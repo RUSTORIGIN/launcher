@@ -1,0 +1,15 @@
+# Normalize line endings: store text as LF in the repo, and check out LF
+# everywhere so diffs stay consistent across contributors and OSes.
+* text=auto eol=lf
+
+# Windows scripts stay CRLF in the working tree.
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets: no line-ending conversion, no textual diff.
+*.ttf binary
+*.mp4 binary
+*.png binary
+*.ico binary
+*.zip binary
+*.exe binary
