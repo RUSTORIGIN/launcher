@@ -1,0 +1,20 @@
+# Build output
+bin/
+obj/
+release/
+
+# Packaged client (multi-GB) and download temp — never commit
+RustClient.zip
+RustClient.zip.sha256
+*.part
+*.part.meta
+
+# Loose built executables at the repo root
+/RustOrigin.exe
+/RustClient.exe
+
+# Design scratch
+.superdesign/tmp/
+
+# Local logs
+*.log

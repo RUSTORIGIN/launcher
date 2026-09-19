@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RustOrigin — Style Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/iconify-icon@2.1.0/dist/iconify-icon.min.js"></script>
+<style>
+  :root{
+    --bg:#0B0D12; --bg-deep:#0A0C11;
+    --accent:#D14431; --accent-hi:#E9583F; --accent-glow:#F0613F;
+    --text-hi:#FFFFFF; --text-dim:#C9CCD6; --text-mute:#8A8E99;
+    --online:#3BD16F;
+    --glass-fill:linear-gradient(155deg, rgba(255,255,255,.09), rgba(255,255,255,.03));
+    --glass-fill-dark:linear-gradient(155deg, rgba(16,18,26,.52), rgba(10,12,18,.40));
+    --glass-shadow:0 10px 40px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.22), inset 0 -1px 0 rgba(0,0,0,.25);
+    --font-brand:'Montserrat',sans-serif; --font-body:'Inter',sans-serif;
+    --ease:cubic-bezier(.22,.61,.36,1);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text-dim);font-family:var(--font-body)}
+  .brand{font-family:var(--font-brand)}
+  .glass{background:var(--glass-fill);backdrop-filter:blur(26px) saturate(150%);-webkit-backdrop-filter:blur(26px) saturate(150%);border:1px solid rgba(255,255,255,.16);box-shadow:var(--glass-shadow);border-radius:24px}
+  .glass-dark{background:var(--glass-fill-dark);backdrop-filter:blur(24px) saturate(135%);-webkit-backdrop-filter:blur(24px) saturate(135%);border:1px solid rgba(255,255,255,.12);box-shadow:0 12px 42px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.14);border-radius:18px}
+  .tag{display:inline-flex;align-items:center;padding:6px 14px;font-size:12.5px;color:var(--text-dim);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.22);border-radius:999px;backdrop-filter:blur(14px)}
+  .label{font-family:var(--font-brand);font-weight:600;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-mute)}
+  .btn-play{display:inline-flex;align-items:center;gap:10px;height:46px;padding:0 28px;font-family:var(--font-brand);font-weight:700;font-size:14px;letter-spacing:.04em;color:#12131A;background:#fff;border:0;border-radius:999px;cursor:pointer;box-shadow:0 10px 30px rgba(0,0,0,.4),inset 0 1px 0 #fff;transition:.24s var(--ease)}
+  .btn-play:hover{background:#F0F1F4;transform:translateY(-1px)}
+  .btn-ghost{display:inline-flex;align-items:center;gap:8px;height:44px;padding:0 20px;font-family:var(--font-brand);font-weight:600;font-size:13px;letter-spacing:.04em;color:var(--text-hi);background:linear-gradient(155deg,rgba(255,255,255,.10),rgba(255,255,255,.03));border:1px solid rgba(255,255,255,.18);border-radius:12px;cursor:pointer;backdrop-filter:blur(16px);transition:.24s var(--ease)}
+  .btn-ghost:hover{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.30)}
+  .btn-danger{display:inline-flex;align-items:center;gap:8px;height:44px;padding:0 20px;font-family:var(--font-brand);font-weight:600;font-size:13px;letter-spacing:.04em;color:#fff;background:linear-gradient(155deg,rgba(209,68,49,.40),rgba(209,68,49,.22));border:1px solid rgba(240,97,63,.55);border-radius:12px;cursor:pointer}
+  .icon-btn{width:44px;height:44px;display:grid;place-items:center;border-radius:999px;color:var(--text-hi);cursor:pointer;background:rgba(14,16,22,.55);border:1px solid rgba(255,255,255,.12);backdrop-filter:blur(18px)}
+  .nav-item{display:flex;align-items:center;gap:12px;height:52px;padding:0 16px;margin-bottom:4px;border-radius:16px;color:var(--text-mute);cursor:pointer;border:1px solid transparent}
+  .nav-item.active{color:var(--text-hi);background:linear-gradient(155deg,rgba(209,68,49,.24),rgba(209,68,49,.10));border-color:rgba(240,97,63,.45);box-shadow:inset 0 1px 0 rgba(255,255,255,.14)}
+  .bar{height:10px;border-radius:5px;background:rgba(255,255,255,.10);overflow:hidden}
+  .bar>.fill{height:100%;border-radius:5px;background:linear-gradient(90deg,var(--accent),var(--accent-hi))}
+  .scene{position:relative;overflow:hidden;background:
+      radial-gradient(120% 90% at 78% 18%, rgba(120,150,120,.5), rgba(0,0,0,0) 55%),
+      radial-gradient(90% 80% at 60% 70%, rgba(70,95,60,.5), rgba(0,0,0,0) 60%),
+      radial-gradient(70% 60% at 22% 40%, rgba(40,60,80,.4), rgba(0,0,0,0) 60%),
+      linear-gradient(160deg,#5a6a4a 0%,#33402f 40%,#1a1f18 100%)}
+  .scene::after{content:"";position:absolute;inset:0;background:radial-gradient(130% 110% at 50% 50%, rgba(0,0,0,0) 40%, rgba(6,8,10,.72) 100%);pointer-events:none}
+  .swatch{height:70px;border-radius:14px;border:1px solid rgba(255,255,255,.08)}
+  .sec{max-width:1080px;margin:0 auto;padding:0 40px}
+  .card{border-radius:18px;padding:22px}
+</style>
+</head>
+<body>
+<div style="width:100%">
+
+  <!-- ===== HERO (the launcher look) ===== -->
+  <div class="scene" style="padding:64px 40px 72px">
+    <div style="position:absolute;top:28px;right:40px;display:flex;gap:12px">
+      <span class="icon-btn"><iconify-icon icon="solar:settings-bold" width="18"></iconify-icon></span>
+      <span class="icon-btn"><iconify-icon icon="solar:minus-square-linear" width="18"></iconify-icon></span>
+      <span class="icon-btn"><iconify-icon icon="solar:close-square-linear" width="18"></iconify-icon></span>
+    </div>
+    <div style="max-width:560px">
+      <svg width="120" height="82" viewBox="0 0 132 90" fill="none" style="filter:drop-shadow(0 8px 24px rgba(0,0,0,.5))">
+        <circle cx="45" cy="45" r="34" stroke="#F4F5FA" stroke-width="13"/>
+        <path d="M87 45a34 34 0 1 1-20-31" stroke="#F4F5FA" stroke-width="13" fill="none"/>
+        <rect x="83" y="39" width="30" height="13" rx="2" fill="#F4F5FA"/>
+      </svg>
+      <h1 class="brand" style="font-size:72px;font-weight:800;letter-spacing:.04em;color:#fff;margin:6px 0 0;line-height:1">RUSTORIGIN</h1>
+      <p class="brand" style="letter-spacing:.28em;font-weight:600;font-size:14px;color:var(--accent-glow);margin:12px 0 0">JANUARY UPDATE 2021</p>
+      <p style="max-width:440px;margin:18px 0 0;font-size:16px;line-height:1.6;color:var(--text-dim)">A private Rust world on the January 2021 build. Frosted glass, cinematic art, one rust-red accent — this is the house style.</p>
+      <div style="display:flex;align-items:center;gap:18px;margin-top:30px">
+        <button class="btn-play"><iconify-icon icon="solar:play-bold" width="18"></iconify-icon> PLAY</button>
+        <button class="btn-ghost"><iconify-icon icon="solar:heart-linear" width="16"></iconify-icon> ADD TO FAVORITE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SYSTEM ===== -->
+  <div style="padding:56px 0 80px">
+    <div class="sec">
+      <span class="tag">DESIGN SYSTEM</span>
+      <h2 class="brand" style="color:#fff;font-size:34px;font-weight:700;margin:16px 0 6px">RustOrigin brand kit</h2>
+      <p style="margin:0 0 40px;color:var(--text-mute)">Tokens &amp; components extracted from the launcher — build your website to match.</p>
+
+      <!-- color -->
+      <div class="label" style="margin-bottom:14px">Color</div>
+      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:44px">
+        <div><div class="swatch" style="background:#0B0D12"></div><p style="font-size:12px;margin:8px 0 0">bg<br><span style="color:var(--text-mute)">#0B0D12</span></p></div>
+        <div><div class="swatch" style="background:#D14431"></div><p style="font-size:12px;margin:8px 0 0">accent<br><span style="color:var(--text-mute)">#D14431</span></p></div>
+        <div><div class="swatch" style="background:#E9583F"></div><p style="font-size:12px;margin:8px 0 0">accent-hi<br><span style="color:var(--text-mute)">#E9583F</span></p></div>
+        <div><div class="swatch" style="background:#C9CCD6"></div><p style="font-size:12px;margin:8px 0 0">text-dim<br><span style="color:var(--text-mute)">#C9CCD6</span></p></div>
+        <div><div class="swatch" style="background:#8A8E99"></div><p style="font-size:12px;margin:8px 0 0">text-mute<br><span style="color:var(--text-mute)">#8A8E99</span></p></div>
+        <div><div class="swatch" style="background:#3BD16F"></div><p style="font-size:12px;margin:8px 0 0">online<br><span style="color:var(--text-mute)">#3BD16F</span></p></div>
+      </div>
+
+      <!-- type -->
+      <div class="label" style="margin-bottom:14px">Typography — Montserrat + Inter</div>
+      <div class="glass-dark card" style="margin-bottom:44px">
+        <p class="brand" style="font-weight:800;font-size:44px;color:#fff;margin:0;letter-spacing:.04em">RUSTORIGIN</p>
+        <p class="brand" style="font-weight:700;font-size:26px;color:#fff;margin:14px 0 0">Section heading</p>
+        <p style="font-size:16.5px;color:var(--text-dim);margin:12px 0 0;max-width:560px">Body copy in Inter — calm, readable, a little muted against the dark surface so headings and the accent carry the emphasis.</p>
+        <p class="label" style="margin:14px 0 0">Uppercase micro-label · tracked</p>
+      </div>
+
+      <!-- glass + buttons -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:44px">
+        <div class="glass card">
+          <div class="label">.glass — frosted pill / rail</div>
+          <p style="margin:10px 0 18px;color:var(--text-dim)">Bright frosted panel with a light top edge. For rails, pills, nav.</p>
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <button class="btn-play"><iconify-icon icon="solar:play-bold" width="16"></iconify-icon> PLAY</button>
+            <button class="btn-ghost">GHOST</button>
+            <button class="btn-danger"><iconify-icon icon="solar:trash-bin-trash-bold" width="15"></iconify-icon> DANGER</button>
+          </div>
+        </div>
+        <div class="glass-dark card">
+          <div class="label">.glass-dark — content card</div>
+          <p style="margin:10px 0 16px;color:var(--text-dim)">Darker fill for text-heavy cards.</p>
+          <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text-dim);margin-bottom:6px"><span>Disk usage</span><span>791 GB free of 1.8 TB</span></div>
+          <div class="bar"><div class="fill" style="width:57%"></div></div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:16px"><span style="width:8px;height:8px;border-radius:50%;background:var(--online);display:inline-block"></span><span style="font-size:13px;color:var(--text-dim)">Installed · ready</span></div>
+        </div>
+      </div>
+
+      <!-- nav sample -->
+      <div class="label" style="margin-bottom:14px">Nav capsule (settings)</div>
+      <div class="glass card" style="width:260px;padding:12px">
+        <div class="nav-item active"><iconify-icon icon="solar:ssd-round-bold" width="18"></iconify-icon><span class="brand" style="font-weight:600;font-size:15px">Installation</span></div>
+        <div class="nav-item"><iconify-icon icon="solar:gamepad-bold" width="18"></iconify-icon><span class="brand" style="font-weight:600;font-size:15px">Game</span></div>
+        <div class="nav-item"><iconify-icon icon="solar:palette-bold" width="18"></iconify-icon><span class="brand" style="font-weight:600;font-size:15px">Appearance</span></div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
