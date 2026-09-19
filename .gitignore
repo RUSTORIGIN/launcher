@@ -18,3 +18,18 @@ RustClient.zip.sha256
 
 # Local logs
 *.log
+
+# Secrets / credentials — NEVER commit these
+*.pem
+*.key
+*.pfx
+*.p12
+*.snk
+*.env
+.env
+rclone.conf
+**/secrets*
+**/credentials*
+# the manifest signing private key, if/when signing is added
+*private*key*
+signing-key*
