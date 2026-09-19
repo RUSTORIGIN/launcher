@@ -1,12 +1,12 @@
 # Security Policy
 
-The RustOrigin launcher is open source specifically so its security-relevant behavior — network
-communication, downloads, SHA-256 verification, installation, and process launching — can be
+The RustOrigin launcher is open source specifically so its security-relevant behavior - network
+communication, downloads, SHA-256 verification, installation, and process launching - can be
 inspected and verified. We take reports about that behavior seriously.
 
 ## Scope
 
-This policy covers the **launcher** in this repository (`WpfLauncher.cs` → `RustOrigin.exe`, and
+This policy covers the **launcher** in this repository (`WpfLauncher.cs` -> `RustOrigin.exe`, and
 the WinForms `RustLauncher.exe`) and its build/release scripts.
 
 It does **not** cover the Rust client itself, which is distributed separately and is not part of
@@ -24,7 +24,7 @@ Examples of in-scope issues:
 
 ## Reporting a vulnerability
 
-**Please report privately — do not open a public issue for an exploitable vulnerability.**
+**Please report privately - do not open a public issue for an exploitable vulnerability.**
 
 - Email: **rustorigin@proton.me**
 - Please include:

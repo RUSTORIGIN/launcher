@@ -1,5 +1,5 @@
 /* ============================================================================
-   RustOrigin — Brand / Design System  (extracted from the launcher)
+   RustOrigin - Brand / Design System  (extracted from the launcher)
    Drop this into any website. Load Montserrat + Inter from Google Fonts:
    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
    ============================================================================ */
@@ -70,7 +70,7 @@ h1,h2,h3,h4,.brand { font-family: var(--font-brand); color: var(--text-hi); }
 .accent  { color: var(--accent-glow); }
 
 /* ============================================================================
-   GLASS — the core of the style. Real backdrop blur (frosted) over imagery.
+   GLASS - the core of the style. Real backdrop blur (frosted) over imagery.
    ============================================================================ */
 .glass {
   background: var(--glass-fill);
@@ -188,7 +188,7 @@ h1,h2,h3,h4,.brand { font-family: var(--font-brand); color: var(--text-hi); }
 }
 
 /* ============================================================================
-   MOTION — matches the launcher's CubicEase transitions.
+   MOTION - matches the launcher's CubicEase transitions.
    ============================================================================ */
 @keyframes ro-fade-up { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
 .fade-up { animation: ro-fade-up var(--dur) var(--ease) both; }
@@ -199,7 +199,7 @@ h1,h2,h3,h4,.brand { font-family: var(--font-brand); color: var(--text-hi); }
 }
 
 /* ============================================================================
-   CINEMATIC BACKGROUND — the launcher floats glass over full-bleed video/art.
+   CINEMATIC BACKGROUND - the launcher floats glass over full-bleed video/art.
    For a website, drop an <img>/<video> in .hero-bg; this adds the dim + vignette
    that keeps text legible (the same treatment the launcher bakes in).
    ============================================================================ */

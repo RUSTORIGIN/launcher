@@ -15,8 +15,8 @@ machine can't decode it, the launcher shows a dark gradient backdrop instead and
 |------|---------|
 | `RustOrigin.exe` | The launcher (already built). |
 | `background.mp4` | The background video. Swap this file to change the background. |
-| `logo.png` | The RUSTORIGIN OG monogram (your original PNG, transparent bg, tight-cropped). Shown top-left and as the hero logo; swap the file to change it — no rebuild needed. |
-| `logo-original.png` | Untouched copy of the original 2000×1333 logo PNG, kept for reference. |
+| `logo.png` | The RUSTORIGIN OG monogram (your original PNG, transparent bg, tight-cropped). Shown top-left and as the hero logo; swap the file to change it - no rebuild needed. |
+| `logo-original.png` | Untouched copy of the original 2000x1333 logo PNG, kept for reference. |
 | `fonts\` | Bundled Montserrat brand font (4 weights + OFL license). Must ship next to the exe. |
 | `launcher.cfg` | Config: download URL, install folder, exe, title, tagline. |
 | `WpfLauncher.cs` | Source of the video launcher. |
@@ -28,27 +28,27 @@ machine can't decode it, the launcher shows a dark gradient backdrop instead and
 
 Brand text (hero title, wordmark, accent line, caps labels) uses **Montserrat** (SemiBold),
 a geometric sans whose round O mirrors the OG mark. It's bundled in `fonts\` (SIL Open Font
-License, included as `fonts\OFL.txt`) and loaded at runtime by family name — the launcher
+License, included as `fonts\OFL.txt`) and loaded at runtime by family name - the launcher
 falls back to Bahnschrift/Segoe UI if the folder is missing. Body text uses Segoe UI for
 readability.
 
-## The window (1440×860, ported from the Superdesign canvas design)
+## The window (1440x860, ported from the Superdesign canvas design)
 
 - Rounded (32px), borderless card over a full-bleed looping video hero, draggable from empty areas.
 - **Top-left**: OG logo mark in a glass pill. **Left rail**: games / library / collections icons.
 - **Top-right**: recent-games pill (star, thumbnails, link) + user pill (chat, bell, avatar,
   player name, now-playing) + minimize/close.
-- **Hero**: "Most Played" tag → large OG logo → RUSTORIGIN wordmark → red "JANUARY UPDATE 2021"
-  → description → white **PLAY** pill + **INSTALL/UPDATE** link, with a live download/extract
+- **Hero**: "Most Played" tag -> large OG logo -> RUSTORIGIN wordmark -> red "JANUARY UPDATE 2021"
+  -> description -> white **PLAY** pill + **INSTALL/UPDATE** link, with a live download/extract
   progress bar.
 - **Right column**: 6 glass **server cards** (tag + name); clicking one launches the client
   with that server's args. "DISCOVER MORE" below.
 - **Friends rail** with 8 avatars and online/offline dots. Bottom chevron + chat icon.
-- Icons use **Segoe MDL2 Assets** (built into Windows 10/11 — nothing to bundle).
+- Icons use **Segoe MDL2 Assets** (built into Windows 10/11 - nothing to bundle).
 
 ## One-time setup (you, the host)
 
-1. **Zip the client** — from PowerShell in this folder:
+1. **Zip the client** - from PowerShell in this folder:
    ```powershell
    .\package_client.ps1
    ```
@@ -75,25 +75,25 @@ readability.
   Cloudflare R2 work on every machine.
 - **SHA-256 verification (required):** the finished download is hashed and **rejected** (deleted,
   never extracted or launched) unless it matches `Sha256=` in `launcher.cfg`. Verification is
-  mandatory — if `Sha256=` is blank, **Install is blocked** and nothing is downloaded, so the
+  mandatory - if `Sha256=` is blank, **Install is blocked** and nothing is downloaded, so the
   launcher never installs a client it can't verify. The check runs on the completed file *before*
   extraction; on mismatch the partial is cleared so the next attempt re-downloads cleanly.
   `package_client.ps1` prints the hash to paste in, and also writes a `RustClient.zip.sha256` sidecar.
 - Downloads are **resumable**: the file is written to
   `%LOCALAPPDATA%\RUSTORIGIN\RustClient.zip.part` using HTTP Range requests. A dropped
   connection retries automatically (up to 30 times, 5 s apart) from the last byte received.
-  Closing the launcher mid-download keeps the partial file — the button turns into
+  Closing the launcher mid-download keeps the partial file - the button turns into
   **RESUME** on the next start. A saved partial is only reused for the *same* remote file
   (URL + ETag + size), so a new build never gets stitched onto an old partial.
 - Every download step is logged with timestamps to `%LOCALAPPDATA%\RUSTORIGIN\launcher.log`
-  — ask players for this file if an install misbehaves.
+  - ask players for this file if an install misbehaves.
 
 ## What players do
 
 1. Run `RustOrigin.exe`.
-2. Click **Install** — it downloads the zip (live progress + speed, resumable) and extracts it to
+2. Click **Install** - it downloads the zip (live progress + speed, resumable) and extracts it to
    `C:\RUSTORIGIN` (the `InstallDir` set in `launcher.cfg`).
-3. Click **PLAY** — launches `RustClient.exe`.
+3. Click **PLAY** - launches `RustClient.exe`.
 
 Clicking **Install** again re-downloads and overwrites = updates.
 
@@ -102,7 +102,7 @@ Clicking **Install** again re-downloads and overwrites = updates.
 | Key | Meaning |
 |-----|---------|
 | `DownloadUrl` | Direct link to `RustClient.zip`. Required. |
-| `Sha256` | Expected SHA-256 of `RustClient.zip`. **Required** — downloads are verified (mismatch = rejected) and Install is blocked when blank. From `package_client.ps1` or `certutil -hashfile RustClient.zip SHA256`. |
+| `Sha256` | Expected SHA-256 of `RustClient.zip`. **Required** - downloads are verified (mismatch = rejected) and Install is blocked when blank. From `package_client.ps1` or `certutil -hashfile RustClient.zip SHA256`. |
 | `InstallDir` | Install path. Shipped as `C:\RUSTORIGIN` (visible, no admin rights needed). Blank = `.\Rust` next to the launcher. |
 | `LaunchExe` | Exe the Play button runs (searched inside the install folder). Default `RustClient.exe`. |
 | `LaunchArgs` | Optional args for the main PLAY button, e.g. `-console +connect 127.0.0.1:28015`. |
@@ -114,13 +114,13 @@ Clicking **Install** again re-downloads and overwrites = updates.
 
 ## Notes
 
-- The launcher targets .NET Framework 4.x, which ships with every Windows 10/11 — no
+- The launcher targets .NET Framework 4.x, which ships with every Windows 10/11 - no
   runtime install needed on players' machines.
 - **EasyAntiCheat:** this build's `win_installscript.vdf` shows the client normally runs
   `EasyAntiCheat\EasyAntiCheat_Setup.exe install 12 -console` at install time. Since the
   launcher just unzips files, EAC is not auto-installed. If your setup needs it, either
   set `LaunchArgs` / a small step to run it, or have players run
-  `EasyAntiCheat\EasyAntiCheat_Setup.exe` once. (Many private-server builds run EAC-less —
+  `EasyAntiCheat\EasyAntiCheat_Setup.exe` once. (Many private-server builds run EAC-less -
   skip this if yours does.)
 - To rebuild after editing `Launcher.cs`, run `build.bat`.
 
@@ -139,7 +139,7 @@ The script stamps the version into the exe, embeds the current `launcher.cfg`, `
 `background.mp4` and `fonts\`, and applies the app icon (`release_icon.ico`) and manifest.
 To change the embedded defaults (servers, download URL, install dir), edit `launcher.cfg`
 here and rebuild. A `launcher.cfg` placed **next to the exe** overrides the embedded one at
-runtime (handy for a test server) — a file that defines `Server=` lines replaces the list.
+runtime (handy for a test server) - a file that defines `Server=` lines replaces the list.
 
 Hosted in the R2 bucket next to the client:
 `https://pub-d8992e85a2df42be8ca5d1757ce64cd8.r2.dev/RustOrigin.exe`
@@ -148,4 +148,4 @@ Publish a new build with
 
 Before publishing, set real `Server=` lines (IP:port of your servers) and `Player=` in
 `launcher.cfg`. The exe is **unsigned** until a code-signing certificate is added, so
-SmartScreen shows "Windows protected your PC" on first run (*More info → Run anyway*).
+SmartScreen shows "Windows protected your PC" on first run (*More info -> Run anyway*).

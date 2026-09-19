@@ -88,7 +88,7 @@ public class LauncherForm : Form
         Controls.Add(lblPath);
 
         btnFolder = new Button();
-        btnFolder.Text = "…";
+        btnFolder.Text = "...";
         btnFolder.Size = new Size(40, 22);
         btnFolder.Location = new Point(470, 116);
         FlatBtn(btnFolder, Color.FromArgb(55, 55, 60));
@@ -200,7 +200,7 @@ public class LauncherForm : Form
         btnPlay.BackColor = btnPlay.Enabled ? Color.FromArgb(205, 65, 45) : Color.FromArgb(70, 50, 48);
         btnInstall.Text = installed ? "Update" : "Install";
         if (!busy)
-            lblStatus.Text = installed ? "Ready to play." : "Client not installed yet — click Install.";
+            lblStatus.Text = installed ? "Ready to play." : "Client not installed yet - click Install.";
     }
 
     void PickFolder()
@@ -238,7 +238,7 @@ public class LauncherForm : Form
         busy = true;
         RefreshState();
         bar.Value = 0;
-        lblStatus.Text = "Connecting…";
+        lblStatus.Text = "Connecting...";
 
         zipPath = Path.Combine(Path.GetTempPath(), "RustClient_download.zip");
         try { if (File.Exists(zipPath)) File.Delete(zipPath); } catch { }
@@ -298,7 +298,7 @@ public class LauncherForm : Form
 
         // Extract on a background thread; keep UI responsive.
         bar.Style = ProgressBarStyle.Marquee;
-        lblStatus.Text = "Extracting… this can take several minutes.";
+        lblStatus.Text = "Extracting... this can take several minutes.";
         ThreadPool.QueueUserWorkItem(delegate { ExtractWorker(); });
     }
 
@@ -361,7 +361,7 @@ public class LauncherForm : Form
                     int d = done, t = total;
                     BeginInvoke((MethodInvoker)delegate
                     {
-                        lblStatus.Text = "Extracting  " + d + " / " + t + " files…";
+                        lblStatus.Text = "Extracting  " + d + " / " + t + " files...";
                         if (t > 0) { bar.Style = ProgressBarStyle.Continuous; bar.Value = (int)Math.Min(1000, (d * 1000L) / t); }
                     });
                 }
@@ -386,7 +386,7 @@ public class LauncherForm : Form
             psi.WorkingDirectory = Path.GetDirectoryName(exe);
             if (LaunchArgs.Length > 0) psi.Arguments = LaunchArgs;
             Process.Start(psi);
-            lblStatus.Text = "Launching…";
+            lblStatus.Text = "Launching...";
         }
         catch (Exception ex)
         {

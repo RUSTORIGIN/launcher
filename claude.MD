@@ -4,21 +4,21 @@ A Windows launcher for a community-hosted Rust ("January 2021" build) server. Th
 downloads the Rust client from a URL the host controls, extracts it, and launches it. Players
 download a small (~7 MB) launcher instead of the full multi-GB client up front.
 
-> "Rust" here is the **game**. This project is written in **C#/.NET Framework 4.x (WPF)** — it
+> "Rust" here is the **game**. This project is written in **C#/.NET Framework 4.x (WPF)** - it
 > is not a Rust-language project. There is no `cargo`, no `src/api/`, and no `.rs` files.
 
 ## Launcher sources in this repo
 
-There are three separate `.cs` files, each with its own `Main()` — they are *not* compiled together:
+There are three separate `.cs` files, each with its own `Main()` - they are *not* compiled together:
 
 | Source | Output | Built by | Notes |
 |--------|--------|----------|-------|
 | `WpfLauncher.cs` | `RustOrigin.exe` | `csc` via `build.bat` / `make_release.ps1` | **Primary / shipping build.** WPF, single-file, video background. Downloads + **SHA-256-verifies** + extracts + launches. |
-| `Program.cs` | `RustLauncher.exe` | `RustLauncher.csproj` (`dotnet build`) | Minimal WinForms UI. **Find-and-launch only — it does not download or verify.** |
+| `Program.cs` | `RustLauncher.exe` | `RustLauncher.csproj` (`dotnet build`) | Minimal WinForms UI. **Find-and-launch only - it does not download or verify.** |
 | `Launcher.cs` | (none) | not wired to any build | Older standalone WinForms downloader (`WebClient`, non-resumable, **no verification**). Reference-only; excluded from the csproj. |
 
 The csproj excludes `WpfLauncher.cs` and `Launcher.cs` on purpose (see the `<Compile Remove>`
-items) — an SDK-style project otherwise globs every `.cs` in the folder and the three `Main()`s
+items) - an SDK-style project otherwise globs every `.cs` in the folder and the three `Main()`s
 collide.
 
 Nearly all real work happens in `WpfLauncher.cs`. It is one self-contained code-only WPF file
@@ -51,19 +51,19 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
 - A saved partial is reused only for the **same** remote file (URL + ETag + size), so a new
   build is never stitched onto an old partial.
 - **TLS**: `ConfigureTls()` forces TLS 1.2 (and 1.3 where the OS supports it); no HTTP fallback.
-- **Integrity**: SHA-256 verification is mandatory — Install is blocked without a configured
+- **Integrity**: SHA-256 verification is mandatory - Install is blocked without a configured
   `Sha256`, and the finished download is verified before extraction and rejected on mismatch
   (see the security section below).
 - **Logging**: every step is timestamped to `%LOCALAPPDATA%\RustOrigin\launcher.log`.
 
-## Security model — current state (READ THIS)
+## Security model - current state (READ THIS)
 
-**Implemented — SHA-256 verification (mandatory):** the launcher hashes the finished download and
+**Implemented - SHA-256 verification (mandatory):** the launcher hashes the finished download and
 **rejects it** (deletes it, never extracts or launches it) unless it matches the configured
 `Sha256`. Verification is **required**, not optional:
 
 - `StartInstall` refuses to begin a download when no `Sha256` is configured (`NormalizedExpectedHash`
-  is empty) — nothing is downloaded until a hash is set, so a config mistake can't install an
+  is empty) - nothing is downloaded until a hash is set, so a config mistake can't install an
   unverified client.
 - `DownloadWorker` step 4 verifies the completed `.part` via `VerifyDownload` / `ComputeSha256`
   *before* promoting it to the real zip or extracting. `VerifyDownload` returns false on mismatch
@@ -91,7 +91,7 @@ if the security model changes.
 
 ## Windows behavior
 
-- Targets .NET Framework 4.x, which ships with Windows 10/11 — no runtime install for players.
+- Targets .NET Framework 4.x, which ships with Windows 10/11 - no runtime install for players.
 - Runs without administrator rights; default `InstallDir` is a top-level folder (`C:\RustOrigin`),
   not `Program Files`.
 - The exe is **unsigned** until a code-signing cert is added, so SmartScreen shows the
@@ -111,17 +111,17 @@ dir, so no admin rights needed):
 | `assets\<version>\` | Video/logo/fonts/`launcher.cfg` unpacked from the exe at first run (WPF needs real files). Keyed by assembly version, so a new build unpacks fresh. |
 | `RustClient.zip.part` + `.part.meta` | Resumable-download buffer and its identity (URL+ETag+size) for validating a resume. |
 | `RustClient.zip` | The verified download, briefly, between finalize and extract (deleted after). |
-| `launcher.log` | Timestamped diagnostics of every download/verify step — ask players for this when an install misbehaves. |
+| `launcher.log` | Timestamped diagnostics of every download/verify step - ask players for this when an install misbehaves. |
 | `installdir.txt` | The chosen install directory, remembered across runs. |
 | `prefs.cfg` | Per-user settings (see below). |
 
 Install also creates a **desktop shortcut** (`<name>.lnk` via `WScript.Shell` COM) and
-**self-copies the launcher** into the install area — see `InstallLauncherAndShortcut()`.
+**self-copies the launcher** into the install area - see `InstallLauncherAndShortcut()`.
 
 ## Build
 
 The primary build uses the .NET Framework C# compiler (`csc.exe`) that is already on every
-Windows 10/11 machine — no SDK/NuGet restore needed.
+Windows 10/11 machine - no SDK/NuGet restore needed.
 
 Quick dev compile of the launcher:
 
@@ -129,12 +129,12 @@ Quick dev compile of the launcher:
 build.bat
 ```
 
-`build.bat` does **not** embed resources, icon, or manifest and does not stamp the version — its
+`build.bat` does **not** embed resources, icon, or manifest and does not stamp the version - its
 `RustOrigin.exe` needs `background.mp4`, `logo.png`, `launcher.cfg` and `fonts\` sitting next to
 it to run. Use it only for a fast compile check; never ship it on its own.
 
 Build the real single-file release exe (stamps version, embeds all resources, applies icon +
-manifest — everything is baked in, nothing needs to sit beside it):
+manifest - everything is baked in, nothing needs to sit beside it):
 
 ```powershell
 .\make_release.ps1 -Version 1.0.0   # -> release\RustOrigin.exe
@@ -148,7 +148,7 @@ dotnet build -c Release RustLauncher.csproj   # -> bin\Release\RustLauncher.exe
 
 There is currently **no** test project, `cargo`, clippy, or GitHub Actions workflow in the repo.
 Do not reference commands that don't exist here. After changing `WpfLauncher.cs`, the fastest
-correctness check is to compile it with `csc` (as `build.bat` does) — a clean compile is the only
+correctness check is to compile it with `csc` (as `build.bat` does) - a clean compile is the only
 gate, since there are no automated tests.
 
 ## Packaging & hosting the client (host-side)
@@ -165,11 +165,11 @@ and `*.bak`/`*.py`/`*.vdf`/`*.bat`/`*.before*`), then prints the zip's **SHA-256
 
 Because verification is mandatory, the client zip, the embedded `Sha256`, and the uploaded file
 must all match. Any re-package produces a **different hash** (zip ordering/metadata differ), so
-these steps move together — never upload a repackaged zip without rebuilding the launcher:
+these steps move together - never upload a repackaged zip without rebuilding the launcher:
 
-1. `.\package_client.ps1` — produces `RustClient.zip` + prints/writes its SHA-256.
-2. Put that hash in `launcher.cfg` → `Sha256=…`, and set `DownloadUrl=` to the file's direct link.
-3. `.\make_release.ps1 -Version <x.y.z>` — bakes the updated `launcher.cfg` (hence the hash) into
+1. `.\package_client.ps1` - produces `RustClient.zip` + prints/writes its SHA-256.
+2. Put that hash in `launcher.cfg` -> `Sha256=...`, and set `DownloadUrl=` to the file's direct link.
+3. `.\make_release.ps1 -Version <x.y.z>` - bakes the updated `launcher.cfg` (hence the hash) into
    `release\RustOrigin.exe`. Confirm the hash is embedded (it appears in the exe's `launcher.cfg`
    resource).
 4. Upload **that exact** `RustClient.zip` to the `DownloadUrl` host (e.g.
@@ -177,7 +177,7 @@ these steps move together — never upload a repackaged zip without rebuilding t
 5. Publish `release\RustOrigin.exe` (e.g. to the R2 bucket next to the client).
 
 If the uploaded zip and the embedded hash ever drift apart, players get a (correct) integrity
-rejection and cannot install — re-run from step 1.
+rejection and cannot install - re-run from step 1.
 
 Uploading/publishing is an outward-facing action: do it deliberately, not as part of a build.
 
@@ -189,7 +189,7 @@ Plain `Key=Value`, `#`/`;` comments. Loaded embedded-defaults-first, then overri
 | Key | Meaning |
 |-----|---------|
 | `DownloadUrl` | Direct link to `RustClient.zip`. Required. |
-| `Sha256` | Expected hex SHA-256 of `RustClient.zip`. **Required** — a mismatched download is rejected, and a blank value blocks Install entirely. Aliases: `ClientSha256`, `ExpectedSha256`. |
+| `Sha256` | Expected hex SHA-256 of `RustClient.zip`. **Required** - a mismatched download is rejected, and a blank value blocks Install entirely. Aliases: `ClientSha256`, `ExpectedSha256`. |
 | `InstallDir` | Install path. Blank = `.\Rust` next to the launcher. Shipped as `C:\RustOrigin`. |
 | `LaunchExe` | Exe the Play button runs (searched recursively inside `InstallDir`). Default `RustClient.exe`. |
 | `LaunchArgs` | Optional args for the main PLAY button, e.g. `-console +connect 127.0.0.1:28015`. |
@@ -201,12 +201,12 @@ Plain `Key=Value`, `#`/`;` comments. Loaded embedded-defaults-first, then overri
 
 ## Settings vs config: `launcher.cfg` (host) vs `Prefs` (per-user)
 
-Two separate mechanisms — don't confuse them:
+Two separate mechanisms - don't confuse them:
 
 - **`launcher.cfg`** = host/deployment config (URL, hash, install dir, branding, servers). Shipped
   embedded in the exe, optionally overridden by a copy next to the exe. Parsed in `ApplyConfig`.
 - **`Prefs`** = per-user preferences the player toggles in the **Settings tab**, persisted to
-  `%LOCALAPPDATA%\RustOrigin\prefs.cfg` (a plain file — **not** the registry). `static class Prefs`
+  `%LOCALAPPDATA%\RustOrigin\prefs.cfg` (a plain file - **not** the registry). `static class Prefs`
   with `Get` / `GetBool` / `Set`.
 
 | Prefs key | Default | Effect |
@@ -243,7 +243,7 @@ in the relevant `Build*Page()`; no config change needed.
 ├── bin/ , obj/           # build output, not source of truth (git-ignored)
 ├── RustClient.zip(.sha256) # packaged client + hash, ~9 GB (git-ignored; produced by package_client.ps1)
 ├── .gitignore            # keeps build output + the multi-GB client out of git
-├── IMPLEMENTATION_PLAN.md # design→code status record (reconciled to current code)
+├── IMPLEMENTATION_PLAN.md # design->code status record (reconciled to current code)
 ├── LICENSE               # MIT
 ├── SECURITY.md           # vulnerability-reporting policy (rustorigin@proton.me)
 ├── README.md             # player/host-facing docs (authoritative for behavior)
@@ -253,14 +253,14 @@ in the relevant `Build*Page()`; no config change needed.
 
 ## Version control
 
-This folder is **not a git repository yet** — despite the original doc's talk of git tags and
+This folder is **not a git repository yet** - despite the original doc's talk of git tags and
 GitHub Actions, none of that exists here. If/when you `git init`, make sure these are ignored
 (a `.gitignore` is provided) so build output and the multi-GB client never get committed:
 
-- `bin/`, `obj/`, `release/` — build output
-- `RustClient.zip`, `RustClient.zip.sha256`, `*.part` — packaged client (9+ GB) and download temp
+- `bin/`, `obj/`, `release/` - build output
+- `RustClient.zip`, `RustClient.zip.sha256`, `*.part` - packaged client (9+ GB) and download temp
 - loose built exes at the repo root (`RustOrigin.exe`, `RustClient.exe`)
-- `.superdesign/tmp/` — design scratch
+- `.superdesign/tmp/` - design scratch
 
 Do commit source (`*.cs`, `*.csproj`), scripts (`*.ps1`, `*.bat`), `launcher.cfg`, `assets` that
 are embedded at build time (`background.mp4`, `logo*.png`, `server-cover.png`, `fonts/`), and docs.
@@ -277,28 +277,28 @@ are embedded at build time (`background.mp4`, `logo*.png`, `server-cover.png`, `
   `ReportProgress`, and the completion block). Follow that pattern for any new background work.
 - Cancellation is cooperative: `volatile bool cancelRequested` (+ `activeReq.Abort()` for the
   in-flight request); long loops (download, hashing) check it and throw `OperationCanceledException`.
-- `DispatcherTimer`s (2s state refresh, video loop) run on the UI thread — keep their handlers cheap.
+- `DispatcherTimer`s (2s state refresh, video loop) run on the UI thread - keep their handlers cheap.
 
 ## Run & smoke-test
 
 There are no automated tests; verify by running the exe:
 
 - Launch `release\RustOrigin.exe` (or a `build.bat` exe with assets beside it). The window renders
-  at 1440×860 with the video hero, PLAY, INSTALL, the server grid, and the Settings gear.
-- **Integrity smoke test:** blank `Sha256` → INSTALL refused; correct `Sha256` → download → verify
-  → extract; wrong `Sha256` → download rejected, nothing installed. (Also in IMPLEMENTATION_PLAN.md §5.)
+  at 1440x860 with the video hero, PLAY, INSTALL, the server grid, and the Settings gear.
+- **Integrity smoke test:** blank `Sha256` -> INSTALL refused; correct `Sha256` -> download -> verify
+  -> extract; wrong `Sha256` -> download rejected, nothing installed. (Also in IMPLEMENTATION_PLAN.md section 5.)
 
 ## Conventions for edits
 
-- Keep `WpfLauncher.cs` **code-only WPF** (no XAML) and self-contained — it is compiled directly
+- Keep `WpfLauncher.cs` **code-only WPF** (no XAML) and self-contained - it is compiled directly
   by `csc.exe`, so it must not take a NuGet dependency.
 - UI colors/brand come from `brand-kit/` and the `B("#hex")` brush helpers; reuse existing
-  palette brushes (`Accent`, `Glass`, `Stroke`, …) rather than adding new literals.
+  palette brushes (`Accent`, `Glass`, `Stroke`, ...) rather than adding new literals.
 - Config keys are parsed case-insensitively in `ApplyConfig`; add new keys there and document
   them in both this file and `README.md`. Per-user toggles go through `Prefs`, not `launcher.cfg`.
 - After changing `WpfLauncher.cs`, rebuild with `build.bat` (or `make_release.ps1`) and confirm
   the exe launches; there are no automated tests to rely on.
-- Asset/branding note: `app_icon_source.png` → `app.ico` / `release_icon.ico`; embedded assets
+- Asset/branding note: `app_icon_source.png` -> `app.ico` / `release_icon.ico`; embedded assets
   (`background.mp4`, `logo*.png`, `server-cover.png`, `fonts/`) are wired in by `make_release.ps1`.
 
 ## Disclaimer

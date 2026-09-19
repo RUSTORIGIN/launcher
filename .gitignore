@@ -3,7 +3,7 @@ bin/
 obj/
 release/
 
-# Packaged client (multi-GB) and download temp — never commit
+# Packaged client (multi-GB) and download temp - never commit
 RustClient.zip
 RustClient.zip.sha256
 *.part
@@ -19,7 +19,7 @@ RustClient.zip.sha256
 # Local logs
 *.log
 
-# Secrets / credentials — NEVER commit these
+# Secrets / credentials - NEVER commit these
 *.pem
 *.key
 *.pfx

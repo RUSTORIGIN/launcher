@@ -26,7 +26,7 @@ using System.Windows.Media.Animation;
 [assembly: AssemblyVersion("1.0.0.0")]
 [assembly: AssemblyFileVersion("1.0.0.0")]
 
-// RUSTORIGIN launcher — WPF port of the Superdesign canvas composition:
+// RUSTORIGIN launcher - WPF port of the Superdesign canvas composition:
 // rounded dark card, full-bleed looping video hero, floating glass UI
 // (left rail, top-right pills, hero block, server column, friends rail).
 // Code-only WPF on .NET Framework 4.x: runs on any Windows 10/11, no runtime install.
@@ -107,7 +107,7 @@ public class LauncherWindow : Window
     string LaunchArgs  = "";
     string Version     = "";
     string GameTitle   = "RUSTORIGIN";
-    string Tagline     = "RUSTORIGIN is a private Rust world on the January 2021 build. Craft, raid and survive with a tight community — one click to jump in.";
+    string Tagline     = "RUSTORIGIN is a private Rust world on the January 2021 build. Craft, raid and survive with a tight community - one click to jump in.";
     string PlayerName  = "White Pegasus";
     List<ServerEntry> Servers = new List<ServerEntry>();
 
@@ -165,7 +165,7 @@ public class LauncherWindow : Window
 
     static string Track(string s, int n)
     {
-        var sp = new string(' ', n);
+        var sp = new string(' ', n);
         return string.Join(sp, s.ToCharArray());
     }
 
@@ -237,7 +237,7 @@ public class LauncherWindow : Window
         });
 
         Loaded += (s, e) => { try { if (Prefs.GetBool("BgVideo", true)) video.Play(); } catch { } };
-        // Drag the window from empty areas only — never from buttons/cards, or DragMove
+        // Drag the window from empty areas only - never from buttons/cards, or DragMove
         // would swallow the MouseLeftButtonUp those controls need.
         MouseLeftButtonDown += (s, e) =>
         {
@@ -331,7 +331,7 @@ public class LauncherWindow : Window
         blurLayer = new Grid();
         blurLayer.Children.Add(blurRect);
         blurLayer.Children.Add(new Rectangle { Fill = B("#8A0E1016") });   // frosted tint baked in (keeps text legible over bright frames)
-        // Rasterize the blurred video ONCE per frame at half resolution — blur is low-frequency,
+        // Rasterize the blurred video ONCE per frame at half resolution - blur is low-frequency,
         // so half-res is invisible, and every glass panel then samples this cheap cache instead
         // of each re-blurring the video. Major GPU saving; keeps animations fluid.
         blurLayer.CacheMode = new BitmapCache { RenderAtScale = 0.5, SnapsToDevicePixels = false };
@@ -794,9 +794,9 @@ public class LauncherWindow : Window
 
         if (!busy)
         {
-            if (partial) statusText.Text = "Partial download saved (" + Human(new FileInfo(partPath).Length) + ") \u2014 click Resume to continue.";
+            if (partial) statusText.Text = "Partial download saved (" + Human(new FileInfo(partPath).Length) + ") - click Resume to continue.";
             else if (game) statusText.Text = "In game.";
-            else statusText.Text = installed ? "Installed \u2014 ready to play." : "Not installed yet \u2014 click Install to download.";
+            else statusText.Text = installed ? "Installed - ready to play." : "Not installed yet - click Install to download.";
         }
     }
 
@@ -818,14 +818,14 @@ public class LauncherWindow : Window
         { statusText.Foreground = AccentHi; statusText.Text = "Set DownloadUrl in launcher.cfg first."; return; }
         // Verification is mandatory: refuse to download/install anything we can't check.
         if (NormalizedExpectedHash().Length == 0)
-        { statusText.Foreground = AccentHi; statusText.Text = "Set Sha256 in launcher.cfg first — downloads must be verified before install."; return; }
+        { statusText.Foreground = AccentHi; statusText.Text = "Set Sha256 in launcher.cfg first - downloads must be verified before install."; return; }
         try { Directory.CreateDirectory(InstallDir); Directory.CreateDirectory(cacheDir); }
         catch (Exception ex) { statusText.Foreground = AccentHi; statusText.Text = "Folder error: " + ex.Message; return; }
 
         busy = true; cancelRequested = false; RefreshState();
         statusText.Foreground = TextMute;
         progTrack.Visibility = Visibility.Visible; progFill.Width = 0;
-        statusText.Text = "Connecting…";
+        statusText.Text = "Connecting...";
 
         Log("StartInstall: url=" + DownloadUrl + "  installDir=" + InstallDir);
         dlThread = new Thread(DownloadWorker) { IsBackground = true, Name = "download" };
@@ -870,7 +870,7 @@ public class LauncherWindow : Window
     }
 
     // Background thread. Downloads to <cache>\RustClient.zip.part using HTTP Range, so an interrupted
-    // transfer continues where it stopped — across automatic retries AND across launcher restarts.
+    // transfer continues where it stopped - across automatic retries AND across launcher restarts.
     void DownloadWorker()
     {
         string error = null; bool cancelled = false; bool verifyFailed = false; string verifyMsg = null;
@@ -914,7 +914,7 @@ public class LauncherWindow : Window
                         have = File.Exists(partPath) ? new FileInfo(partPath).Length : 0;
                         resumed = have > 0;
                         Log("attempt " + attempt + " failed: " + ex.GetType().Name + ": " + ex.Message + "  -> have=" + have + ", retry in 5s");
-                        SetStatus("Connection lost — resuming in 5s (attempt " + attempt + "/30), " + Human(have) + " saved");
+                        SetStatus("Connection lost - resuming in 5s (attempt " + attempt + "/30), " + Human(have) + " saved");
                         for (int i = 0; i < 50 && !cancelRequested; i++) Thread.Sleep(100);
                     }
                 }
@@ -941,8 +941,8 @@ public class LauncherWindow : Window
                     {
                         // A hash was configured and the file did not match it: reject and discard,
                         // so the next attempt re-downloads cleanly instead of reusing a bad file.
-                        verifyMsg = "Integrity check failed — the download did not match the expected SHA-256 and was rejected. Nothing was installed.";
-                        Log("INTEGRITY FAIL (mismatch): expected=" + ExpectedSha256 + " actual=" + actualHash + " — discarding download");
+                        verifyMsg = "Integrity check failed - the download did not match the expected SHA-256 and was rejected. Nothing was installed.";
+                        Log("INTEGRITY FAIL (mismatch): expected=" + ExpectedSha256 + " actual=" + actualHash + " - discarding download");
                         try { File.Delete(partPath); } catch { }
                         try { File.Delete(metaPath); } catch { }
                     }
@@ -950,8 +950,8 @@ public class LauncherWindow : Window
                     {
                         // No hash configured (StartInstall normally blocks this; defensive). Keep the
                         // .part so that adding Sha256 and clicking Resume verifies it without re-downloading.
-                        verifyMsg = "Install blocked — no expected SHA-256 is configured, so the download can't be verified. Set Sha256 in launcher.cfg, then click Resume. Nothing was installed.";
-                        Log("INTEGRITY FAIL (no hash configured): actual=" + actualHash + " — keeping .part for Resume once a hash is set");
+                        verifyMsg = "Install blocked - no expected SHA-256 is configured, so the download can't be verified. Set Sha256 in launcher.cfg, then click Resume. Nothing was installed.";
+                        Log("INTEGRITY FAIL (no hash configured): actual=" + actualHash + " - keeping .part for Resume once a hash is set");
                     }
                 }
                 else
@@ -960,7 +960,7 @@ public class LauncherWindow : Window
                     File.Move(partPath, zipPath);
                     try { File.Delete(metaPath); } catch { }
                     Log("finalized+verified zip (" + new FileInfo(zipPath).Length + " bytes), extracting to " + InstallDir);
-                    SetStatus("Extracting… this can take several minutes.");
+                    SetStatus("Extracting... this can take several minutes.");
                     ExtractZip(zipPath, InstallDir);
                     Log("extract done");
                     try { File.Delete(zipPath); } catch { }
@@ -973,10 +973,10 @@ public class LauncherWindow : Window
         Dispatcher.BeginInvoke((Action)(() =>
         {
             busy = false; activeReq = null;
-            if (cancelled) statusText.Text = "Paused — progress saved. Click Resume to continue.";
-            else if (verifyFailed) { statusText.Foreground = AccentHi; statusText.Text = verifyMsg ?? "Integrity check failed — the download was rejected. Nothing was installed."; }
+            if (cancelled) statusText.Text = "Paused - progress saved. Click Resume to continue.";
+            else if (verifyFailed) { statusText.Foreground = AccentHi; statusText.Text = verifyMsg ?? "Integrity check failed - the download was rejected. Nothing was installed."; }
             else if (error != null) { statusText.Foreground = AccentHi; statusText.Text = "Download failed: " + error; }
-            else { progFill.Width = progTrack.ActualWidth; statusText.Text = "Install complete — ready to play!"; }
+            else { progFill.Width = progTrack.ActualWidth; statusText.Text = "Install complete - ready to play!"; }
             RefreshState();   // the .part is kept on cancel/error so Resume can continue
         }));
     }
@@ -1058,7 +1058,7 @@ public class LauncherWindow : Window
                     int d = done, t = total;
                     Dispatcher.BeginInvoke((Action)(() =>
                     {
-                        statusText.Text = "Extracting  " + d + " / " + t + " files…";
+                        statusText.Text = "Extracting  " + d + " / " + t + " files...";
                         if (t > 0) progFill.Width = progTrack.ActualWidth * ((double)d / t);
                     }));
                 }
@@ -1086,7 +1086,7 @@ public class LauncherWindow : Window
         string expected = NormalizedExpectedHash();
         if (expected.Length == 0)
         {
-            Log("integrity: no ExpectedSha256 configured — refusing to install unverified download (sha256=" + actualHex + ")");
+            Log("integrity: no ExpectedSha256 configured - refusing to install unverified download (sha256=" + actualHex + ")");
             return false;
         }
 
@@ -1103,7 +1103,7 @@ public class LauncherWindow : Window
         Dispatcher.BeginInvoke((Action)(() =>
         {
             statusText.Foreground = TextMute;
-            statusText.Text = "Verifying download…";
+            statusText.Text = "Verifying download...";
             progFill.Width = 0;
         }));
 
@@ -1193,10 +1193,10 @@ public class LauncherWindow : Window
         string exe = FindGameExe();
         if (exe == null)
         {
-            statusText.Foreground = AccentHi; statusText.Text = "Client not installed — click Install first.";
+            statusText.Foreground = AccentHi; statusText.Text = "Client not installed - click Install first.";
             RefreshState(); return;
         }
-        // single instance: never launch a second RustClient — focus the running one instead
+        // single instance: never launch a second RustClient - focus the running one instead
         try
         {
             var running = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(LaunchExe));
@@ -1214,7 +1214,7 @@ public class LauncherWindow : Window
             if (!string.IsNullOrEmpty(args)) psi.Arguments = args;
             var proc = Process.Start(psi);
             if (proc != null) { WatchGame(proc); if (Prefs.GetBool("MinimizeInGame", false)) { try { WindowState = WindowState.Minimized; } catch { } } }
-            statusText.Foreground = TextMute; statusText.Text = "Launching…";
+            statusText.Foreground = TextMute; statusText.Text = "Launching...";
         }
         catch (Exception ex) { statusText.Foreground = AccentHi; statusText.Text = "Launch error: " + ex.Message; }
     }
@@ -1580,7 +1580,7 @@ public class LauncherWindow : Window
         if (logoBmp != null) head.Children.Add(new Image { Source = logoBmp, Width = 44, Height = 44, Stretch = Stretch.Uniform, VerticalAlignment = VerticalAlignment.Center });
         var htxt = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(logoBmp != null ? 16 : 0, 0, 0, 0) };
         htxt.Children.Add(new TextBlock { Text = "RustOrigin", Foreground = TextHi, FontFamily = Brand, FontWeight = FontWeights.Bold, FontSize = 24 });
-        htxt.Children.Add(new TextBlock { Text = "Private Rust world \u2014 January 2021 build", Foreground = TextDim, FontSize = 14, Margin = new Thickness(0, 2, 0, 0) });
+        htxt.Children.Add(new TextBlock { Text = "Private Rust world - January 2021 build", Foreground = TextDim, FontSize = 14, Margin = new Thickness(0, 2, 0, 0) });
         head.Children.Add(htxt);
         cs.Children.Add(head);
         cs.Children.Add(AboutRow("Launcher version", "v" + AppVer()));
@@ -1682,10 +1682,10 @@ public class LauncherWindow : Window
 
     void Uninstall()
     {
-        if (busy) { SetSettingsStatus("Busy \u2014 wait for the current operation to finish."); return; }
+        if (busy) { SetSettingsStatus("Busy - wait for the current operation to finish."); return; }
         if (GameRunning()) { SetSettingsStatus("Close the game before uninstalling."); return; }
         if (MessageBox.Show(this, "Delete the installed RustOrigin client from:\n\n" + InstallDir + "\n\nThe launcher itself stays. Continue?", "Uninstall", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        busy = true; RefreshState(); SetSettingsStatus("Uninstalling\u2026 this can take a minute.");
+        busy = true; RefreshState(); SetSettingsStatus("Uninstalling... this can take a minute.");
         ThreadPool.QueueUserWorkItem(delegate { UninstallWorker(); });
     }
 
@@ -1711,7 +1711,7 @@ public class LauncherWindow : Window
         Dispatcher.BeginInvoke((Action)delegate
         {
             busy = false;
-            SetSettingsStatus(err != null ? "Uninstall error: " + err : "Uninstalled \u2014 removed " + removed + " item(s).");
+            SetSettingsStatus(err != null ? "Uninstall error: " + err : "Uninstalled - removed " + removed + " item(s).");
             RefreshState();
         });
     }
@@ -1789,7 +1789,7 @@ public class LauncherWindow : Window
     {
         if (busy && dlThread != null && dlThread.IsAlive)
         {
-            if (MessageBox.Show(this, "A download is in progress. Quit now?\n\nProgress is saved — click Resume next time to continue where it left off.",
+            if (MessageBox.Show(this, "A download is in progress. Quit now?\n\nProgress is saved - click Resume next time to continue where it left off.",
                 "Quit", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             { e.Cancel = true; return; }
             CancelDownload();
