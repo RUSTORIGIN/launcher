@@ -19,10 +19,15 @@ machine can't decode it, the launcher shows a dark gradient backdrop instead and
 | `logo-original.png` | Untouched copy of the original 2000x1333 logo PNG, kept for reference. |
 | `fonts\` | Bundled Montserrat brand font (4 weights + OFL license). Must ship next to the exe. |
 | `launcher.cfg` | Config: download URL, install folder, exe, title, tagline. |
-| `WpfLauncher.cs` | Source of the video launcher. |
-| `Launcher.cs` | Source of an older plain WinForms version (optional). |
-| `build.bat` | Rebuild `RustOrigin.exe` after editing `WpfLauncher.cs`. |
-| `package_client.ps1` | Zips your client folder into `RustClient.zip` for hosting. |
+| `src/WpfLauncher.cs` | Source of the video launcher. |
+| `src/Launcher.cs` | Source of an older plain WinForms version (optional). |
+| `scripts/build.bat` | Dev compile check of `src/WpfLauncher.cs`. |
+| `scripts/make_release.ps1` | Build the shippable single-file `RustOrigin.exe`. |
+| `scripts/package_client.ps1` | Zips your client folder into `RustClient.zip` for hosting. |
+
+The repo is organized into `src/` (code), `assets/` (embedded media + fonts), `config/`
+(`launcher.cfg`), `scripts/` (build/packaging), and `docs/`. The media, fonts, and
+`launcher.cfg` above are embedded into the exe at build time - only `RustOrigin.exe` ships.
 
 ## Typography
 
@@ -50,7 +55,7 @@ readability.
 
 1. **Zip the client** - from PowerShell in this folder:
    ```powershell
-   .\package_client.ps1
+   .\scripts\package_client.ps1
    ```
    Produces `RustClient.zip` (client files at the zip root). Default level is `Optimal`
    (smaller download); use `-Level Fastest` for speed, or point `-SourceDir` / `-OutFile`
@@ -67,7 +72,7 @@ readability.
    DownloadUrl=https://your-host/RustClient.zip
    ```
 
-4. **Ship** the release zip built by `make_release.ps1` (see **Releases** below).
+4. **Ship** the release exe built by `scripts/make_release.ps1` (see **Releases** below).
 
 ## Downloads: resumable + verified + TLS 1.2
 
@@ -78,7 +83,7 @@ readability.
   mandatory - if `Sha256=` is blank, **Install is blocked** and nothing is downloaded, so the
   launcher never installs a client it can't verify. The check runs on the completed file *before*
   extraction; on mismatch the partial is cleared so the next attempt re-downloads cleanly.
-  `package_client.ps1` prints the hash to paste in, and also writes a `RustClient.zip.sha256` sidecar.
+  `scripts/package_client.ps1` prints the hash to paste in, and also writes a `RustClient.zip.sha256` sidecar.
 - Downloads are **resumable**: the file is written to
   `%LOCALAPPDATA%\RUSTORIGIN\RustClient.zip.part` using HTTP Range requests. A dropped
   connection retries automatically (up to 30 times, 5 s apart) from the last byte received.
@@ -102,7 +107,7 @@ Clicking **Install** again re-downloads and overwrites = updates.
 | Key | Meaning |
 |-----|---------|
 | `DownloadUrl` | Direct link to `RustClient.zip`. Required. |
-| `Sha256` | Expected SHA-256 of `RustClient.zip`. **Required** - downloads are verified (mismatch = rejected) and Install is blocked when blank. From `package_client.ps1` or `certutil -hashfile RustClient.zip SHA256`. |
+| `Sha256` | Expected SHA-256 of `RustClient.zip`. **Required** - downloads are verified (mismatch = rejected) and Install is blocked when blank. From `scripts/package_client.ps1` or `certutil -hashfile RustClient.zip SHA256`. |
 | `InstallDir` | Install path. Shipped as `C:\RUSTORIGIN` (visible, no admin rights needed). Blank = `.\Rust` next to the launcher. |
 | `LaunchExe` | Exe the Play button runs (searched inside the install folder). Default `RustClient.exe`. |
 | `LaunchArgs` | Optional args for the main PLAY button, e.g. `-console +connect 127.0.0.1:28015`. |
@@ -122,7 +127,8 @@ Clicking **Install** again re-downloads and overwrites = updates.
   set `LaunchArgs` / a small step to run it, or have players run
   `EasyAntiCheat\EasyAntiCheat_Setup.exe` once. (Many private-server builds run EAC-less -
   skip this if yours does.)
-- To rebuild after editing `Launcher.cs`, run `build.bat`.
+- To rebuild after editing `src/WpfLauncher.cs`, run `scripts\build.bat` (dev check) or
+  `scripts\make_release.ps1` (shippable single-file exe).
 
 ## Releases (what players download)
 
@@ -132,7 +138,7 @@ and unpacked at first run to `%LOCALAPPDATA%\RUSTORIGIN\assets\<version>\` (WPF 
 files for the video and private fonts). Nothing else needs to sit next to the exe.
 
 ```powershell
-.\make_release.ps1 -Version 1.0.0     # -> release\RustOrigin.exe
+.\scripts\make_release.ps1 -Version 1.0.0     # -> release\RustOrigin.exe
 ```
 
 The script stamps the version into the exe, embeds the current `launcher.cfg`, `logo.png`,

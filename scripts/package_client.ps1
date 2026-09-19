@@ -7,15 +7,18 @@
 #     cfg\*            except keys_default.cfg (personal keybinds/settings)
 #     *.bak *.log *.dmp *.tmp *.old *.orig *.py *.vdf *.bat *.before*  Thumbs.db desktop.ini
 #
-# Usage (PowerShell):
-#   .\package_client.ps1
-#   .\package_client.ps1 -SourceDir "C:\path\to\RustClient" -OutFile "D:\RustClient.zip" -Level Fastest
+# Usage (PowerShell), from the repo root:
+#   .\scripts\package_client.ps1
+#   .\scripts\package_client.ps1 -SourceDir "C:\path\to\RustClient" -OutFile "D:\RustClient.zip" -Level Fastest
 #
 # Level: Optimal (default, smaller download, slower) or Fastest (quick, a bit larger).
+#
+# Defaults: the client folder is the repo's sibling (..\RustClient relative to the repo root,
+# i.e. two levels up from this script), and the zip lands at the repo root.
 
 param(
-    [string]$SourceDir = (Join-Path (Split-Path $PSScriptRoot -Parent) 'RustClient'),
-    [string]$OutFile   = (Join-Path $PSScriptRoot 'RustClient.zip'),
+    [string]$SourceDir = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'RustClient'),
+    [string]$OutFile   = (Join-Path (Split-Path $PSScriptRoot -Parent) 'RustClient.zip'),
     [ValidateSet('Fastest','Optimal','NoCompression')]
     [string]$Level     = 'Optimal'
 )

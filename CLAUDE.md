@@ -9,19 +9,19 @@ download a small (~7 MB) launcher instead of the full multi-GB client up front.
 
 ## Launcher sources in this repo
 
-There are three separate `.cs` files, each with its own `Main()` - they are *not* compiled together:
+All three live in `src/`, each with its own `Main()` - they are *not* compiled together:
 
 | Source | Output | Built by | Notes |
 |--------|--------|----------|-------|
-| `WpfLauncher.cs` | `RustOrigin.exe` | `csc` via `build.bat` / `make_release.ps1` | **Primary / shipping build.** WPF, single-file, video background. Downloads + **SHA-256-verifies** + extracts + launches. |
-| `Program.cs` | `RustLauncher.exe` | `RustLauncher.csproj` (`dotnet build`) | Minimal WinForms UI. **Find-and-launch only - it does not download or verify.** |
-| `Launcher.cs` | (none) | not wired to any build | Older standalone WinForms downloader (`WebClient`, non-resumable, **no verification**). Reference-only; excluded from the csproj. |
+| `src/WpfLauncher.cs` | `RustOrigin.exe` | `csc` via `scripts/build.bat` / `scripts/make_release.ps1` | **Primary / shipping build.** WPF, single-file, video background. Downloads + **SHA-256-verifies** + extracts + launches. |
+| `src/Program.cs` | `RustLauncher.exe` | `src/RustLauncher.csproj` (`dotnet build`) | Minimal WinForms UI. **Find-and-launch only - it does not download or verify.** |
+| `src/Launcher.cs` | (none) | not wired to any build | Older standalone WinForms downloader (`WebClient`, non-resumable, **no verification**). Reference-only; excluded from the csproj. |
 
 The csproj excludes `WpfLauncher.cs` and `Launcher.cs` on purpose (see the `<Compile Remove>`
-items) - an SDK-style project otherwise globs every `.cs` in the folder and the three `Main()`s
+items) - an SDK-style project otherwise globs every `.cs` in `src/` and the three `Main()`s
 collide.
 
-Nearly all real work happens in `WpfLauncher.cs`. It is one self-contained code-only WPF file
+Nearly all real work happens in `src/WpfLauncher.cs`. It is one self-contained code-only WPF file
 (~1830 lines): window chrome, glass/acrylic UI, config parsing, and the resumable, verified
 downloader all live there.
 
@@ -123,38 +123,41 @@ Install also creates a **desktop shortcut** (`<name>.lnk` via `WScript.Shell` CO
 The primary build uses the .NET Framework C# compiler (`csc.exe`) that is already on every
 Windows 10/11 machine - no SDK/NuGet restore needed.
 
+All scripts resolve paths against the repo root, so run them from the root regardless of the
+`scripts\` location.
+
 Quick dev compile of the launcher:
 
 ```bat
-build.bat
+scripts\build.bat
 ```
 
 `build.bat` does **not** embed resources, icon, or manifest and does not stamp the version - its
-`RustOrigin.exe` needs `background.mp4`, `logo.png`, `launcher.cfg` and `fonts\` sitting next to
-it to run. Use it only for a fast compile check; never ship it on its own.
+`RustOrigin.exe` (written to the repo root) needs the assets beside it to run. Use it only for a
+fast compile check; never ship it on its own.
 
 Build the real single-file release exe (stamps version, embeds all resources, applies icon +
 manifest - everything is baked in, nothing needs to sit beside it):
 
 ```powershell
-.\make_release.ps1 -Version 1.0.0   # -> release\RustOrigin.exe
+.\scripts\make_release.ps1 -Version 1.0.0   # -> release\RustOrigin.exe
 ```
 
 The WinForms `RustLauncher.exe` builds via the SDK-style project (`net48`, verified working):
 
 ```powershell
-dotnet build -c Release RustLauncher.csproj   # -> bin\Release\RustLauncher.exe
+dotnet build -c Release src\RustLauncher.csproj   # -> src\bin\Release\RustLauncher.exe
 ```
 
 There is currently **no** test project, `cargo`, clippy, or GitHub Actions workflow in the repo.
-Do not reference commands that don't exist here. After changing `WpfLauncher.cs`, the fastest
+Do not reference commands that don't exist here. After changing `src\WpfLauncher.cs`, the fastest
 correctness check is to compile it with `csc` (as `build.bat` does) - a clean compile is the only
 gate, since there are no automated tests.
 
 ## Packaging & hosting the client (host-side)
 
 ```powershell
-.\package_client.ps1        # zips the client folder into RustClient.zip (client files at zip root)
+.\scripts\package_client.ps1   # zips the client folder into RustClient.zip (client files at zip root)
 ```
 
 `package_client.ps1` excludes things that must never ship (e.g. `temp\`, `maps\`, most of `cfg\`,
@@ -167,11 +170,11 @@ Because verification is mandatory, the client zip, the embedded `Sha256`, and th
 must all match. Any re-package produces a **different hash** (zip ordering/metadata differ), so
 these steps move together - never upload a repackaged zip without rebuilding the launcher:
 
-1. `.\package_client.ps1` - produces `RustClient.zip` + prints/writes its SHA-256.
-2. Put that hash in `launcher.cfg` -> `Sha256=...`, and set `DownloadUrl=` to the file's direct link.
-3. `.\make_release.ps1 -Version <x.y.z>` - bakes the updated `launcher.cfg` (hence the hash) into
-   `release\RustOrigin.exe`. Confirm the hash is embedded (it appears in the exe's `launcher.cfg`
-   resource).
+1. `.\scripts\package_client.ps1` - produces `RustClient.zip` + prints/writes its SHA-256.
+2. Put that hash in `config\launcher.cfg` -> `Sha256=...`, and set `DownloadUrl=` to the file's direct link.
+3. `.\scripts\make_release.ps1 -Version <x.y.z>` - bakes the updated `config\launcher.cfg` (hence the
+   hash) into `release\RustOrigin.exe`. Confirm the hash is embedded (it appears in the exe's
+   `launcher.cfg` resource).
 4. Upload **that exact** `RustClient.zip` to the `DownloadUrl` host (e.g.
    `rclone copyto RustClient.zip r2:rustorigin/RustClient.zip --s3-no-check-bucket`).
 5. Publish `release\RustOrigin.exe` (e.g. to the R2 bucket next to the client).
@@ -223,51 +226,58 @@ in the relevant `Build*Page()`; no config change needed.
 
 ```
 .
-├── WpfLauncher.cs        # PRIMARY launcher source (WPF, single file) -> RustOrigin.exe
-├── Launcher.cs           # older WinForms launcher UI
-├── Program.cs            # WinForms entry point
-├── RustLauncher.csproj   # SDK-style project for the WinForms build (net48)
-├── build.bat             # dev build of RustOrigin.exe via csc.exe
-├── make_release.ps1      # release build: stamp version, embed resources, icon+manifest
-├── package_client.ps1    # zip the client into RustClient.zip for hosting
-├── launcher.cfg          # runtime config (URL, install dir, servers, branding)
-├── app.manifest          # Win32 app manifest
-├── app.ico / release_icon.ico / app_icon_source.png
-├── background.mp4        # embedded background video
-├── logo.png / logo-original.png / server-cover.png
-├── fonts/                # bundled Montserrat (4 weights) + OFL.txt
-├── brand-kit/            # design system (css, style guide, docs)
-├── .superdesign/         # design canvas scratch (HTML mockups)
-├── discord/              # discord assets
-├── release/              # built RustOrigin.exe output (git-ignored)
-├── bin/ , obj/           # build output, not source of truth (git-ignored)
-├── RustClient.zip(.sha256) # packaged client + hash, ~9 GB (git-ignored; produced by package_client.ps1)
-├── .gitignore            # keeps build output + the multi-GB client out of git
-├── IMPLEMENTATION_PLAN.md # design->code status record (reconciled to current code)
-├── LICENSE               # MIT
-├── SECURITY.md           # vulnerability-reporting policy (rustorigin@proton.me)
-├── README.md             # player/host-facing docs (authoritative for behavior)
-├── README-PLAYERS.txt
-└── claude.MD             # this file
+├── src/                     # all C# source (each .cs has its own Main; NOT compiled together)
+│   ├── WpfLauncher.cs       #   PRIMARY launcher (WPF, single file) -> RustOrigin.exe
+│   ├── Launcher.cs          #   older standalone WinForms downloader (reference-only)
+│   ├── Program.cs           #   minimal WinForms find-and-launch UI -> RustLauncher.exe
+│   ├── RustLauncher.csproj  #   SDK-style project (net48); builds Program.cs only
+│   ├── app.manifest         #   Win32 manifest (csc /win32manifest, csproj ApplicationManifest)
+│   └── app.ico              #   WinForms app icon (csproj ApplicationIcon)
+├── assets/                  # build-time embedded resources + icon sources
+│   ├── background.mp4
+│   ├── logo.png / logo-original.png / server-cover.png
+│   ├── release_icon.ico     #   applied to RustOrigin.exe by make_release.ps1
+│   ├── app_icon_source.png
+│   └── fonts/               #   bundled Montserrat (4 weights) + OFL.txt
+├── config/
+│   └── launcher.cfg         # runtime config (URL, hash, install dir, servers, branding)
+├── scripts/
+│   ├── build.bat            # dev compile check of WpfLauncher.cs via csc
+│   ├── make_release.ps1     # release build: stamp version, embed resources, icon+manifest
+│   └── package_client.ps1   # zip the client into RustClient.zip for hosting
+├── docs/
+│   ├── IMPLEMENTATION_PLAN.md  # design->code status record (reconciled to current code)
+│   ├── README-PLAYERS.txt
+│   └── brand-kit/           # design system (css, style guide, docs)
+├── discord/                 # discord assets
+├── .superdesign/            # design canvas scratch (HTML mockups)
+├── release/                 # built RustOrigin.exe output (git-ignored)
+├── src/bin/ , src/obj/      # dotnet build output, not source of truth (git-ignored)
+├── RustClient.zip(.sha256)  # packaged client + hash, ~9 GB (git-ignored; from package_client.ps1)
+├── .gitignore  .gitattributes
+├── LICENSE                  # MIT
+├── SECURITY.md              # vulnerability-reporting policy (rustorigin@proton.me)
+├── README.md                # player/host-facing docs (authoritative for behavior)
+└── CLAUDE.md                # this file
 ```
 
 ## Version control
 
-This folder is **not a git repository yet** - despite the original doc's talk of git tags and
-GitHub Actions, none of that exists here. If/when you `git init`, make sure these are ignored
-(a `.gitignore` is provided) so build output and the multi-GB client never get committed:
+This is a git repository (branch `main`), pushed to a **private** GitHub repo
+(`RUSTORIGIN/RustOriginLauncher`). `.gitignore` and `.gitattributes` are in place; line endings
+are normalized to LF (CRLF for `.bat`/`.ps1`).
 
-- `bin/`, `obj/`, `release/` - build output
+`.gitignore` keeps build output and the multi-GB client out of git:
+
+- `bin/`, `obj/`, `release/` - build output (dotnet output lands in `src/bin`, `src/obj`)
 - `RustClient.zip`, `RustClient.zip.sha256`, `*.part` - packaged client (9+ GB) and download temp
 - loose built exes at the repo root (`RustOrigin.exe`, `RustClient.exe`)
 - `.superdesign/tmp/` - design scratch
+- key/cert/secret file types (`*.pem`, `*.key`, `*.pfx`, `.env`, `rclone.conf`, ...)
 
-Do commit source (`*.cs`, `*.csproj`), scripts (`*.ps1`, `*.bat`), `launcher.cfg`, `assets` that
-are embedded at build time (`background.mp4`, `logo*.png`, `server-cover.png`, `fonts/`), and docs.
-
-> Note: this file is on disk as `claude.MD`. The conventional name is `CLAUDE.md`; the odd casing
-> is harmless on Windows (case-insensitive) but is a different filename on Linux/macOS and in git.
-> Consider renaming to `CLAUDE.md` before the first commit.
+Do commit source (`src/*.cs`, `src/*.csproj`), scripts (`scripts/*`), `config/launcher.cfg`,
+build-time `assets/` (`background.mp4`, `logo*.png`, `server-cover.png`, `fonts/`, `release_icon.ico`),
+and docs. When it goes public, remember the commit history exposes the author email.
 
 ## Threading model
 
@@ -283,23 +293,24 @@ are embedded at build time (`background.mp4`, `logo*.png`, `server-cover.png`, `
 
 There are no automated tests; verify by running the exe:
 
-- Launch `release\RustOrigin.exe` (or a `build.bat` exe with assets beside it). The window renders
-  at 1440x860 with the video hero, PLAY, INSTALL, the server grid, and the Settings gear.
+- Launch `release\RustOrigin.exe` (or a `scripts\build.bat` exe with assets beside it). The window
+  renders at 1440x860 with the video hero, PLAY, INSTALL, the server grid, and the Settings gear.
 - **Integrity smoke test:** blank `Sha256` -> INSTALL refused; correct `Sha256` -> download -> verify
-  -> extract; wrong `Sha256` -> download rejected, nothing installed. (Also in IMPLEMENTATION_PLAN.md section 5.)
+  -> extract; wrong `Sha256` -> download rejected, nothing installed. (Also in docs/IMPLEMENTATION_PLAN.md section 5.)
 
 ## Conventions for edits
 
-- Keep `WpfLauncher.cs` **code-only WPF** (no XAML) and self-contained - it is compiled directly
-  by `csc.exe`, so it must not take a NuGet dependency.
-- UI colors/brand come from `brand-kit/` and the `B("#hex")` brush helpers; reuse existing
+- Keep `src/WpfLauncher.cs` **code-only WPF** (no XAML) and self-contained - it is compiled
+  directly by `csc.exe`, so it must not take a NuGet dependency.
+- UI colors/brand come from `docs/brand-kit/` and the `B("#hex")` brush helpers; reuse existing
   palette brushes (`Accent`, `Glass`, `Stroke`, ...) rather than adding new literals.
 - Config keys are parsed case-insensitively in `ApplyConfig`; add new keys there and document
   them in both this file and `README.md`. Per-user toggles go through `Prefs`, not `launcher.cfg`.
-- After changing `WpfLauncher.cs`, rebuild with `build.bat` (or `make_release.ps1`) and confirm
-  the exe launches; there are no automated tests to rely on.
-- Asset/branding note: `app_icon_source.png` -> `app.ico` / `release_icon.ico`; embedded assets
-  (`background.mp4`, `logo*.png`, `server-cover.png`, `fonts/`) are wired in by `make_release.ps1`.
+- After changing `src/WpfLauncher.cs`, rebuild with `scripts\build.bat` (or `scripts\make_release.ps1`)
+  and confirm the exe launches; there are no automated tests to rely on.
+- Asset/branding note: `assets/app_icon_source.png` -> `src/app.ico` / `assets/release_icon.ico`;
+  embedded assets (`assets/background.mp4`, `assets/logo*.png`, `assets/server-cover.png`,
+  `assets/fonts/`) and `config/launcher.cfg` are wired in by `scripts/make_release.ps1`.
 
 ## Disclaimer
 

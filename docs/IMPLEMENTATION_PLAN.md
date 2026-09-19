@@ -13,8 +13,8 @@
 - Canvas: https://superdesign.dev/teams/908d793f-f95d-45d5-9232-74f2cfa4f45b/projects/b9f5e199-00eb-4043-9e07-e3775dd9ede7?node=draft-variant-36d5d2ba-dc4a-4f28-b270-48fc5a820124
 
 **Target codebase**
-- `WpfLauncher.cs` - code-only WPF on .NET Framework 4.x (no XAML), compiled with `csc` via
-  `make_release.ps1` (or `build.bat` for a resource-less dev compile).
+- `src/WpfLauncher.cs` - code-only WPF on .NET Framework 4.x (no XAML), compiled with `csc` via
+  `scripts/make_release.ps1` (or `scripts/build.bat` for a resource-less dev compile).
 - Single-file distribution: video/logo/fonts/config embedded as resources, unpacked at first run.
 
 ---
@@ -116,7 +116,7 @@ _Dropped from the original plan:_ **T2** (pulse the online dots) is moot - no av
 
 ```powershell
 # from RustLauncher\
-.\make_release.ps1 -Version <x.y.z>   # embeds assets, applies icon+manifest -> release\RustOrigin.exe
+.\scripts\make_release.ps1 -Version <x.y.z>   # embeds assets, applies icon+manifest -> release\RustOrigin.exe
 ```
 
 Verify: window renders at 1440x860; hero (logo/wordmark/caption/tagline), PLAY, INSTALL, the
