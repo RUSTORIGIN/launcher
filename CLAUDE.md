@@ -150,9 +150,10 @@ dotnet build -c Release src\RustLauncher.csproj   # -> src\bin\Release\RustLaunc
 ```
 
 There is currently **no** test project, `cargo`, or clippy in the repo, and no CI *test* step.
-The only GitHub Actions workflow is the **release** workflow (`.github/workflows/release.yml`),
-which builds and publishes on a version tag (see the release checklist). Do not reference commands
-that don't exist here. After changing `src\WpfLauncher.cs`, the fastest correctness check is to
+Two GitHub Actions workflows exist: **build-check** (`.github/workflows/build-check.yml`) compiles
+both builds on every push/PR to catch breakage, and **release** (`.github/workflows/release.yml`)
+builds and publishes on a version tag (see the release checklist). Do not reference commands that
+don't exist here. After changing `src\WpfLauncher.cs`, the fastest correctness check is to
 compile it with `csc` (as `build.bat` does) - a clean compile is the only gate, since there are no
 automated tests.
 
@@ -317,7 +318,7 @@ in the relevant `Build*Page()`; no config change needed.
 │   ├── IMPLEMENTATION_PLAN.md  # design->code status record (reconciled to current code)
 │   ├── README-PLAYERS.txt
 │   └── brand-kit/           # design system (css, style guide, docs)
-├── .github/workflows/       # GitHub Actions: release.yml (build + publish on a version tag)
+├── .github/workflows/       # GitHub Actions: build-check.yml (push/PR compile) + release.yml (tag -> release)
 ├── discord/                 # discord assets
 ├── .superdesign/            # design canvas scratch (HTML mockups)
 ├── release/                 # built RustOrigin.exe output (git-ignored)

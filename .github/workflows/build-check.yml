@@ -1,0 +1,49 @@
+# Fast build check: compiles both builds on every push/PR so breakage is caught early.
+# It does NOT build the installers (that is the release workflow's job) and produces no release.
+# Doc-only changes are skipped via paths-ignore.
+name: Build check
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'SECURITY.md'
+      - '.gitignore'
+      - '.gitattributes'
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'SECURITY.md'
+      - '.gitignore'
+      - '.gitattributes'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build launcher (compile + embed) via make_release.ps1
+        shell: pwsh
+        run: |
+          .\scripts\make_release.ps1 -Version 0.0.0
+          if (-not (Test-Path 'release\RustOrigin.exe')) { throw 'RustOrigin.exe was not produced' }
+          Write-Host 'RustOrigin.exe built OK'
+
+      - name: Build WinForms project (RustLauncher.csproj)
+        shell: pwsh
+        run: dotnet build -c Release src\RustLauncher.csproj --nologo
