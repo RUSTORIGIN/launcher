@@ -320,7 +320,7 @@ in the relevant `Build*Page()`; no config change needed.
 │   ├── IMPLEMENTATION_PLAN.md  # design->code status record (reconciled to current code)
 │   ├── README-PLAYERS.txt
 │   └── brand-kit/           # design system (css, style guide, docs)
-├── .github/workflows/       # GitHub Actions: build-check.yml (push/PR compile) + release.yml (tag -> release)
+├── .github/                 # workflows (build-check, release), PR template, ruleset, BRANCH_PROTECTION.md
 ├── discord/                 # discord assets
 ├── .superdesign/            # design canvas scratch (HTML mockups)
 ├── release/                 # built RustOrigin.exe output (git-ignored)
@@ -329,6 +329,7 @@ in the relevant `Build*Page()`; no config change needed.
 ├── .gitignore  .gitattributes
 ├── LICENSE                  # MIT
 ├── SECURITY.md              # vulnerability-reporting policy (rustorigin@proton.me)
+├── CONTRIBUTING.md          # pull-request workflow (branch -> PR -> CI -> merge)
 ├── README.md                # player/host-facing docs (authoritative for behavior)
 └── CLAUDE.md                # this file
 ```
