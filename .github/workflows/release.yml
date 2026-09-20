@@ -1,0 +1,110 @@
+# Builds and publishes the RustOrigin launcher on a version tag.
+#
+# Trigger: push a tag like `v1.0.0`  ->  builds RustOrigin.exe, the NSIS setup .exe, and the MSI,
+# generates SHA-256 checksums, (optionally) attests build provenance, and creates a GitHub Release
+# with all artifacts attached. Can also be run manually (workflow_dispatch) to just build artifacts.
+#
+# It builds ONLY the ~7 MB launcher from the committed config/launcher.cfg (the multi-GB game client
+# is never in CI). The launcher embeds config/launcher.cfg's Sha256, so make sure that hash matches
+# the RustClient.zip you host - see the release checklist in CLAUDE.md.
+name: Release launcher
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build, e.g. 1.0.0 (a tag push uses the tag instead)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write        # create the release and upload assets
+  id-token: write        # build-provenance attestation
+  attestations: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = '${{ github.event.inputs.version }}'
+          if ([string]::IsNullOrWhiteSpace($v)) { $v = ('${{ github.ref_name }}' -replace '^v','') }
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { $v = '0.0.0' }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Building version $v"
+
+      - name: Set up .NET 8 (for the WiX tool)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install WiX v5 + UI extension
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
+          wix extension add -g WixToolset.UI.wixext/5.0.2
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis -y --no-progress
+
+      - name: Build launcher (RustOrigin.exe)
+        shell: pwsh
+        run: .\scripts\make_release.ps1 -Version ${{ steps.ver.outputs.version }}
+
+      - name: Build NSIS setup .exe
+        shell: pwsh
+        run: .\scripts\build_installer_exe.ps1 -Version ${{ steps.ver.outputs.version }}
+
+      - name: Build MSI
+        shell: pwsh
+        run: .\scripts\build_msi.ps1 -Version ${{ steps.ver.outputs.version }}
+
+      - name: Generate SHA-256 checksums
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem 'release\*' -Include *.exe,*.msi -File
+          $lines = Get-FileHash -Algorithm SHA256 -LiteralPath $files.FullName |
+                   ForEach-Object { '{0}  {1}' -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) }
+          $lines | Set-Content 'release\SHA256SUMS.txt'
+          $lines | Write-Host
+
+      - name: Attest build provenance
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            release/RustOrigin.exe
+            release/*-x64.exe
+            release/*.msi
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustorigin-launcher-${{ steps.ver.outputs.version }}
+          path: |
+            release/RustOrigin.exe
+            release/*-x64.exe
+            release/*.msi
+            release/SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: RustOrigin Launcher ${{ steps.ver.outputs.version }}
+          generate_release_notes: true
+          files: |
+            release/RustOrigin.exe
+            release/*-x64.exe
+            release/*.msi
+            release/SHA256SUMS.txt

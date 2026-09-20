@@ -149,10 +149,12 @@ The WinForms `RustLauncher.exe` builds via the SDK-style project (`net48`, verif
 dotnet build -c Release src\RustLauncher.csproj   # -> src\bin\Release\RustLauncher.exe
 ```
 
-There is currently **no** test project, `cargo`, clippy, or GitHub Actions workflow in the repo.
-Do not reference commands that don't exist here. After changing `src\WpfLauncher.cs`, the fastest
-correctness check is to compile it with `csc` (as `build.bat` does) - a clean compile is the only
-gate, since there are no automated tests.
+There is currently **no** test project, `cargo`, or clippy in the repo, and no CI *test* step.
+The only GitHub Actions workflow is the **release** workflow (`.github/workflows/release.yml`),
+which builds and publishes on a version tag (see the release checklist). Do not reference commands
+that don't exist here. After changing `src\WpfLauncher.cs`, the fastest correctness check is to
+compile it with `csc` (as `build.bat` does) - a clean compile is the only gate, since there are no
+automated tests.
 
 ## Installers
 
@@ -228,6 +230,20 @@ these steps move together - never upload a repackaged zip without rebuilding the
 If the uploaded zip and the embedded hash ever drift apart, players get a (correct) integrity
 rejection and cannot install - re-run from step 1.
 
+**Automated launcher release (GitHub Actions).** `.github/workflows/release.yml` builds and
+publishes the launcher on a version tag:
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+That builds `RustOrigin.exe`, the NSIS setup `.exe`, and the MSI from the **committed**
+`config/launcher.cfg`, generates `SHA256SUMS.txt`, and creates a GitHub Release with all
+artifacts attached. **It does not touch the game client** (that 9 GB zip is never in CI), so
+steps 1-2 and 4 above (package the client, set the matching `Sha256`, upload the zip to R2)
+are still done by hand *before* tagging - otherwise the released launcher embeds a hash for a
+zip nobody is hosting. Only tag once `config/launcher.cfg` holds the hash of the zip you uploaded.
+
 Uploading/publishing is an outward-facing action: do it deliberately, not as part of a build.
 
 ## launcher.cfg reference
@@ -301,6 +317,7 @@ in the relevant `Build*Page()`; no config change needed.
 │   ├── IMPLEMENTATION_PLAN.md  # design->code status record (reconciled to current code)
 │   ├── README-PLAYERS.txt
 │   └── brand-kit/           # design system (css, style guide, docs)
+├── .github/workflows/       # GitHub Actions: release.yml (build + publish on a version tag)
 ├── discord/                 # discord assets
 ├── .superdesign/            # design canvas scratch (HTML mockups)
 ├── release/                 # built RustOrigin.exe output (git-ignored)
