@@ -156,22 +156,28 @@ gate, since there are no automated tests.
 
 ## Installer (MSI)
 
-An optional MSI wraps the launcher for a polished install (Start Menu + Desktop shortcuts,
-Add/Remove Programs entry, clean uninstall/upgrade). It installs **only** the ~7 MB launcher;
-the game client is still downloaded + verified at runtime.
+An optional MSI wraps the launcher for a polished install. It installs **only** the ~7 MB
+launcher; the game client is still downloaded + verified at runtime.
 
 ```powershell
 .\scripts\build_msi.ps1 -Version 1.0.0   # -> release\RustOriginLauncher-1.0.0.msi
 ```
 
-- **Per-user install, no admin/UAC:** goes to `%LOCALAPPDATA%\Programs\RustOrigin Launcher\`,
-  matching the launcher's no-admin design. (The launcher then installs the client to `C:\RustOrigin`.)
+- **Full wizard UI** (`WixUI_InstallDir`): Welcome -> License -> **Choose install location (Browse)**
+  -> Ready -> Progress -> Finish, plus Start Menu + Desktop shortcuts, an Add/Remove Programs entry,
+  and clean uninstall/upgrade. The license page shows `scripts/installer/license.rtf` (MIT).
+- **Per-user install, no admin/UAC:** default location `%LOCALAPPDATA%\Programs\RustOrigin Launcher\`,
+  matching the launcher's no-admin design. The user can change it on the install-location page - but
+  because it's a per-user (non-elevated) MSI, picking a protected folder like `Program Files` will
+  fail; keep the default or a writable path. (The launcher then installs the client to `C:\RustOrigin`.)
 - Built with the **WiX toolset** (`scripts/installer/RustOrigin.wxs`). `build_msi.ps1` first runs
   `make_release.ps1` so the MSI always wraps a fresh, versioned exe; the MSI version is bound from
   the exe's file version.
-- **WiX prerequisite (one-time):** `dotnet tool install --global wix --version 5.0.2`. Use **v5** -
-  WiX **v6+ require accepting the paid Open Source Maintenance Fee EULA to build**, which v5 does not.
-  v5 uses the same `.wxs` schema, so nothing in the source changes.
+- **WiX prerequisites (one-time):**
+  `dotnet tool install --global wix --version 5.0.2` and
+  `wix extension add -g WixToolset.UI.wixext/5.0.2` (the UI extension provides the wizard).
+  Use **v5** - WiX **v6+ require accepting the paid Open Source Maintenance Fee EULA to build**,
+  which v5 does not. v5 uses the same `.wxs` schema, so nothing in the source changes.
 - `UpgradeCode` in the `.wxs` is **stable** - never change it, or upgrades won't recognize prior builds.
 - Like the exe, the MSI is **unsigned** until a code-signing cert is added (same SmartScreen note).
 
@@ -268,7 +274,8 @@ in the relevant `Build*Page()`; no config change needed.
 │   ├── package_client.ps1   # zip the client into RustClient.zip for hosting
 │   ├── build_msi.ps1        # build the per-user MSI installer (WiX)
 │   └── installer/
-│       └── RustOrigin.wxs   # WiX source for the MSI
+│       ├── RustOrigin.wxs   # WiX source for the MSI (WixUI_InstallDir wizard)
+│       └── license.rtf      # MIT license shown on the installer's license page
 ├── docs/
 │   ├── IMPLEMENTATION_PLAN.md  # design->code status record (reconciled to current code)
 │   ├── README-PLAYERS.txt

@@ -13,7 +13,8 @@
   The UpgradeCode below is STABLE and must never change - it is how Windows recognizes newer
   builds as upgrades of the same product.
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="RustOrigin Launcher"
            Manufacturer="RustOrigin"
            Version="!(bind.FileVersion.RustOriginExe)"
@@ -24,11 +25,17 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
+    <!-- Wizard UI: Welcome -> License -> Install location (Browse/Change) -> Ready -> Progress -> Finish.
+         WixUI_InstallDir is the dialog set that includes the "choose install folder" page; the
+         InstallDirectory attribute tells it which directory the Browse page edits. -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="scripts\installer\license.rtf" />
+
     <!-- Add/Remove Programs presentation -->
     <Icon Id="AppIcon" SourceFile="assets\release_icon.ico" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <!-- ARPNOMODIFY/ARPNOREPAIR are provided by WixUI_InstallDir; don't redefine them here. -->
     <Property Id="ARPNOREPAIR" Value="1" />
-    <Property Id="ARPNOMODIFY" Value="1" />
 
     <!-- Install locations -->
     <StandardDirectory Id="LocalAppDataFolder">

@@ -21,9 +21,10 @@ $wix = (Get-Command wix -ErrorAction SilentlyContinue).Source
 if (-not $wix) { $wix = Join-Path $env:USERPROFILE ".dotnet\tools\wix.exe" }
 if (-not (Test-Path $wix)) { throw "WiX not found. Install it with:  dotnet tool install --global wix" }
 
-# 3) compile the MSI
+# 3) compile the MSI (WixToolset.UI.wixext provides the WixUI_InstallDir wizard).
+#    One-time:  wix extension add -g WixToolset.UI.wixext/5.0.2
 $out = "$repo\release\RustOriginLauncher-$Version.msi"
-& $wix build "$PSScriptRoot\installer\RustOrigin.wxs" -arch x64 -o $out
+& $wix build "$PSScriptRoot\installer\RustOrigin.wxs" -ext WixToolset.UI.wixext -arch x64 -o $out
 if ($LASTEXITCODE -ne 0) { throw "MSI build failed" }
 
 $msi = Get-Item $out
