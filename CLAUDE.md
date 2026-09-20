@@ -164,7 +164,8 @@ is still downloaded + verified at runtime). Pick whichever fits distribution.
 
 ### A) NSIS setup `.exe` (electron-builder style) - recommended for distribution
 
-A single self-contained setup executable, the same *kind* electron-builder's NSIS target produces (`AppName-x.y.z-x64.exe`).
+A single self-contained setup executable, the same *kind* electron-builder's NSIS target produces
+(`AppName-x.y.z-x64.exe`).
 
 ```powershell
 .\scripts\build_installer_exe.ps1 -Version 1.0.0   # -> release\RustOrigin-Launcher-1.0.0-x64.exe
@@ -173,7 +174,8 @@ A single self-contained setup executable, the same *kind* electron-builder's NSI
 - **Wizard:** Welcome -> License (MIT) -> **Choose install folder** -> Install (progress) ->
   Finish (with "Launch" checkbox), plus Start Menu + Desktop shortcuts, an Add/Remove Programs
   entry, and an uninstaller.
-- **Per-machine install to `Program Files` (requires admin/UAC)** - the classic per-machine installer behavior. This
+- **Per-machine install to `Program Files` (requires admin/UAC)** - the classic per-machine
+  installer behavior. This
   is the one trade-off vs the launcher's usual no-admin design; use the MSI below if you want no-admin.
 - Built with **NSIS** (`scripts/installer/RustOrigin.nsi`, Modern UI 2). `build_installer_exe.ps1`
   runs `make_release.ps1` first so the setup always wraps a fresh, versioned exe.
