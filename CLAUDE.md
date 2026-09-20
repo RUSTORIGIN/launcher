@@ -154,6 +154,27 @@ Do not reference commands that don't exist here. After changing `src\WpfLauncher
 correctness check is to compile it with `csc` (as `build.bat` does) - a clean compile is the only
 gate, since there are no automated tests.
 
+## Installer (MSI)
+
+An optional MSI wraps the launcher for a polished install (Start Menu + Desktop shortcuts,
+Add/Remove Programs entry, clean uninstall/upgrade). It installs **only** the ~7 MB launcher;
+the game client is still downloaded + verified at runtime.
+
+```powershell
+.\scripts\build_msi.ps1 -Version 1.0.0   # -> release\RustOriginLauncher-1.0.0.msi
+```
+
+- **Per-user install, no admin/UAC:** goes to `%LOCALAPPDATA%\Programs\RustOrigin Launcher\`,
+  matching the launcher's no-admin design. (The launcher then installs the client to `C:\RustOrigin`.)
+- Built with the **WiX toolset** (`scripts/installer/RustOrigin.wxs`). `build_msi.ps1` first runs
+  `make_release.ps1` so the MSI always wraps a fresh, versioned exe; the MSI version is bound from
+  the exe's file version.
+- **WiX prerequisite (one-time):** `dotnet tool install --global wix --version 5.0.2`. Use **v5** -
+  WiX **v6+ require accepting the paid Open Source Maintenance Fee EULA to build**, which v5 does not.
+  v5 uses the same `.wxs` schema, so nothing in the source changes.
+- `UpgradeCode` in the `.wxs` is **stable** - never change it, or upgrades won't recognize prior builds.
+- Like the exe, the MSI is **unsigned** until a code-signing cert is added (same SmartScreen note).
+
 ## Packaging & hosting the client (host-side)
 
 ```powershell
@@ -244,7 +265,10 @@ in the relevant `Build*Page()`; no config change needed.
 ├── scripts/
 │   ├── build.bat            # dev compile check of WpfLauncher.cs via csc
 │   ├── make_release.ps1     # release build: stamp version, embed resources, icon+manifest
-│   └── package_client.ps1   # zip the client into RustClient.zip for hosting
+│   ├── package_client.ps1   # zip the client into RustClient.zip for hosting
+│   ├── build_msi.ps1        # build the per-user MSI installer (WiX)
+│   └── installer/
+│       └── RustOrigin.wxs   # WiX source for the MSI
 ├── docs/
 │   ├── IMPLEMENTATION_PLAN.md  # design->code status record (reconciled to current code)
 │   ├── README-PLAYERS.txt

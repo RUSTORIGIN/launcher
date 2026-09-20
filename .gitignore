@@ -2,6 +2,8 @@
 bin/
 obj/
 release/
+*.msi
+*.wixpdb
 
 # Packaged client (multi-GB) and download temp - never commit
 RustClient.zip
