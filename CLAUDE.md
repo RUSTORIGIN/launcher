@@ -154,10 +154,29 @@ Do not reference commands that don't exist here. After changing `src\WpfLauncher
 correctness check is to compile it with `csc` (as `build.bat` does) - a clean compile is the only
 gate, since there are no automated tests.
 
-## Installer (MSI)
+## Installers
 
-An optional MSI wraps the launcher for a polished install. It installs **only** the ~7 MB
-launcher; the game client is still downloaded + verified at runtime.
+Two optional installers are provided; both install **only** the ~7 MB launcher (the game client
+is still downloaded + verified at runtime). Pick whichever fits distribution.
+
+### A) NSIS setup `.exe` (electron-builder style) - recommended for distribution
+
+A single self-contained setup executable, the same *kind* electron-builder's NSIS target produces (`AppName-x.y.z-x64.exe`).
+
+```powershell
+.\scripts\build_installer_exe.ps1 -Version 1.0.0   # -> release\RustOrigin-Launcher-1.0.0-x64.exe
+```
+
+- **Wizard:** Welcome -> License (MIT) -> **Choose install folder** -> Install (progress) ->
+  Finish (with "Launch" checkbox), plus Start Menu + Desktop shortcuts, an Add/Remove Programs
+  entry, and an uninstaller.
+- **Per-machine install to `Program Files` (requires admin/UAC)** - the classic per-machine installer behavior. This
+  is the one trade-off vs the launcher's usual no-admin design; use the MSI below if you want no-admin.
+- Built with **NSIS** (`scripts/installer/RustOrigin.nsi`, Modern UI 2). `build_installer_exe.ps1`
+  runs `make_release.ps1` first so the setup always wraps a fresh, versioned exe.
+- **NSIS prerequisite (one-time):** `winget install NSIS.NSIS`.
+
+### B) MSI (per-user, no admin)
 
 ```powershell
 .\scripts\build_msi.ps1 -Version 1.0.0   # -> release\RustOriginLauncher-1.0.0.msi
@@ -273,9 +292,11 @@ in the relevant `Build*Page()`; no config change needed.
 │   ├── make_release.ps1     # release build: stamp version, embed resources, icon+manifest
 │   ├── package_client.ps1   # zip the client into RustClient.zip for hosting
 │   ├── build_msi.ps1        # build the per-user MSI installer (WiX)
+│   ├── build_installer_exe.ps1 # build the NSIS setup .exe (electron-builder style, Program Files)
 │   └── installer/
 │       ├── RustOrigin.wxs   # WiX source for the MSI (WixUI_InstallDir wizard)
-│       └── license.rtf      # MIT license shown on the installer's license page
+│       ├── RustOrigin.nsi   # NSIS source for the setup .exe (MUI2 wizard)
+│       └── license.rtf      # MIT license shown on both installers' license page
 ├── docs/
 │   ├── IMPLEMENTATION_PLAN.md  # design->code status record (reconciled to current code)
 │   ├── README-PLAYERS.txt
