@@ -295,19 +295,20 @@ Two separate mechanisms - don't confuse them:
 
 - **`launcher.cfg`** = host/deployment config (URL, hash, install dir, branding, servers). Shipped
   embedded in the exe, optionally overridden by a copy next to the exe. Parsed in `ApplyConfig`.
-- **`Prefs`** = per-user preferences the player toggles in the **Settings tab**, persisted to
+- **`Prefs`** = per-user preferences read at runtime, persisted to
   `%LOCALAPPDATA%\RustOrigin\prefs.cfg` (a plain file - **not** the registry). `static class Prefs`
-  with `Get` / `GetBool` / `Set`.
+  with `Get` / `GetBool` / `Set`. **There is no in-app settings UI** - the Settings tab/gear was
+  removed; users change these by editing `prefs.cfg` directly (defaults below apply otherwise).
 
 | Prefs key | Default | Effect |
 |-----------|---------|--------|
-| `LaunchArgs` | (from cfg) | Overrides `launcher.cfg`'s `LaunchArgs` for the PLAY button; set via the Game settings page. |
+| `LaunchArgs` | (from cfg) | Overrides `launcher.cfg`'s `LaunchArgs` for the PLAY button (set in `prefs.cfg`). |
 | `BgSlideshow` | `true` | Auto-switch (cross-fade) between the background screenshots. Off keeps a single still image. |
 | `MinimizeInGame` | `false` | Minimize the launcher while the client runs. |
 | `AutoUpdate` | `true` | Check `UpdateRepo`'s GitHub Releases on launch and offer a verified self-update. |
 
-To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect and a `ToggleRow`
-in the relevant `Build*Page()`; no config change needed.
+To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect. There is no
+settings screen to wire it into - users set it in `prefs.cfg`.
 
 ## Repository layout (actual)
 
@@ -389,7 +390,7 @@ and docs. When it goes public, remember the commit history exposes the author em
 There are no automated tests; verify by running the exe:
 
 - Launch `release\RustOrigin.exe` (or a `scripts\build.bat` exe with assets beside it). The window
-  renders at 1440x860 with the screenshot slideshow, PLAY, INSTALL, the server grid, and the Settings gear.
+  renders at 1440x860 with the screenshot slideshow, PLAY, INSTALL, the server grid, and minimize/close.
 - **Integrity smoke test:** blank `Sha256` -> INSTALL refused; correct `Sha256` -> download -> verify
   -> extract; wrong `Sha256` -> download rejected, nothing installed. (Also in docs/IMPLEMENTATION_PLAN.md section 5.)
 

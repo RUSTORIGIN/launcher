@@ -50,7 +50,7 @@ plus the `Avatar`/`Offline` helpers) have been **removed** (section 4 T-cleanup,
 |---|---|---|
 | Rounded 32px card, 1px stroke, shadow | window chrome + `mainGrid.Clip` + edge Border | ✅ rendered |
 | Hero key-visual (CSS gradient scene) | `BuildBackground()` - cross-fading screenshot slideshow (`1.jpg`-`4.jpg`) + `BuildGradient()` overlays; gradient fallback | ✅ rendered (real screenshots, upgraded from the CSS mock) |
-| Window controls: **gear (Settings) / min / close** | `BuildTopRight()` + `OpenSettings()` / `MinimizeWithFade()` | ✅ rendered (app-only; not in the web mock) |
+| Window controls: **min / close** | `BuildTopRight()` + `MinimizeWithFade()` | ✅ rendered (settings gear removed) |
 | Hero: large OG logo | `BuildHero()` `logoBmp` image | ✅ rendered |
 | Hero: wordmark (`GameTitle`) | `BuildHero()` @ 54px | ✅ rendered |
 | Hero: "JANUARY UPDATE 2021" caption | `BuildHero()` accent caption | ✅ rendered |
@@ -58,7 +58,7 @@ plus the `Avatar`/`Offline` helpers) have been **removed** (section 4 T-cleanup,
 | Hero action 1: **PLAY** white pill | `PlayButton()` | ✅ rendered (-> `IN-GAME` while the client runs) |
 | Hero action 2: **INSTALL / RESUME** + progress/status | `LinkButton()` -> `StartInstall()`, `progTrack`/`statusText` | ✅ rendered (see section 4 T1) |
 | Right column: 6 server cards + DISCOVER MORE | `BuildServerGrid()` / `ServerTile()` | ✅ rendered; each card launches with its args |
-| **Settings tab** (Installation/Game/Downloads/Appearance/About) | `BuildSettingsPanel()` + `Build*Page()` | ✅ rendered - **new since the original plan; not in the mock** |
+| **Settings tab** | (removed) | ❌ removed - the launcher has no in-app settings UI; prefs live in `prefs.cfg` |
 | Hero "Most Played" tag | - | ❌ not rendered (removed) |
 | Top-left brand mark | (was `BuildBrandMark()`) | ❌ removed |
 | Left rail (icon buttons) | - | ❌ never implemented (no builder) |
@@ -120,7 +120,7 @@ _Dropped from the original plan:_ **T2** (pulse the online dots) is moot - no av
 ```
 
 Verify: window renders at 1440x860; hero (logo/wordmark/caption/tagline), PLAY, INSTALL, the
-6-card server grid, DISCOVER MORE, and the Settings gear are all present; PLAY and server cards
+6-card server grid, and DISCOVER MORE are all present; PLAY and server cards
 launch the client; tray/minimize/shortcut work.
 
 **Integrity smoke test:** with `Sha256` blank, clicking INSTALL must be refused ("Set Sha256...").
@@ -135,7 +135,7 @@ Keep the client zip, the embedded `Sha256`, and the uploaded file in lockstep - 
 ## 6. Status summary
 
 The design is implemented in `WpfLauncher.cs` as an intentionally **reduced** composition (video
-hero + window controls + hero block + server grid + Settings tab), plus real launcher behaviour
+hero + window controls + hero block + server grid), plus real launcher behaviour
 the mock can't express - most importantly **mandatory SHA-256 verification** of downloads.
 Remaining work is optional: **T5** (bundle Inter) and **T6** (live data). **T-cleanup** (delete
 dead UI methods) is done. No functional gaps.
