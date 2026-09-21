@@ -13,7 +13,8 @@ Initial launcher (not yet tagged/published). Highlights:
 - **Mandatory SHA-256 verification** of the downloaded client (rejects any mismatch; Install is
   blocked without a configured hash).
 - **Resumable** downloads (HTTP Range, auto-retry) over TLS 1.2/1.3; free-disk-space check before
-  extraction.
+  extraction. The hero button **pauses/resumes** an in-progress download (PAUSE while downloading,
+  RESUME to continue from the saved partial), and **PLAY is hidden until the client is installed**.
 - **Self-update** from GitHub Releases, verified against the release `SHA256SUMS.txt`.
 - **Rounded, frameless native window** via `WindowChrome`: drag from anywhere, resize, maximize,
   Aero Snap, taskbar, system menu, circular glass min/max/close buttons; content scales on resize. The 32px

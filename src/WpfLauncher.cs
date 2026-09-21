@@ -708,7 +708,7 @@ public class LauncherWindow : Window
 
         var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 30, 0, 0) };
         playBtn = PlayButton();
-        installBtn = LinkButton("", "INSTALL", StartInstall);
+        installBtn = LinkButton("", "INSTALL", OnDownloadButton);
         row.Children.Add(playBtn);
         row.Children.Add(installBtn);
         hero.Children.Add(row);
@@ -761,7 +761,8 @@ public class LauncherWindow : Window
         var b = new Border { Height = 46, Margin = new Thickness(30, 0, 0, 0), Cursor = Cursors.Hand, Background = Brushes.Transparent, Child = sp };
         b.MouseEnter += (s, e) => { if (b.IsEnabled) tb.Foreground = AccentHi; };
         b.MouseLeave += (s, e) => { if (b.IsEnabled) tb.Foreground = TextHi; };
-        b.MouseLeftButtonUp += (s, e) => { e.Handled = true; if (b.IsEnabled && !busy) onClick(); };
+        // No !busy guard here: this button doubles as PAUSE while a download runs.
+        b.MouseLeftButtonUp += (s, e) => { e.Handled = true; if (b.IsEnabled) onClick(); };
         b.Tag = new object[] { false, tb, ic };
         return b;
     }
@@ -1059,21 +1060,35 @@ public class LauncherWindow : Window
         bool partial   = HasPartial();
         bool game      = GameRunning();
 
-        // PLAY -> IN-GAME while the game runs (clicking it focuses the running game)
-        SetButtonEnabled(playBtn, (installed || game) && !busy);
+        // PLAY: shown only when the client is installed (or our game is running) - hidden otherwise.
+        // While the game runs it becomes IN-GAME (clicking it focuses the running game).
         object[] pmeta = (object[])playBtn.Tag;
-        ((TextBlock)pmeta[1]).Text = Track(game ? "IN-GAME" : "PLAY", 1);
+        bool showPlay = installed || game;
+        playBtn.Visibility = showPlay ? Visibility.Visible : Visibility.Collapsed;
+        if (showPlay)
+        {
+            SetButtonEnabled(playBtn, !busy || game);
+            ((TextBlock)pmeta[1]).Text = Track(game ? "IN-GAME" : "PLAY", 1);
+        }
 
-        // Install/Resume button: hidden once installed (no UPDATE); shown to install, resume, or while downloading
+        // Download button: PAUSE while a download runs, else RESUME (a partial exists) or INSTALL;
+        // hidden once installed with nothing to resume.
         object[] imeta = (object[])installBtn.Tag;
-        if (installed && !partial && !busy)
+        if (busy)
+        {
+            installBtn.Visibility = Visibility.Visible;
+            SetButtonEnabled(installBtn, true);                 // clickable to pause
+            ((TextBlock)imeta[1]).Text = Track("PAUSE", 1);
+            ((TextBlock)imeta[2]).Text = "\uE769";              // pause glyph
+        }
+        else if (installed && !partial)
         {
             installBtn.Visibility = Visibility.Collapsed;
         }
         else
         {
             installBtn.Visibility = Visibility.Visible;
-            SetButtonEnabled(installBtn, !busy);
+            SetButtonEnabled(installBtn, true);
             ((TextBlock)imeta[1]).Text = Track(partial ? "RESUME" : "INSTALL", 1);
             ((TextBlock)imeta[2]).Text = partial ? "\uE768" : "\uE896";
         }
@@ -1116,6 +1131,13 @@ public class LauncherWindow : Window
         Log("StartInstall: url=" + DownloadUrl + "  installDir=" + InstallDir);
         dlThread = new Thread(DownloadWorker) { IsBackground = true, Name = "download" };
         dlThread.Start();
+    }
+
+    // The hero download button: PAUSE while a download runs, otherwise INSTALL/RESUME.
+    void OnDownloadButton()
+    {
+        if (busy) { CancelDownload(); SetStatus("Pausing..."); }
+        else StartInstall();
     }
 
     void CancelDownload()

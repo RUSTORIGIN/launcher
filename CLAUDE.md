@@ -56,6 +56,10 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
 
 - **Resumable**: written to `%LOCALAPPDATA%\RustOrigin\RustClient.zip.part` via HTTP Range
   requests; auto-retries a dropped connection (up to 30 times, 5s apart) from the last byte.
+- **Pause / resume from the UI**: the hero download button is INSTALL, then **PAUSE** while a
+  download runs (calls `CancelDownload` -> keeps the `.part`), then **RESUME** to continue via Range
+  from the saved byte. One handler, `OnDownloadButton`, dispatches on `busy`; `RefreshState` sets the
+  label/glyph. The **PLAY** button is hidden unless the client is installed (or our client is running).
 - A saved partial is reused only for the **same** remote file (URL + ETag + size), so a new
   build is never stitched onto an old partial.
 - **TLS**: `ConfigureTls()` forces TLS 1.2 (and 1.3 where the OS supports it); no HTTP fallback.
