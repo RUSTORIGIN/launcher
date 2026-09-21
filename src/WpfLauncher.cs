@@ -1276,6 +1276,34 @@ public class LauncherWindow : Window
         string error = null; bool cancelled = false; bool verifyFailed = false; string verifyMsg = null;
         try
         {
+            // 0) Reuse a cached, verified RustClient.zip (e.g. left by an interrupted extract) rather
+            //    than re-downloading the whole client. Re-verify it first; on mismatch discard it and
+            //    download fresh, so a corrupt cached file is never extracted.
+            bool usedCache = false;
+            if (!cancelRequested && File.Exists(zipPath))
+            {
+                Log("cached zip present (" + new FileInfo(zipPath).Length + " bytes); verifying before reuse");
+                SetStatus("Verifying cached download...");
+                string zhash = ""; bool zok;
+                try { zok = VerifyDownload(zipPath, out zhash); }
+                catch (OperationCanceledException) { cancelled = true; zok = false; }
+                if (!cancelled && zok)
+                {
+                    Log("cached zip verified; extracting to " + InstallDir + " (no download needed)");
+                    SetStatus("Extracting... this can take several minutes.");
+                    try { Directory.CreateDirectory(InstallDir); File.Delete(InstallMarkerPath()); } catch { }
+                    ExtractZip(zipPath, InstallDir);
+                    Log("extract done (from cached zip)");
+                    try { File.WriteAllText(InstallMarkerPath(), DateTime.Now.ToString("o")); } catch { }
+                    try { File.Delete(zipPath); } catch { }
+                    InstallLauncherAndShortcut();
+                    usedCache = true;
+                }
+                else if (!cancelled) { Log("cached zip failed verification; discarding and downloading fresh"); try { File.Delete(zipPath); } catch { } }
+            }
+
+            if (!usedCache && !cancelled)
+            {
             // 1) size + identity of the remote file (HEAD; optional)
             long total = -1; string etag = "";
             try
@@ -1369,6 +1397,7 @@ public class LauncherWindow : Window
                     InstallLauncherAndShortcut();
                 }
             }
+            }   // end if (!usedCache && !cancelled)
         }
         catch (Exception ex) { error = ex.Message; Log("FAILED: " + ex.GetType().Name + ": " + ex.Message); }
 
