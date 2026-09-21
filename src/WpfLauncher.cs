@@ -782,8 +782,8 @@ public class LauncherWindow : Window
     {
         serverStatusRefreshers.Clear();
         var wrap = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 64, 0) };
-        var social = SocialRow(new Thickness(9, 0, 0, 12));   // social icons above the server cards
-        if (social != null) wrap.Children.Add(social);
+        var social = SocialRow(new Thickness(12, 0, 0, 12));   // social icons above the server cards
+        if (social != null) { social.HorizontalAlignment = HorizontalAlignment.Center; wrap.Children.Add(social); }
         var grid = new System.Windows.Controls.Primitives.UniformGrid { Columns = 1 };   // vertical list
         string[][] pal = {
             new[]{"#3A2E5A","#141020"}, new[]{"#2C4A3A","#121C17"}, new[]{"#2F3D5A","#12161F"},
