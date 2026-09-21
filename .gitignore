@@ -13,6 +13,7 @@ RustClient.zip.sha256
 
 # Loose built executables at the repo root
 /RustOriginLauncher.exe
+/RustOrigin.exe
 /RustClient.exe
 
 # Design scratch
