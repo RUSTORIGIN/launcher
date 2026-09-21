@@ -1114,7 +1114,7 @@ public class LauncherWindow : Window
         {
             if (partial) statusText.Text = "Partial download saved (" + Human(new FileInfo(partPath).Length) + ") - click Resume to continue.";
             else if (game) statusText.Text = "In game.";
-            else statusText.Text = installed ? "Installed - ready to play." : "";
+            else statusText.Text = "";
         }
     }
 
