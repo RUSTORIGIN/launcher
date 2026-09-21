@@ -16,7 +16,9 @@ Initial launcher (not yet tagged/published). Highlights:
   extraction.
 - **Self-update** from GitHub Releases, verified against the release `SHA256SUMS.txt`.
 - **Rounded, frameless native window** via `WindowChrome`: drag from anywhere, resize, maximize,
-  Aero Snap, taskbar, system menu, custom min/max/close buttons; content scales on resize.
+  Aero Snap, taskbar, system menu, custom min/max/close buttons; content scales on resize. The 32px
+  corners come from a rounded window region (not a layered window), so the **native Windows
+  minimize/maximize/restore animations** are preserved.
 - **Cross-fading screenshot background** (four embedded JPEGs, ~7s switch) with **carousel dot
   indicators** at the bottom (click a dot to jump to a screenshot).
 - **Vertical server cards** with per-server cover art, and **live A2S player counts** (green/red

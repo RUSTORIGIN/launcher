@@ -406,6 +406,12 @@ There are no automated tests; verify by running the exe:
   opens at 1440x860 in a **rounded frameless window** with full native behaviour (drag from anywhere,
   resize, maximize, Aero Snap, taskbar) via `WindowChrome`, custom min/max/close caption buttons, the
   screenshot slideshow, PLAY, INSTALL, and the server grid. Corners flatten when maximized.
+- **Native min/max animations:** the window is intentionally **not** layered (`AllowsTransparency =
+  false`) - a layered window loses the native minimize/maximize/restore animations. The 32px rounded
+  corners come instead from a rounded window region (`ApplyWindowRegion` -> `SetWindowRgn` with
+  `CreateRoundRectRgn`), reapplied on resize/DPI-change and cleared (square) when maximized. So it
+  keeps both the big radius and the real Windows animations; region-clipped corners are not
+  anti-aliased, so they read very slightly harder than a layered window's.
 - **Integrity smoke test:** blank `Sha256` -> INSTALL refused; correct `Sha256` -> download -> verify
   -> extract; wrong `Sha256` -> download rejected, nothing installed. (Also in docs/IMPLEMENTATION_PLAN.md section 5.)
 

@@ -236,9 +236,14 @@ public class LauncherWindow : Window
         // drag, resize, maximize, Aero Snap, taskbar and the system menu; custom caption buttons
         // (built in BuildCaption) provide min/max/close. WM_GETMINMAXINFO keeps a maximized window
         // inside the work area (taskbar stays visible).
+        //
+        // The window is deliberately NOT layered (AllowsTransparency = false): a layered window
+        // loses the native minimize/maximize/restore animations. Instead the rounded corners come
+        // from a rounded window region applied in ApplyWindowRegion() (SetWindowRgn), so we keep the
+        // 32px radius AND the real Windows min/max animations.
         WindowStyle = WindowStyle.None;
-        AllowsTransparency = true;                       // needed for the rounded corners to show through
-        Background = Brushes.Transparent;
+        AllowsTransparency = false;
+        Background = B("#0B0D12");
         ResizeMode = ResizeMode.CanResize;               // resize + maximize + Aero Snap
         ShowInTaskbar = true;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -326,7 +331,7 @@ public class LauncherWindow : Window
         try
         {
             Show();
-            WindowState = WindowState.Normal;   // fade-in via OnStateChanged
+            WindowState = WindowState.Normal;   // native restore animation (non-layered window)
             Activate();
             Topmost = true; Topmost = false;
         }
@@ -375,6 +380,9 @@ public class LauncherWindow : Window
     [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
     [DllImport("user32.dll")] static extern bool ReleaseCapture();
     [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+    [DllImport("gdi32.dll")]  static extern IntPtr CreateRoundRectRgn(int l, int t, int r, int b, int w, int h);
 
     protected override void OnSourceInitialized(EventArgs e)
     {
@@ -384,8 +392,39 @@ public class LauncherWindow : Window
             IntPtr hwnd = new WindowInteropHelper(this).Handle;
             SetWindowLong(hwnd, GWL_STYLE, GetWindowLong(hwnd, GWL_STYLE) | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
             HwndSource.FromHwnd(hwnd).AddHook(WndProc);
+            SizeChanged += (s, ev) => ApplyWindowRegion();   // keep the rounded region matched to the size
+            ApplyWindowRegion();
         }
         catch { }
+    }
+
+    // Clip the (non-layered) window to a rounded rectangle so we keep the 32px corners without a
+    // layered window. Cleared when maximized (square, fills the work area). The OS owns the region
+    // once handed over, so it must not be deleted here.
+    void ApplyWindowRegion()
+    {
+        try
+        {
+            IntPtr hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd == IntPtr.Zero) return;
+            if (WindowState == WindowState.Maximized) { SetWindowRgn(hwnd, IntPtr.Zero, true); return; }
+            RECT rc;
+            if (!GetWindowRect(hwnd, out rc)) return;
+            int w = rc.right - rc.left, h = rc.bottom - rc.top;
+            if (w <= 0 || h <= 0) return;
+            double scale = 1.0;
+            var src = PresentationSource.FromVisual(this);
+            if (src != null && src.CompositionTarget != null) scale = src.CompositionTarget.TransformToDevice.M11;
+            int d = (int)Math.Round(CornerR * 2 * scale);   // diameter for CreateRoundRectRgn
+            SetWindowRgn(hwnd, CreateRoundRectRgn(0, 0, w + 1, h + 1, d, d), true);
+        }
+        catch { }
+    }
+
+    protected override void OnDpiChanged(System.Windows.DpiScale oldDpi, System.Windows.DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+        ApplyWindowRegion();   // region is in device pixels, so re-scale it on a DPI change
     }
 
     // Keep a maximized frameless window inside the monitor work area (don't cover the taskbar).
@@ -1361,12 +1400,10 @@ public class LauncherWindow : Window
     protected override void OnStateChanged(EventArgs e)
     {
         base.OnStateChanged(e);
-        ApplyRounding();                         // square corners when maximized, rounded otherwise
-        if (WindowState == WindowState.Normal)   // fade back in on restore
-        {
-            try { BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(200)))); }
-            catch { Opacity = 1; }
-        }
+        ApplyRounding();        // square content corners when maximized, rounded otherwise
+        ApplyWindowRegion();    // rounded window region when normal, cleared (square) when maximized
+        // No manual restore fade: the window is non-layered, so Windows plays its own native
+        // minimize/maximize/restore animation.
     }
 
     // Tuck the launcher away while the game runs, then restore + focus it when the game exits.
