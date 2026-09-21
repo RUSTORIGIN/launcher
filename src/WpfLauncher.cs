@@ -1022,10 +1022,27 @@ public class LauncherWindow : Window
         try { return File.Exists(partPath) && new FileInfo(partPath).Length > 0; } catch { return false; }
     }
 
+    Process gameProc;   // the client this launcher started (if any)
+
+    // True only when OUR client is running: the one we launched this session, or a process whose exe
+    // is the installed client under InstallDir. A same-named process elsewhere on the PC (e.g. another
+    // Rust client) must NOT count - otherwise the button shows IN-GAME while nothing is installed here.
     bool GameRunning()
     {
-        try { return Process.GetProcessesByName(Path.GetFileNameWithoutExtension(LaunchExe)).Length > 0; }
-        catch { return false; }
+        try { if (gameProc != null && !gameProc.HasExited) return true; } catch { }
+        try
+        {
+            string exe = FindGameExe();
+            if (exe == null) return false;                 // nothing installed here -> our game can't be running
+            string full = Path.GetFullPath(exe);
+            foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(LaunchExe)))
+            {
+                try { if (string.Equals(Path.GetFullPath(p.MainModule.FileName), full, StringComparison.OrdinalIgnoreCase)) return true; }
+                catch { }                                   // access denied / bitness mismatch -> skip this one
+            }
+        }
+        catch { }
+        return false;
     }
 
     void StartGameTimer()
@@ -1452,6 +1469,7 @@ public class LauncherWindow : Window
     {
         try
         {
+            gameProc = null;   // our client has exited
             try { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; Activate(); } } catch { }
             RefreshState();
             statusText.Foreground = TextMute; statusText.Text = "Ready to play.";
@@ -1467,24 +1485,24 @@ public class LauncherWindow : Window
             statusText.Foreground = AccentHi; statusText.Text = "Client not installed - click Install first.";
             RefreshState(); return;
         }
-        // single instance: never launch a second RustClient - focus the running one instead
-        try
+        // single instance: never launch a second copy of OUR client - focus the running one instead
+        if (GameRunning())
         {
-            var running = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(LaunchExe));
-            if (running.Length > 0)
+            statusText.Foreground = TextMute; statusText.Text = "RustOrigin is already running.";
+            try
             {
-                statusText.Foreground = TextMute; statusText.Text = "RustOrigin is already running.";
-                try { if (running[0].MainWindowHandle != IntPtr.Zero) SetForegroundWindow(running[0].MainWindowHandle); } catch { }
-                return;
+                foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(LaunchExe)))
+                { if (p.MainWindowHandle != IntPtr.Zero) { SetForegroundWindow(p.MainWindowHandle); break; } }
             }
+            catch { }
+            return;
         }
-        catch { }
         try
         {
             var psi = new ProcessStartInfo(exe) { WorkingDirectory = Path.GetDirectoryName(exe) };
             if (!string.IsNullOrEmpty(args)) psi.Arguments = args;
             var proc = Process.Start(psi);
-            if (proc != null) { WatchGame(proc); if (Prefs.GetBool("MinimizeInGame", false)) { try { WindowState = WindowState.Minimized; } catch { } } }
+            if (proc != null) { gameProc = proc; WatchGame(proc); if (Prefs.GetBool("MinimizeInGame", false)) { try { WindowState = WindowState.Minimized; } catch { } } }
             statusText.Foreground = TextMute; statusText.Text = "Launching...";
         }
         catch (Exception ex) { statusText.Foreground = AccentHi; statusText.Text = "Launch error: " + ex.Message; }

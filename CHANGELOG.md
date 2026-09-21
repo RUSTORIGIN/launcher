@@ -31,6 +31,11 @@ Initial launcher (not yet tagged/published). Highlights:
   workflow (builds exe + installers, checksums, GitHub Release).
 - Docs: `README`, `CLAUDE.md`, `CONTRIBUTING.md`, `SECURITY.md`, MIT `LICENSE`.
 
+### Fixed
+- The main button no longer shows **IN-GAME** for an unrelated `RustClient.exe` running elsewhere
+  on the PC. "Running" is now scoped to the client this launcher started or the exe under its own
+  `InstallDir`, so an un-installed launcher can't falsely report the game as running.
+
 ### Notes
 - The exe and installers are **unsigned** until a code-signing certificate is added (SmartScreen
   shows an unknown-publisher warning on first run).
