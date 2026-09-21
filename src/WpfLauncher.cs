@@ -106,6 +106,7 @@ public class LauncherWindow : Window
     string LaunchExe   = "RustClient.exe";
     string LaunchArgs  = "";
     string Version     = "";
+    string UpdateRepo  = "RUSTORIGIN/RustOriginLauncher";   // owner/repo checked for launcher self-updates (GitHub Releases). Empty disables.
     string GameTitle   = "RUSTORIGIN";
     string Tagline     = "RUSTORIGIN is a private Rust world on the January 2021 build. Craft, raid and survive with a tight community - one click to jump in.";
     string PlayerName  = "White Pegasus";
@@ -248,6 +249,7 @@ public class LauncherWindow : Window
         SetupTray();
         StartGameTimer();
         RefreshState();
+        StartUpdateCheck();
     }
 
     // ---------- system tray icon (notification area) ----------
@@ -704,6 +706,7 @@ public class LauncherWindow : Window
                 switch (k)
                 {
                     case "downloadurl": DownloadUrl = v; break;
+                    case "updaterepo":  UpdateRepo = v; break;
                     case "sha256":
                     case "clientsha256":
                     case "expectedsha256": ExpectedSha256 = v; break;
@@ -1526,6 +1529,7 @@ public class LauncherWindow : Window
         exec.Child = exes; col.Children.Add(exec);
 
         col.Children.Add(ToggleRow("Minimize launcher while in-game", "Hide the launcher to the taskbar when the game starts; it returns when you quit.", Prefs.GetBool("MinimizeInGame", false), delegate(bool v) { Prefs.Set("MinimizeInGame", v); }));
+        col.Children.Add(ToggleRow("Automatically check for updates", "On launch, check GitHub for a newer, verified launcher and offer to update.", Prefs.GetBool("AutoUpdate", true), delegate(bool v) { Prefs.Set("AutoUpdate", v); }));
         return col;
     }
 
@@ -1775,6 +1779,177 @@ public class LauncherWindow : Window
             t.InvokeMember("Save", BindingFlags.InvokeMethod, null, sc, null);
         }
         catch { }
+    }
+
+    // ---------- launcher self-update ----------
+    // Checks the configured GitHub repo's latest release, and if it is newer than this build,
+    // downloads the new RustOrigin.exe, VERIFIES its SHA-256 against the release's SHA256SUMS.txt,
+    // and swaps itself out (rename-running-exe trick) before relaunching. A failed hash check
+    // rejects the update - the launcher never runs an unverified replacement, same as the client.
+    void StartUpdateCheck()
+    {
+        try
+        {
+            if (!Prefs.GetBool("AutoUpdate", true)) return;
+            string repo = (UpdateRepo ?? "").Trim();
+            if (repo.Length == 0) return;
+            // clean up a leftover .old from a previous self-update
+            try { string old = SelfPath() + ".old"; if (File.Exists(old)) File.Delete(old); } catch { }
+            var t = new Thread(delegate () { try { UpdateCheckWorker(repo); } catch (Exception ex) { Log("update check failed: " + ex.Message); } })
+            { IsBackground = true, Name = "update-check" };
+            t.Start();
+        }
+        catch { }
+    }
+
+    static string SelfPath() { return Process.GetCurrentProcess().MainModule.FileName; }
+
+    // Compare only Major.Minor.Build (GitHub tags are usually 3-part; a 2-part Version has Build = -1).
+    // Fully-qualified System.Version because the class has a string field named `Version`.
+    static System.Version NormVer(System.Version v) { return new System.Version(v.Major, v.Minor, v.Build < 0 ? 0 : v.Build); }
+
+    void UpdateCheckWorker(string repo)
+    {
+        System.Version current;
+        if (!System.Version.TryParse(AppVer(), out current) || current.Major == 0) return;   // skip dev/0.0.0 builds
+
+        string json = HttpGetString("https://api.github.com/repos/" + repo + "/releases/latest");
+        if (json == null) return;   // private/unreleased/offline - silently skip
+
+        string tag = JsonStr(json, "tag_name");
+        System.Version latest;
+        if (string.IsNullOrEmpty(tag) || !System.Version.TryParse(tag.TrimStart('v', 'V'), out latest)) return;
+        if (NormVer(latest) <= NormVer(current)) { Log("update check: up to date (v" + current + " >= " + tag + ")"); return; }
+
+        string exeUrl  = AssetUrl(json, "RustOrigin.exe");
+        string sumsUrl = AssetUrl(json, "SHA256SUMS.txt");
+        if (exeUrl == null || sumsUrl == null) { Log("update: release " + tag + " missing RustOrigin.exe or SHA256SUMS.txt asset"); return; }
+        Log("update available: v" + current + " -> " + tag);
+
+        bool go = false;
+        Dispatcher.Invoke((Action)(() =>
+        {
+            go = MessageBox.Show(this,
+                "A new version of RustOrigin Launcher is available.\n\nInstalled:  v" + current + "\nLatest:     " + tag + "\n\nDownload and update now?",
+                "Update available", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes;
+        }));
+        if (!go) return;
+
+        string expected = HashFromSums(HttpGetString(sumsUrl), "RustOrigin.exe");
+        if (expected == null) { UpdateFail("Could not read the update checksum."); return; }
+
+        string self = SelfPath();
+        string newPath = self + ".new";
+        try { if (File.Exists(newPath)) File.Delete(newPath); } catch { }
+        if (!HttpDownload(exeUrl, newPath)) { UpdateFail("The update download failed."); return; }
+
+        string actual = Sha256File(newPath);
+        if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+        {
+            try { File.Delete(newPath); } catch { }
+            Log("update REJECTED (hash mismatch): expected " + expected + " got " + actual);
+            UpdateFail("The downloaded update failed its integrity check and was discarded. Nothing was changed.");
+            return;
+        }
+        Log("update verified (" + actual + "); swapping in " + tag);
+
+        try
+        {
+            string old = self + ".old";
+            try { if (File.Exists(old)) File.Delete(old); } catch { }
+            File.Move(self, old);       // a running exe can be renamed on Windows
+            File.Move(newPath, self);   // put the new build in its place
+            Process.Start(new ProcessStartInfo(self) { UseShellExecute = true });
+            Dispatcher.Invoke((Action)(() => { try { if (tray != null) tray.Visible = false; } catch { } Application.Current.Shutdown(); }));
+        }
+        catch (Exception ex)
+        {
+            Log("self-replace failed: " + ex.Message);
+            try { if (!File.Exists(self) && File.Exists(self + ".old")) File.Move(self + ".old", self); } catch { }   // roll back
+            UpdateFail("Could not apply the update (the install folder may be read-only). Opening the releases page so you can update manually.");
+            try { Process.Start(new ProcessStartInfo("https://github.com/" + repo + "/releases/latest") { UseShellExecute = true }); } catch { }
+        }
+    }
+
+    void UpdateFail(string msg)
+    {
+        Dispatcher.Invoke((Action)(() => MessageBox.Show(this, msg, "Update", MessageBoxButton.OK, MessageBoxImage.Warning)));
+    }
+
+    // --- small HTTP + parsing helpers for the updater (no external dependency) ---
+    string HttpGetString(string url)
+    {
+        try
+        {
+            var req = (HttpWebRequest)WebRequest.Create(url);
+            req.UserAgent = UA; req.Timeout = 20000; req.AllowAutoRedirect = true;
+            req.Accept = "application/vnd.github+json";
+            using (var resp = (HttpWebResponse)req.GetResponse())
+            using (var sr = new StreamReader(resp.GetResponseStream()))
+                return sr.ReadToEnd();
+        }
+        catch (Exception ex) { Log("GET " + url + " failed: " + ex.Message); return null; }
+    }
+
+    bool HttpDownload(string url, string dest)
+    {
+        try
+        {
+            var req = (HttpWebRequest)WebRequest.Create(url);
+            req.UserAgent = UA; req.Timeout = 30000; req.ReadWriteTimeout = 60000; req.AllowAutoRedirect = true;
+            using (var resp = (HttpWebResponse)req.GetResponse())
+            using (var s = resp.GetResponseStream())
+            using (var fs = new FileStream(dest, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
+                s.CopyTo(fs);
+            return true;
+        }
+        catch (Exception ex) { Log("download " + url + " failed: " + ex.Message); return false; }
+    }
+
+    static string Sha256File(string path)
+    {
+        using (var sha = System.Security.Cryptography.SHA256.Create())
+        using (var fs = File.OpenRead(path))
+        {
+            byte[] h = sha.ComputeHash(fs);
+            var sb = new System.Text.StringBuilder(h.Length * 2);
+            foreach (byte b in h) sb.Append(b.ToString("x2"));
+            return sb.ToString();
+        }
+    }
+
+    static string JsonStr(string json, string key)
+    {
+        if (json == null) return null;
+        var m = System.Text.RegularExpressions.Regex.Match(json,
+            "\"" + System.Text.RegularExpressions.Regex.Escape(key) + "\"\\s*:\\s*\"(.*?)\"");
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
+    // First browser_download_url whose URL ends with the given asset file name.
+    static string AssetUrl(string json, string assetName)
+    {
+        if (json == null) return null;
+        var ms = System.Text.RegularExpressions.Regex.Matches(json,
+            "\"browser_download_url\"\\s*:\\s*\"(https://[^\"]+?/" + System.Text.RegularExpressions.Regex.Escape(assetName) + ")\"");
+        return ms.Count > 0 ? ms[0].Groups[1].Value : null;
+    }
+
+    // Parse a "<hex>  <name>" line out of a SHA256SUMS.txt body.
+    static string HashFromSums(string sums, string fileName)
+    {
+        if (sums == null) return null;
+        foreach (string raw in sums.Split('\n'))
+        {
+            string ln = raw.Trim();
+            if (ln.Length == 0) continue;
+            if (ln.EndsWith(fileName, StringComparison.OrdinalIgnoreCase))
+            {
+                string hash = ln.Split(new[] { ' ' }, 2)[0].Trim();
+                if (hash.Length == 64) return hash.ToLowerInvariant();
+            }
+        }
+        return null;
     }
 
     static string Human(long bytes)

@@ -115,6 +115,7 @@ Clicking **Install** again re-downloads and overwrites = updates.
 | `Title` | Big hero title (default `RUSTORIGIN`). |
 | `Tagline` | Description line under the title. |
 | `Player` | Name shown in the top-right user pill. |
+| `UpdateRepo` | `owner/repo` for launcher self-updates via GitHub Releases (public repos only; blank disables). The launcher checks on launch, and only installs an update that matches the release's `SHA256SUMS.txt`. |
 | `Server` | Repeatable, up to 6: `Server=Tag\|Name\|launch args` (args optional). Fills the right-column cards; the first is the "now playing" entry. |
 
 ## Notes

@@ -56,6 +56,23 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
   (see the security section below).
 - **Logging**: every step is timestamped to `%LOCALAPPDATA%\RustOrigin\launcher.log`.
 
+## Self-update (launcher)
+
+On launch (background thread, gated by the `AutoUpdate` pref, default on), the launcher checks
+`UpdateRepo`'s **latest GitHub Release** and compares the tag to its own version. If newer, it
+prompts, downloads the release's `RustOrigin.exe`, **verifies its SHA-256 against the release's
+`SHA256SUMS.txt`**, and self-replaces (rename running exe -> `.old`, drop the new exe in, relaunch).
+A hash mismatch is rejected - it never runs an unverified replacement, same trust model as the
+client download. See `StartUpdateCheck` / `UpdateCheckWorker` in `src/WpfLauncher.cs`.
+
+Notes / limits:
+- Needs a **public** repo (unauthenticated GitHub API); on a private repo the check 404s and is
+  silently skipped. `UpdateRepo=` blank also disables it.
+- If the install folder is read-only (e.g. a `Program Files` install without elevation), the swap
+  fails gracefully and opens the releases page for a manual update.
+- The `SHA256SUMS.txt` is **not signed** - whoever controls the repo's releases controls the update
+  (same caveat as the unsigned client manifest). Signing is future work.
+
 ## Security model - current state (READ THIS)
 
 **Implemented - SHA-256 verification (mandatory):** the launcher hashes the finished download and
@@ -265,6 +282,7 @@ Plain `Key=Value`, `#`/`;` comments. Loaded embedded-defaults-first, then overri
 | `Title` | Big hero title (default `RUSTORIGIN`). |
 | `Tagline` | Description line under the title. |
 | `Player` | Parsed into `PlayerName` but currently **not displayed** (the user pill was removed). Kept for compatibility / future use. |
+| `UpdateRepo` | `owner/repo` checked for launcher self-updates via GitHub Releases (public repos only). Blank disables. Default `RUSTORIGIN/RustOriginLauncher`. |
 | `Server` | Repeatable, up to 6: `Server=Tag\|Name\|launch args\|players` (last two optional). Fills the right-column cards. A source that defines `Server=` lines replaces the list from the previous source. |
 
 ## Settings vs config: `launcher.cfg` (host) vs `Prefs` (per-user)
@@ -283,6 +301,7 @@ Two separate mechanisms - don't confuse them:
 | `BgVideo` | `true` | Play the background video. |
 | `ShortLoop` | `true` | Restart the intro clip at 0:16 instead of playing it in full. |
 | `MinimizeInGame` | `false` | Minimize the launcher while the client runs. |
+| `AutoUpdate` | `true` | Check `UpdateRepo`'s GitHub Releases on launch and offer a verified self-update. |
 
 To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect and a `ToggleRow`
 in the relevant `Build*Page()`; no config change needed.
