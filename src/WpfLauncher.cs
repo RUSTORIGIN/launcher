@@ -753,14 +753,20 @@ public class LauncherWindow : Window
 
     Border LinkButton(string glyph, string text, Action onClick)
     {
-        var sp = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        var sp = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
         var ic = Icon(glyph, 15, TextHi); ic.Margin = new Thickness(0, 0, 9, 0);
         var tb = new TextBlock { Text = Track(text, 1), FontSize = 13.5, FontFamily = Brand, FontWeight = FontWeights.SemiBold,
             Foreground = TextHi, VerticalAlignment = VerticalAlignment.Center };
         sp.Children.Add(ic); sp.Children.Add(tb);
-        var b = new Border { Height = 46, Margin = new Thickness(30, 0, 0, 0), Cursor = Cursors.Hand, Background = Brushes.Transparent, Child = sp };
-        b.MouseEnter += (s, e) => { if (b.IsEnabled) tb.Foreground = AccentHi; };
-        b.MouseLeave += (s, e) => { if (b.IsEnabled) tb.Foreground = TextHi; };
+        // Outline (glass) pill - secondary to the filled white PLAY pill.
+        var b = new Border
+        {
+            Height = 46, CornerRadius = new CornerRadius(23), Margin = new Thickness(18, 0, 0, 0),
+            Padding = new Thickness(24, 0, 26, 0), Cursor = Cursors.Hand,
+            Background = B("#14FFFFFF"), BorderBrush = B("#33FFFFFF"), BorderThickness = new Thickness(1), Child = sp
+        };
+        b.MouseEnter += (s, e) => { if (b.IsEnabled) { b.Background = B("#26FFFFFF"); b.BorderBrush = StrokeHi; } };
+        b.MouseLeave += (s, e) => { if (b.IsEnabled) { b.Background = B("#14FFFFFF"); b.BorderBrush = B("#33FFFFFF"); } };
         // No !busy guard here: this button doubles as PAUSE while a download runs.
         b.MouseLeftButtonUp += (s, e) => { e.Handled = true; if (b.IsEnabled) onClick(); };
         b.Tag = new object[] { false, tb, ic };
