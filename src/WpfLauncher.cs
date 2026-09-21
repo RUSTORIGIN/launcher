@@ -349,7 +349,7 @@ public class LauncherWindow : Window
 
     void BuildCaption(Grid host)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 10, 12, 0) };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 12, 14, 0) };
         row.Children.Add(CaptionBtn("", delegate { WindowState = WindowState.Minimized; }, false));   // minimize
         maxBtn = CaptionBtn("", delegate { ToggleMaximize(); }, false);                                // maximize/restore
         maxGlyph = (TextBlock)maxBtn.Child;
@@ -358,13 +358,20 @@ public class LauncherWindow : Window
         host.Children.Add(row);
     }
 
+    // Circular glass caption button, matching the social icon buttons. Close hovers red (Accent),
+    // the others brighten the glass; the glyph lifts to white on hover.
     Border CaptionBtn(string glyph, Action onClick, bool closeBtn)
     {
-        var tb = new TextBlock { Text = glyph, FontFamily = Icons, FontSize = 11, Foreground = B("#E6E8EE"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var b = new Border { Width = 42, Height = 30, CornerRadius = new CornerRadius(8), Background = Brushes.Transparent, Cursor = Cursors.Hand, Child = tb, Margin = new Thickness(4, 0, 0, 0) };
+        var tb = new TextBlock { Text = glyph, FontFamily = Icons, FontSize = 11, Foreground = TextDim, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var b = new Border
+        {
+            Width = 34, Height = 34, CornerRadius = new CornerRadius(17),
+            Background = B("#1FFFFFFF"), BorderBrush = B("#26FFFFFF"), BorderThickness = new Thickness(1),
+            Cursor = Cursors.Hand, Child = tb, Margin = new Thickness(10, 0, 0, 0)
+        };
         System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(b, true);   // clickable inside the caption drag area
-        b.MouseEnter += (s, e) => { b.Background = closeBtn ? Accent : B("#1AFFFFFF"); };
-        b.MouseLeave += (s, e) => { b.Background = Brushes.Transparent; };
+        b.MouseEnter += (s, e) => { b.Background = closeBtn ? Accent : B("#33FFFFFF"); b.BorderBrush = closeBtn ? Accent : StrokeHi; tb.Foreground = TextHi; };
+        b.MouseLeave += (s, e) => { b.Background = B("#1FFFFFFF"); b.BorderBrush = B("#26FFFFFF"); tb.Foreground = TextDim; };
         b.MouseLeftButtonUp += (s, e) => { e.Handled = true; onClick(); };
         return b;
     }
