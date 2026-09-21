@@ -741,8 +741,7 @@ public class LauncherWindow : Window
             Height = 46, MinWidth = 130, CornerRadius = new CornerRadius(23), Cursor = Cursors.Hand,
             Background = TextHi, Padding = new Thickness(26, 0, 28, 0), Child = sp
         };
-        b.MouseEnter += (s, e) => { if (b.IsEnabled) b.Background = B("#F0F1F4"); };
-        b.MouseLeave += (s, e) => { if (b.IsEnabled) b.Background = TextHi; };
+        // flat: no hover shade
         b.MouseLeftButtonUp += (s, e) => { e.Handled = true; if (b.IsEnabled && !busy) Play(LaunchArgs); };
         b.Tag = new object[] { true, tb, ic };
         return b;
@@ -762,8 +761,7 @@ public class LauncherWindow : Window
             Height = 46, MinWidth = 130, CornerRadius = new CornerRadius(23), Cursor = Cursors.Hand,
             Background = TextHi, Padding = new Thickness(24, 0, 28, 0), Child = sp
         };
-        b.MouseEnter += (s, e) => { if (b.IsEnabled) b.Background = B("#F0F1F4"); };
-        b.MouseLeave += (s, e) => { if (b.IsEnabled) b.Background = TextHi; };
+        // flat: no hover shade
         // No !busy guard here: this button doubles as PAUSE while a download runs.
         b.MouseLeftButtonUp += (s, e) => { e.Handled = true; if (b.IsEnabled) onClick(); };
         b.Tag = new object[] { false, tb, ic };
@@ -796,15 +794,14 @@ public class LauncherWindow : Window
         var more = new Border
         {
             Height = 40, CornerRadius = new CornerRadius(20), Background = Brushes.Transparent,
-            BorderBrush = StrokeHi, BorderThickness = new Thickness(1), Padding = new Thickness(20, 0, 16, 0),
+            BorderBrush = B("#26FFFFFF"), BorderThickness = new Thickness(1), Padding = new Thickness(20, 0, 16, 0),
             HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 16, 0, 0), Cursor = Cursors.Hand
         };
         var ms = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         ms.Children.Add(new TextBlock { Text = Track("DISCOVER MORE", 1), Foreground = TextHi, FontFamily = Brand, FontWeight = FontWeights.SemiBold, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center });
         var ch = Icon("\uE76C", 10, TextHi); ch.Margin = new Thickness(8, 1, 0, 0); ms.Children.Add(ch);
         more.Child = ms;
-        more.MouseEnter += (s, e) => { more.Background = B("#1AFFFFFF"); };
-        more.MouseLeave += (s, e) => { more.Background = Brushes.Transparent; };
+        // flat: no hover fill
         wrap.Children.Add(more);
 
         content.Children.Add(wrap);
