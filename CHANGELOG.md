@@ -38,6 +38,11 @@ Initial launcher (not yet tagged/published). Highlights:
 - The main button no longer shows **IN-GAME** for an unrelated `RustClient.exe` running elsewhere
   on the PC. "Running" is now scoped to the client this launcher started or the exe under its own
   `InstallDir`, so an un-installed launcher can't falsely report the game as running.
+- **Broken/incomplete installs are caught before launch.** A structural completeness check (the
+  `<exe>_Data` folder is present and non-empty and `UnityPlayer.dll` sits next to the exe, or our
+  post-extract marker exists) means a half-extracted client no longer launches into a Unity error.
+  Such an install shows a **REPAIR** button + a hint instead of PLAY, and clicking a server card
+  won't launch a broken client. Cheap sanity check, not cryptographic verification.
 
 ### Notes
 - The exe and installers are **unsigned** until a code-signing certificate is added (SmartScreen

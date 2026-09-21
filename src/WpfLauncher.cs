@@ -1073,24 +1073,38 @@ public class LauncherWindow : Window
 
     string InstallMarkerPath() { return Path.Combine(InstallDir, ".rustorigin-installed"); }
 
-    // A finished install has the game exe AND is structurally complete: either our completion marker
-    // is present (written after a successful extract), or the Unity data folder (<exe>_Data) sits next
-    // to the exe. A half-extracted install that has RustClient.exe but no RustClient_Data does NOT
-    // count as installed - so the launcher shows INSTALL/RESUME instead of a PLAY that would launch a
-    // broken client. Also accepts a valid pre-existing install placed there outside the launcher.
-    bool IsInstalled()
+    // Structural completeness: the game exe AND a real Unity data folder next to it. A finished
+    // install is either marked by our completion marker (written after a full extract) OR is
+    // structurally sound - the `<exe>_Data` folder exists and is non-empty AND `UnityPlayer.dll`
+    // sits next to the exe. A half-extracted client (RustClient.exe present but RustClient_Data
+    // missing/empty, or UnityPlayer.dll gone) does NOT count as installed, so the launcher offers a
+    // repair instead of launching a broken game. A valid pre-existing install (no marker) still
+    // passes on the structural check. This is a cheap sanity check, not cryptographic verification.
+    bool InstallComplete(string exe)
     {
-        string exe = FindGameExe();
         if (exe == null) return false;
         try { if (File.Exists(InstallMarkerPath())) return true; } catch { }
         try
         {
-            string dir = Path.GetDirectoryName(exe);
+            string dir  = Path.GetDirectoryName(exe);
             string data = Path.Combine(dir, Path.GetFileNameWithoutExtension(exe) + "_Data");
-            return Directory.Exists(data);
+            bool dataOk = Directory.Exists(data) && DirHasEntries(data);
+            bool unityOk = File.Exists(Path.Combine(dir, "UnityPlayer.dll"));
+            return dataOk && unityOk;
         }
         catch { return false; }
     }
+
+    static bool DirHasEntries(string dir)
+    {
+        try { var e = Directory.EnumerateFileSystemEntries(dir).GetEnumerator(); return e.MoveNext(); }
+        catch { return false; }
+    }
+
+    bool IsInstalled() { return InstallComplete(FindGameExe()); }
+
+    // The game exe is present but the install is structurally incomplete (needs a reinstall/repair).
+    bool IsBrokenInstall() { string exe = FindGameExe(); return exe != null && !InstallComplete(exe); }
 
     bool HasPartial()
     {
@@ -1133,6 +1147,7 @@ public class LauncherWindow : Window
         bool installed = IsInstalled();
         bool partial   = HasPartial();
         bool game      = GameRunning();
+        bool broken    = !installed && !game && IsBrokenInstall();   // exe present but files missing
 
         // PLAY: shown only when the client is installed (or our game is running) - hidden otherwise.
         // While the game runs it becomes IN-GAME (clicking it focuses the running game).
@@ -1165,15 +1180,16 @@ public class LauncherWindow : Window
         {
             installBtn.Visibility = Visibility.Visible;
             SetButtonEnabled(installBtn, true);
-            ((TextBlock)imeta[1]).Text = Track(partial ? "RESUME" : "INSTALL", 1);
+            ((TextBlock)imeta[1]).Text = Track(partial ? "RESUME" : (broken ? "REPAIR" : "INSTALL"), 1);
             ((TextBlock)imeta[2]).Text = partial ? "\uE768" : "\uE896";
         }
 
         if (!busy)
         {
-            if (partial) statusText.Text = "Partial download saved (" + Human(new FileInfo(partPath).Length) + ") - click Resume to continue.";
-            else if (game) statusText.Text = "In game.";
-            else statusText.Text = "";
+            if (partial) { statusText.Foreground = TextMute; statusText.Text = "Partial download saved (" + Human(new FileInfo(partPath).Length) + ") - click Resume to continue."; }
+            else if (game) { statusText.Foreground = TextMute; statusText.Text = "In game."; }
+            else if (broken) { statusText.Foreground = AccentHi; statusText.Text = "Install looks incomplete or corrupted - click Repair to reinstall."; }
+            else { statusText.Foreground = TextMute; statusText.Text = ""; }
         }
     }
 
@@ -1584,6 +1600,12 @@ public class LauncherWindow : Window
         if (exe == null)
         {
             statusText.Foreground = AccentHi; statusText.Text = "Client not installed - click Install first.";
+            RefreshState(); return;
+        }
+        // Don't launch a structurally-incomplete install (a server-card click also lands here).
+        if (!GameRunning() && !InstallComplete(exe))
+        {
+            statusText.Foreground = AccentHi; statusText.Text = "Install looks incomplete or corrupted - click Repair to reinstall.";
             RefreshState(); return;
         }
         // single instance: never launch a second copy of OUR client - focus the running one instead
