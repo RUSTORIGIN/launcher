@@ -754,19 +754,19 @@ public class LauncherWindow : Window
     Border LinkButton(string glyph, string text, Action onClick)
     {
         var sp = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
-        var ic = Icon(glyph, 15, TextHi); ic.Margin = new Thickness(0, 0, 9, 0);
-        var tb = new TextBlock { Text = Track(text, 1), FontSize = 13.5, FontFamily = Brand, FontWeight = FontWeights.SemiBold,
-            Foreground = TextHi, VerticalAlignment = VerticalAlignment.Center };
+        var ic = Icon(glyph, 13, B("#12141A")); ic.Margin = new Thickness(0, 1, 9, 0);
+        var tb = new TextBlock { Text = Track(text, 1), FontSize = 14, FontFamily = Brand, FontWeight = FontWeights.SemiBold,
+            Foreground = B("#12141A"), VerticalAlignment = VerticalAlignment.Center };
         sp.Children.Add(ic); sp.Children.Add(tb);
-        // Outline (glass) pill - secondary to the filled white PLAY pill.
+        // Full white pill, matching PLAY. Left margin is set in RefreshState so it aligns to the
+        // hero's left edge when it is the leading button (PLAY hidden).
         var b = new Border
         {
-            Height = 46, CornerRadius = new CornerRadius(23), Margin = new Thickness(18, 0, 0, 0),
-            Padding = new Thickness(24, 0, 26, 0), Cursor = Cursors.Hand,
-            Background = B("#14FFFFFF"), BorderBrush = B("#33FFFFFF"), BorderThickness = new Thickness(1), Child = sp
+            Height = 46, MinWidth = 130, CornerRadius = new CornerRadius(23), Cursor = Cursors.Hand,
+            Background = TextHi, Padding = new Thickness(24, 0, 28, 0), Child = sp
         };
-        b.MouseEnter += (s, e) => { if (b.IsEnabled) { b.Background = B("#26FFFFFF"); b.BorderBrush = StrokeHi; } };
-        b.MouseLeave += (s, e) => { if (b.IsEnabled) { b.Background = B("#14FFFFFF"); b.BorderBrush = B("#33FFFFFF"); } };
+        b.MouseEnter += (s, e) => { if (b.IsEnabled) b.Background = B("#F0F1F4"); };
+        b.MouseLeave += (s, e) => { if (b.IsEnabled) b.Background = TextHi; };
         // No !busy guard here: this button doubles as PAUSE while a download runs.
         b.MouseLeftButtonUp += (s, e) => { e.Handled = true; if (b.IsEnabled) onClick(); };
         b.Tag = new object[] { false, tb, ic };
@@ -1078,8 +1078,10 @@ public class LauncherWindow : Window
         }
 
         // Download button: PAUSE while a download runs, else RESUME (a partial exists) or INSTALL;
-        // hidden once installed with nothing to resume.
+        // hidden once installed with nothing to resume. When it leads (PLAY hidden) it sits flush to
+        // the hero's left edge; when PLAY is shown it gets a small gap after it.
         object[] imeta = (object[])installBtn.Tag;
+        installBtn.Margin = new Thickness(showPlay ? 14 : 0, 0, 0, 0);
         if (busy)
         {
             installBtn.Visibility = Visibility.Visible;
