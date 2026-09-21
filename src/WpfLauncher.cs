@@ -323,7 +323,9 @@ public class LauncherWindow : Window
 
     void SetDiscord(string state)
     {
-        try { if (discord != null) discord.SetPresence(GameTitle, state, sessionStartUnix, DiscordLargeImage, GameTitle + " - January Update 2021"); }
+        // The Discord app name is already the top line, so use details for the build and state for
+        // the activity: "RUSTORIGIN" / "January Update 2021" / "In the launcher".
+        try { if (discord != null) discord.SetPresence("January Update 2021", state, sessionStartUnix, DiscordLargeImage, GameTitle + " - January Update 2021"); }
         catch { }
     }
 
