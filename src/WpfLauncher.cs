@@ -822,13 +822,18 @@ public class LauncherWindow : Window
         if (!string.IsNullOrEmpty(srv.Cover))
             cov = LoadBitmap(Path.Combine(Assets.Dir, srv.Cover)) ?? LoadBitmap(Path.Combine(AppDir(), srv.Cover));
         if (cov == null) cov = coverBmp;
+        UIElement coverEl;
         if (cov != null)
         {
             var img = new Image { Source = cov, Stretch = Stretch.UniformToFill };
             RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
-            tile.Children.Add(img);
+            coverEl = img;
         }
-        else tile.Children.Add(new Rectangle { Fill = Grad(c1, c2) });
+        else coverEl = new Rectangle { Fill = Grad(c1, c2) };
+        // Blurred on hover (animated below) so the "click to join" overlay reads on top.
+        var coverBlur = new System.Windows.Media.Effects.BlurEffect { Radius = 0, KernelType = System.Windows.Media.Effects.KernelType.Gaussian, RenderingBias = System.Windows.Media.Effects.RenderingBias.Performance };
+        coverEl.Effect = coverBlur;
+        tile.Children.Add(coverEl);
 
         var ov = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
         ov.GradientStops.Add(new GradientStop(Colors.Transparent, 0.22));
@@ -893,8 +898,18 @@ public class LauncherWindow : Window
         var edge = new Border { CornerRadius = new CornerRadius(14), BorderBrush = B("#1FFFFFFF"), BorderThickness = new Thickness(1), Background = Brushes.Transparent, IsHitTestVisible = false };
         tile.Children.Add(edge);
 
-        tile.MouseEnter += (s, e) => { edge.BorderBrush = StrokeHi; join.BeginAnimation(OpacityProperty, new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(140)))); };
-        tile.MouseLeave += (s, e) => { edge.BorderBrush = B("#1FFFFFFF"); join.BeginAnimation(OpacityProperty, new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(140)))); };
+        tile.MouseEnter += (s, e) =>
+        {
+            edge.BorderBrush = StrokeHi;
+            join.BeginAnimation(OpacityProperty, new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(140))));
+            coverBlur.BeginAnimation(System.Windows.Media.Effects.BlurEffect.RadiusProperty, new DoubleAnimation(10, new Duration(TimeSpan.FromMilliseconds(140))));
+        };
+        tile.MouseLeave += (s, e) =>
+        {
+            edge.BorderBrush = B("#1FFFFFFF");
+            join.BeginAnimation(OpacityProperty, new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(140))));
+            coverBlur.BeginAnimation(System.Windows.Media.Effects.BlurEffect.RadiusProperty, new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(140))));
+        };
         tile.MouseLeftButtonUp += (s, e) => { e.Handled = true; if (!busy) Play(srv.Args.Length > 0 ? srv.Args : LaunchArgs); };
         return tile;
     }
