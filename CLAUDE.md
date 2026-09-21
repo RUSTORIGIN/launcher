@@ -213,7 +213,7 @@ A single self-contained setup executable, the same *kind* electron-builder's NSI
 (`AppName-x.y.z-x64.exe`).
 
 ```powershell
-.\scripts\build_installer_exe.ps1 -Version 1.0.0   # -> release\RustOrigin-Launcher-1.0.0-x64.exe
+.\scripts\build_installer_exe.ps1 -Version 1.0.0   # -> release\RustOriginLauncher-1.0.0-x64.exe
 ```
 
 - **Wizard:** Welcome -> License (MIT) -> **Choose install folder** -> Install (progress) ->

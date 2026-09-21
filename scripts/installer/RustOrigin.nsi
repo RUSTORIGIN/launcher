@@ -31,7 +31,7 @@ Name "${APPNAME}"
 !ifdef OUTFILE
   OutFile "${OUTFILE}"
 !else
-  OutFile "RustOrigin-Launcher-${VERSION}-x64.exe"
+  OutFile "RustOriginLauncher-${VERSION}-x64.exe"
 !endif
 InstallDir "$PROGRAMFILES64\${APPNAME}"
 InstallDirRegKey HKLM "Software\RustOrigin\Launcher" "InstallDir"
