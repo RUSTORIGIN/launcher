@@ -129,7 +129,6 @@ public class LauncherWindow : Window
     Image        slideBack, slideFront;   // two stacked images for cross-fading between screenshots
     BitmapImage[] slides = new BitmapImage[0];
     int          slideIndex;
-    Grid         blurLayer;   // blurred+tinted copy of the slideshow that glass panels sample (real acrylic)
     BitmapImage  logoBmp;
     BitmapImage  coverBmp;
     Border settingsPanel; TextBlock settingsPathLabel; TextBlock settingsStatus; TextBlock settingsCacheLabel, settingsDiskLabel; ColumnDefinition settingsDiskFillCol, settingsDiskRestCol; Grid homeView; bool settingsOpen;
@@ -321,14 +320,7 @@ public class LauncherWindow : Window
         }
         slides = list.ToArray();
 
-        blurLayer = new Grid();
-        if (slides.Length == 0)   // no images found - plain gradient, glass panels still get a tint
-        {
-            ShowFallbackBackdrop();
-            blurLayer.Children.Add(new Rectangle { Fill = B("#8A0E1016") });
-            mainGrid.Children.Add(blurLayer);
-            return;
-        }
+        if (slides.Length == 0) { ShowFallbackBackdrop(); return; }   // no images - plain gradient fallback
 
         // Two stacked images: slideBack shows the current screenshot, slideFront fades the next one in.
         slideBack  = new Image { Stretch = Stretch.UniformToFill, Source = slides[0] };
@@ -338,23 +330,6 @@ public class LauncherWindow : Window
         bgHost = new Grid();
         bgHost.Children.Add(slideBack);
         bgHost.Children.Add(slideFront);
-
-        // Frosted-glass source: a blurred + tinted copy of the slideshow. Glass panels sample the
-        // region of this layer directly behind them, giving real backdrop blur. It sits under the
-        // sharp slideshow (never shown directly) but still renders so VisualBrush can read it.
-        var blurRect = new Rectangle
-        {
-            Fill = new VisualBrush(bgHost) { Stretch = Stretch.UniformToFill },
-            Effect = new System.Windows.Media.Effects.BlurEffect { Radius = 26, KernelType = System.Windows.Media.Effects.KernelType.Gaussian, RenderingBias = System.Windows.Media.Effects.RenderingBias.Performance }
-        };
-        RenderOptions.SetBitmapScalingMode(blurRect, BitmapScalingMode.LowQuality);
-        blurLayer.Children.Add(blurRect);
-        blurLayer.Children.Add(new Rectangle { Fill = B("#8A0E1016") });   // frosted tint baked in (keeps text legible over bright frames)
-        // Rasterize the blurred slideshow ONCE per frame at half resolution - blur is low-frequency,
-        // so half-res is invisible, and every glass panel then samples this cheap cache instead of
-        // each re-blurring the images. Major GPU saving; keeps animations fluid.
-        blurLayer.CacheMode = new BitmapCache { RenderAtScale = 0.5, SnapsToDevicePixels = false };
-        mainGrid.Children.Add(blurLayer);
         mainGrid.Children.Add(bgHost);
 
         // Auto-switch every 7s with a ~0.9s cross-fade (gated by the BgSlideshow pref).
@@ -383,27 +358,12 @@ public class LauncherWindow : Window
         mainGrid.Children.Add(new Rectangle { Fill = g });
     }
 
-    // ---------- legibility gradients (left 45%, bottom 40%, vignette) ----------
+    // ---------- legibility scrim ----------
+    // A single subtle uniform darken so the hero text and cards stay readable over bright
+    // screenshots. The heavy left/bottom gradients and the vignette were removed by request.
     void BuildGradient()
     {
         mainGrid.Children.Add(new Rectangle { Fill = B("#400A0C11"), IsHitTestVisible = false });
-
-        var left = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 0) };
-        left.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString("#DB0A0C11"), 0));
-        left.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString("#8C0A0C11"), 0.24));
-        left.GradientStops.Add(new GradientStop(Colors.Transparent, 0.45));
-        mainGrid.Children.Add(new Rectangle { Fill = left, IsHitTestVisible = false });
-
-        var bottom = new LinearGradientBrush { StartPoint = new Point(0, 1), EndPoint = new Point(0, 0) };
-        bottom.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString("#E60A0C11"), 0));
-        bottom.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString("#590A0C11"), 0.22));
-        bottom.GradientStops.Add(new GradientStop(Colors.Transparent, 0.40));
-        mainGrid.Children.Add(new Rectangle { Fill = bottom, IsHitTestVisible = false });
-
-        var vig = new RadialGradientBrush { Center = new Point(0.5, 0.5), GradientOrigin = new Point(0.5, 0.5), RadiusX = 0.85, RadiusY = 0.85 };
-        vig.GradientStops.Add(new GradientStop(Colors.Transparent, 0.55));
-        vig.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString("#B305060A"), 1));
-        mainGrid.Children.Add(new Rectangle { Fill = vig, IsHitTestVisible = false });
     }
 
     // ---------- content ----------
@@ -455,23 +415,8 @@ public class LauncherWindow : Window
             BorderBrush = GlassEdge(), BorderThickness = new Thickness(1),
             Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 34, ShadowDepth = 9, Direction = 270, Opacity = 0.5, Color = (Color)ColorConverter.ConvertFromString("#000000") }
         };
-        if (blurLayer != null)
-        {
-            // Real backdrop blur: paint the slice of the blurred layer that sits behind this panel.
-            var vb = new VisualBrush(blurLayer) { ViewboxUnits = BrushMappingMode.Absolute, Stretch = Stretch.Fill };
-            panel.Background = vb;
-            panel.LayoutUpdated += delegate
-            {
-                try
-                {
-                    GeneralTransform t = panel.TransformToVisual(blurLayer);
-                    Rect r = t.TransformBounds(new Rect(new Point(0, 0), panel.RenderSize));
-                    if (r.Width > 1 && r.Height > 1 && r != vb.Viewbox) vb.Viewbox = r;
-                }
-                catch { }
-            };
-        }
-        else panel.Background = Glass;
+        // Flat translucent panel (no backdrop blur), readable over the sharp screenshot behind it.
+        panel.Background = B("#CC0E1016");
         return panel;
     }
 

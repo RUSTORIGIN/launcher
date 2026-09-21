@@ -22,7 +22,7 @@ items) - an SDK-style project otherwise globs every `.cs` in `src/` and the thre
 collide.
 
 Nearly all real work happens in `src/WpfLauncher.cs`. It is one self-contained code-only WPF file
-(~1830 lines): window chrome, glass/acrylic UI, config parsing, and the resumable, verified
+(~1800 lines): window chrome, glass UI, config parsing, and the resumable, verified
 downloader all live there.
 
 ## How it works
@@ -43,8 +43,9 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
   resources and unpacked at first run to `%LOCALAPPDATA%\RustOrigin\assets\<version>\` (loaded from
   real files for the images and private fonts).
 - The background is a **cross-fading slideshow** of `1.jpg`-`4.jpg` (switches every ~7s; see
-  `BuildBackground` / `NextSlide`). The glass panels sample a blurred+tinted copy of it for real
-  backdrop blur. Toggle via the `BgSlideshow` pref.
+  `BuildBackground` / `NextSlide`), shown cleanly over a light uniform scrim (`BuildGradient`) -
+  no vignette, side gradients, or backdrop blur. Glass panels are flat translucent. Toggle the
+  auto-switch via the `BgSlideshow` pref.
 - A `launcher.cfg` placed **next to the exe** overrides the embedded defaults at runtime.
 
 ## Download behavior (implemented)
