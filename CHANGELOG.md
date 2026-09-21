@@ -21,9 +21,9 @@ Initial launcher (not yet tagged/published). Highlights:
   minimize/maximize/restore animations** are preserved.
 - **Cross-fading screenshot background** (four embedded JPEGs, ~7s switch) with **carousel dot
   indicators** at the bottom (click a dot to jump to a screenshot).
-- **Vertical server cards** with per-server cover art, and **live A2S player counts** (green/red
-  status dot + `players/max`, queried over Steam A2S when a card's args include `+connect host:port`,
-  refreshed ~60s).
+- **Vertical server cards** with per-server cover art, a **"click to join" hover overlay**, and
+  **live A2S player counts** (green/red status dot + `players/max`, queried over Steam A2S when a
+  card's args include `+connect host:port`, refreshed ~60s).
 - **Social links** row under the hero PLAY/INSTALL buttons: configurable `Social=platform|url`
   icons with built-in Discord / YouTube / TikTok brand marks (inline vectors, no extra assets).
 - Two installers: **NSIS setup `.exe`** (Program Files) and **per-user MSI**.

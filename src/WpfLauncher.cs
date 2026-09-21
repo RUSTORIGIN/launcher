@@ -868,11 +868,27 @@ public class LauncherWindow : Window
             }
         }
 
+        // Hover overlay: darken the card and show a centered "CLICK TO JOIN" call to action (fades
+        // in on hover). Non-hit-testable so it never swallows the tile's click.
+        var join = new Grid { IsHitTestVisible = false, Opacity = 0 };
+        join.Children.Add(new Rectangle { Fill = B("#66000000") });
+        var jsp = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var jic = Icon("", 13, TextHi); jic.Margin = new Thickness(0, 1, 9, 0);   // play glyph
+        jsp.Children.Add(jic);
+        jsp.Children.Add(new TextBlock
+        {
+            Text = Track("CLICK TO JOIN", 2), Foreground = TextHi, FontFamily = Brand, FontWeight = FontWeights.SemiBold, FontSize = 13,
+            VerticalAlignment = VerticalAlignment.Center,
+            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 6, ShadowDepth = 1, Opacity = 0.85, Color = Colors.Black }
+        });
+        join.Children.Add(jsp);
+        tile.Children.Add(join);
+
         var edge = new Border { CornerRadius = new CornerRadius(14), BorderBrush = B("#1FFFFFFF"), BorderThickness = new Thickness(1), Background = Brushes.Transparent, IsHitTestVisible = false };
         tile.Children.Add(edge);
 
-        tile.MouseEnter += (s, e) => { edge.BorderBrush = StrokeHi; };
-        tile.MouseLeave += (s, e) => { edge.BorderBrush = B("#1FFFFFFF"); };
+        tile.MouseEnter += (s, e) => { edge.BorderBrush = StrokeHi; join.BeginAnimation(OpacityProperty, new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(140)))); };
+        tile.MouseLeave += (s, e) => { edge.BorderBrush = B("#1FFFFFFF"); join.BeginAnimation(OpacityProperty, new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(140)))); };
         tile.MouseLeftButtonUp += (s, e) => { e.Handled = true; if (!busy) Play(srv.Args.Length > 0 ? srv.Args : LaunchArgs); };
         return tile;
     }
