@@ -31,6 +31,8 @@ $res = @("/resource:assets\1.jpg,assets/1.jpg",
          "/resource:assets\2.jpg,assets/2.jpg",
          "/resource:assets\3.jpg,assets/3.jpg",
          "/resource:assets\4.jpg,assets/4.jpg",
+         "/resource:assets\main.jpg,assets/main.jpg",
+         "/resource:assets\train.jpg,assets/train.jpg",
          "/resource:assets\logo.png,assets/logo.png",
          "/resource:assets\server-cover.png,assets/server-cover.png",
          "/resource:config\launcher.cfg,assets/launcher.cfg",
@@ -50,4 +52,4 @@ New-Item -ItemType Directory -Force "$repo\release" | Out-Null
 Copy-Item "$repo\RustOrigin.exe" "$repo\release\RustOrigin.exe" -Force
 $exe = Get-Item "$repo\release\RustOrigin.exe"
 Write-Host ("built single-file launcher: {0}  ({1:N2} MB, v{2})" -f $exe.FullName, ($exe.Length / 1MB), $Version)
-Write-Host "embedded: 4 background screenshots, logo.png, server-cover.png, launcher.cfg, 4x Montserrat + OFL"
+Write-Host "embedded: 4 background screenshots, 2 server covers, logo.png, server-cover.png, launcher.cfg, 4x Montserrat + OFL"

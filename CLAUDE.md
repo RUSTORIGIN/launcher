@@ -287,7 +287,7 @@ Plain `Key=Value`, `#`/`;` comments. Loaded embedded-defaults-first, then overri
 | `Tagline` | Description line under the title. |
 | `Player` | Parsed into `PlayerName` but currently **not displayed** (the user pill was removed). Kept for compatibility / future use. |
 | `UpdateRepo` | `owner/repo` checked for launcher self-updates via GitHub Releases (public repos only). Blank disables. Default `RUSTORIGIN/RustOriginLauncher`. |
-| `Server` | Repeatable, up to 6: `Server=Tag\|Name\|launch args\|players` (last two optional). Fills the right-column cards. A source that defines `Server=` lines replaces the list from the previous source. |
+| `Server` | Repeatable, up to 6: `Server=Tag\|Name\|launch args\|players\|cover` (everything after Name optional). `cover` is an embedded image file name (e.g. `main.jpg`) used as the card background, else the shared `server-cover.png`, else a gradient. Cards stack vertically. A source that defines `Server=` lines replaces the list from the previous source. |
 
 ## Settings vs config: `launcher.cfg` (host) vs `Prefs` (per-user)
 

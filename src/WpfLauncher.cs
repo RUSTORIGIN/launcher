@@ -51,7 +51,8 @@ static class Assets
 {
     public static string Dir = "";
     static readonly string[] Files = {
-        "1.jpg", "2.jpg", "3.jpg", "4.jpg", "logo.png", "server-cover.png", "launcher.cfg",
+        "1.jpg", "2.jpg", "3.jpg", "4.jpg", "main.jpg", "train.jpg",
+        "logo.png", "server-cover.png", "launcher.cfg",
         "fonts/Montserrat-Regular.ttf", "fonts/Montserrat-Medium.ttf",
         "fonts/Montserrat-SemiBold.ttf", "fonts/Montserrat-Bold.ttf", "fonts/OFL.txt" };
 
@@ -93,8 +94,9 @@ static class Assets
 
 public class ServerEntry
 {
-    public string Tag, Name, Args, Players;
-    public ServerEntry(string tag, string name, string args, string players = "") { Tag = tag; Name = name; Args = args; Players = players; }
+    public string Tag, Name, Args, Players, Cover;
+    public ServerEntry(string tag, string name, string args, string players = "", string cover = "")
+    { Tag = tag; Name = name; Args = args; Players = players; Cover = cover; }
 }
 
 public class LauncherWindow : Window
@@ -194,12 +196,8 @@ public class LauncherWindow : Window
         LoadConfig();
         if (Servers.Count == 0)
         {
-            Servers.Add(new ServerEntry("Most Played", "RustOrigin Main", "", "187/250"));
-            Servers.Add(new ServerEntry("Most Recent", "Merged Map Test", "-console +connect 127.0.0.1:28025", "64/150"));
-            Servers.Add(new ServerEntry("Promoted",    "Localhost Dev",   "-console +connect 127.0.0.1:28015", "12/100"));
-            Servers.Add(new ServerEntry("Promoted",    "Deadman Desert Arena", "", "96/200"));
-            Servers.Add(new ServerEntry("Trending",    "Training Grounds", "", "41/100"));
-            Servers.Add(new ServerEntry("Trending",    "Skinbox Sandbox", "", "8/50"));
+            Servers.Add(new ServerEntry("Vanilla",  "RustOrigin Main", "", "", "main.jpg"));
+            Servers.Add(new ServerEntry("Training", "Aim Train",       "", "", "train.jpg"));
         }
         logoBmp = LoadBitmap(Path.Combine(Assets.Dir, "logo.png")) ?? LoadBitmap(Path.Combine(AppDir(), "logo.png"));
         coverBmp = LoadBitmap(Path.Combine(Assets.Dir, "server-cover.png")) ?? LoadBitmap(Path.Combine(AppDir(), "server-cover.png"));
@@ -609,7 +607,7 @@ public class LauncherWindow : Window
     void BuildServerGrid(Grid content)
     {
         var wrap = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 64, 0) };
-        var grid = new System.Windows.Controls.Primitives.UniformGrid { Columns = 2 };
+        var grid = new System.Windows.Controls.Primitives.UniformGrid { Columns = 1 };   // vertical list
         string[][] pal = {
             new[]{"#3A2E5A","#141020"}, new[]{"#2C4A3A","#121C17"}, new[]{"#2F3D5A","#12161F"},
             new[]{"#5A3A26","#1C1512"}, new[]{"#4A2F2F","#1C1212"}, new[]{"#3A4A5A","#141A20"} };
@@ -637,13 +635,18 @@ public class LauncherWindow : Window
     // A server "pill": cover image background + name + player-count badge (server-browser style).
     Grid ServerTile(ServerEntry srv, string c1, string c2)
     {
-        double W = 200, H = 116;
+        double W = 340, H = 150;
         var tile = new Grid { Width = W, Height = H, Margin = new Thickness(7), Cursor = Cursors.Hand, Background = Brushes.Transparent };
-        tile.Clip = new RectangleGeometry(new Rect(0, 0, W, H), 14, 14);
+        tile.Clip = new RectangleGeometry(new Rect(0, 0, W, H), 16, 16);
 
-        if (coverBmp != null)
+        // Per-server cover (the Server= cover field), else the shared cover, else a gradient.
+        BitmapImage cov = null;
+        if (!string.IsNullOrEmpty(srv.Cover))
+            cov = LoadBitmap(Path.Combine(Assets.Dir, srv.Cover)) ?? LoadBitmap(Path.Combine(AppDir(), srv.Cover));
+        if (cov == null) cov = coverBmp;
+        if (cov != null)
         {
-            var img = new Image { Source = coverBmp, Stretch = Stretch.UniformToFill };
+            var img = new Image { Source = cov, Stretch = Stretch.UniformToFill };
             RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
             tile.Children.Add(img);
         }
@@ -658,7 +661,7 @@ public class LauncherWindow : Window
         texts.Children.Add(new TextBlock
         {
             Text = srv.Name.ToUpperInvariant(), Foreground = TextHi, FontFamily = Brand, FontWeight = FontWeights.Bold,
-            FontSize = 15, LineHeight = 16, LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+            FontSize = 19, LineHeight = 21, LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
             TextWrapping = TextWrapping.Wrap, MaxWidth = W - 24,
             Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 6, ShadowDepth = 1, Opacity = 0.85, Color = Colors.Black }
         });
@@ -727,12 +730,14 @@ public class LauncherWindow : Window
                     case "tagline":     if (v.Length > 0) Tagline = v; break;
                     case "player":      if (v.Length > 0) PlayerName = v; break;
                     case "server":
-                        // Server=Tag|Name|launch args   (args optional). A source that defines
-                        // servers replaces the list from the previous source instead of appending.
+                        // Server=Tag|Name|launch args|players|cover   (all but Name optional). A source
+                        // that defines servers replaces the list from the previous source, not appends.
                         if (!clearedServers) { Servers.Clear(); clearedServers = true; }
-                        var parts = v.Split(new[] { '|' }, 4);
+                        var parts = v.Split(new[] { '|' }, 5);
                         if (parts.Length >= 2)
-                            Servers.Add(new ServerEntry(parts[0].Trim(), parts[1].Trim(), parts.Length > 2 ? parts[2].Trim() : "", parts.Length > 3 ? parts[3].Trim() : ""));
+                            Servers.Add(new ServerEntry(parts[0].Trim(), parts[1].Trim(),
+                                parts.Length > 2 ? parts[2].Trim() : "", parts.Length > 3 ? parts[3].Trim() : "",
+                                parts.Length > 4 ? parts[4].Trim() : ""));
                         break;
                 }
             }

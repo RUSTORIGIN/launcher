@@ -48,8 +48,8 @@ readability.
 - **Hero**: "Most Played" tag -> large OG logo -> RUSTORIGIN wordmark -> red "JANUARY UPDATE 2021"
   -> description -> white **PLAY** pill + **INSTALL/UPDATE** link, with a live download/extract
   progress bar.
-- **Right column**: 6 glass **server cards** (tag + name); clicking one launches the client
-  with that server's args. "DISCOVER MORE" below.
+- **Right column**: a vertical stack of **server cards** (cover image + name + tag); clicking one
+  launches the client with that server's args. "DISCOVER MORE" below.
 - **Friends rail** with 8 avatars and online/offline dots. Bottom chevron + chat icon.
 - Icons use **Segoe MDL2 Assets** (built into Windows 10/11 - nothing to bundle).
 
@@ -118,7 +118,7 @@ Clicking **Install** again re-downloads and overwrites = updates.
 | `Tagline` | Description line under the title. |
 | `Player` | Name shown in the top-right user pill. |
 | `UpdateRepo` | `owner/repo` for launcher self-updates via GitHub Releases (public repos only; blank disables). The launcher checks on launch, and only installs an update that matches the release's `SHA256SUMS.txt`. |
-| `Server` | Repeatable, up to 6: `Server=Tag\|Name\|launch args` (args optional). Fills the right-column cards; the first is the "now playing" entry. |
+| `Server` | Repeatable, up to 6: `Server=Tag\|Name\|launch args\|players\|cover` (everything after Name optional). `cover` is an embedded image file name (e.g. `main.jpg`) used as the card background. Cards stack vertically; the first is the "now playing" entry. |
 
 ## Notes
 
