@@ -17,7 +17,8 @@ Initial launcher (not yet tagged/published). Highlights:
 - **Self-update** from GitHub Releases, verified against the release `SHA256SUMS.txt`.
 - **Rounded, frameless native window** via `WindowChrome`: drag from anywhere, resize, maximize,
   Aero Snap, taskbar, system menu, custom min/max/close buttons; content scales on resize.
-- **Cross-fading screenshot background** (four embedded JPEGs, ~7s switch).
+- **Cross-fading screenshot background** (four embedded JPEGs, ~7s switch) with **carousel dot
+  indicators** at the bottom (click a dot to jump to a screenshot).
 - **Vertical server cards** with per-server cover art, and **live A2S player counts** (green/red
   status dot + `players/max`, queried over Steam A2S when a card's args include `+connect host:port`,
   refreshed ~60s).

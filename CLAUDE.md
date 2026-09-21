@@ -43,9 +43,13 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
   resources and unpacked at first run to `%LOCALAPPDATA%\RustOrigin\assets\<version>\` (loaded from
   real files for the images and private fonts).
 - The background is a **cross-fading slideshow** of `1.jpg`-`4.jpg` (switches every ~7s; see
-  `BuildBackground` / `NextSlide`), **softly blurred** (a `BlurEffect` on `bgHost`, half-res cached)
-  under a light uniform scrim (`BuildGradient`) so the foreground UI reads cleanly - no vignette or
-  side gradients. Glass panels are flat translucent. Toggle the auto-switch via the `BgSlideshow` pref.
+  `BuildBackground` / `NextSlide` / `ShowSlide`), **softly blurred** (a `BlurEffect` on `bgHost`,
+  half-res cached) under a light uniform scrim (`BuildGradient`) so the foreground UI reads cleanly -
+  no vignette or side gradients. Glass panels are flat translucent. Toggle the auto-switch via the
+  `BgSlideshow` pref.
+- **Carousel dot indicators** at the bottom-center (`BuildSlideDots` / `UpdateSlideDots`): one dot
+  per screenshot, the active one a wide accent pill; clicking a dot jumps to that slide and resets
+  the auto-advance timer. Hidden when fewer than two slides load.
 - A `launcher.cfg` placed **next to the exe** overrides the embedded defaults at runtime.
 
 ## Download behavior (implemented)

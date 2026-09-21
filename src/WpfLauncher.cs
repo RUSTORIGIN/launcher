@@ -133,6 +133,8 @@ public class LauncherWindow : Window
     Image        slideBack, slideFront;   // two stacked images for cross-fading between screenshots
     BitmapImage[] slides = new BitmapImage[0];
     int          slideIndex;
+    System.Windows.Threading.DispatcherTimer slideTimer;   // auto-advance timer (reset on manual pick)
+    List<Border> slideDots;                                // carousel indicator dots at the bottom
     BitmapImage  logoBmp;
     BitmapImage  coverBmp;
     Grid homeView;
@@ -253,6 +255,7 @@ public class LauncherWindow : Window
         BuildBackground();
         BuildGradient();
         BuildContent();
+        BuildSlideDots();   // carousel indicators on top of the content, bottom-center
 
         // 1px light edge to match the rounded card
         edgeBorder = new Border { CornerRadius = new CornerRadius(CornerR), BorderBrush = B("#1AFFFFFF"),
@@ -445,19 +448,70 @@ public class LauncherWindow : Window
 
         // Auto-switch every 7s with a ~0.9s cross-fade (gated by the BgSlideshow pref).
         slideIndex = 0;
-        var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(7) };
-        t.Tick += (s, e) => { try { if (slides.Length > 1 && Prefs.GetBool("BgSlideshow", true)) NextSlide(); } catch { } };
-        t.Start();
+        slideTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(7) };
+        slideTimer.Tick += (s, e) => { try { if (slides.Length > 1 && Prefs.GetBool("BgSlideshow", true)) NextSlide(); } catch { } };
+        slideTimer.Start();
     }
 
-    void NextSlide()
+    void NextSlide() { ShowSlide((slideIndex + 1) % slides.Length); }
+
+    // Cross-fade to a specific slide and sync the carousel dots.
+    void ShowSlide(int next)
     {
-        int next = (slideIndex + 1) % slides.Length;
+        if (slides.Length == 0) next = 0; else next %= slides.Length;
+        if (next == slideIndex) return;
         slideFront.Source = slides[next];
         var fade = new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(900)));
         fade.Completed += (s, e) => { try { slideBack.Source = slides[next]; } catch { } };   // settle the fade onto the back layer
         slideFront.BeginAnimation(UIElement.OpacityProperty, fade);
         slideIndex = next;
+        UpdateSlideDots();
+    }
+
+    // Carousel indicator dots (bottom-center): one per screenshot; active is a wide accent pill.
+    // Clicking a dot jumps to that slide and resets the auto-advance timer. Hidden when <2 slides.
+    void BuildSlideDots()
+    {
+        if (slides == null || slides.Length < 2) return;
+        slideDots = new List<Border>();
+        var bar = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(0, 0, 0, 20)
+        };
+        for (int i = 0; i < slides.Length; i++)
+        {
+            int idx = i;
+            var dot = new Border
+            {
+                Height = 6, Width = 6, CornerRadius = new CornerRadius(3),
+                Background = B("#59FFFFFF"), Margin = new Thickness(5, 0, 5, 0),
+                Cursor = Cursors.Hand, VerticalAlignment = VerticalAlignment.Center
+            };
+            dot.MouseLeftButtonUp += (s, e) =>
+            {
+                e.Handled = true;
+                ShowSlide(idx);
+                if (slideTimer != null) { slideTimer.Stop(); slideTimer.Start(); }   // full interval after a manual pick
+            };
+            slideDots.Add(dot);
+            bar.Children.Add(dot);
+        }
+        mainGrid.Children.Add(bar);
+        UpdateSlideDots();
+    }
+
+    void UpdateSlideDots()
+    {
+        if (slideDots == null) return;
+        for (int i = 0; i < slideDots.Count; i++)
+        {
+            bool active = (i == slideIndex);
+            slideDots[i].Width = active ? 20 : 6;
+            slideDots[i].Background = active ? Accent : B("#59FFFFFF");
+        }
     }
 
     void ShowFallbackBackdrop()

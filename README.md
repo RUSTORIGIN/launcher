@@ -41,7 +41,7 @@ readability.
 
 ## The window (rounded + native, opens at 1440x860)
 
-- **Rounded, frameless** window that still behaves like a normal Windows window - **drag it from anywhere**, resize, maximize, Aero Snap, taskbar and the system menu (via WPF `WindowChrome`), with custom minimize/maximize/close buttons top-right. Corners flatten when maximized. Full-bleed cross-fading screenshot slideshow behind it.
+- **Rounded, frameless** window that still behaves like a normal Windows window - **drag it from anywhere**, resize, maximize, Aero Snap, taskbar and the system menu (via WPF `WindowChrome`), with custom minimize/maximize/close buttons top-right. Corners flatten when maximized. Full-bleed cross-fading screenshot slideshow behind it, with **carousel dot indicators** at the bottom (click a dot to jump to that screenshot).
 - **Top-left**: OG logo mark in a glass pill. **Left rail**: games / library / collections icons.
 - **Top-right**: recent-games pill (star, thumbnails, link) + user pill (chat, bell, avatar,
   player name, now-playing) + minimize/close.
