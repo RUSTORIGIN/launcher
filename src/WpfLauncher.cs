@@ -546,26 +546,20 @@ public class LauncherWindow : Window
         homeView = new Grid { Width = 1440, Height = 860 };
         BuildHero(homeView);
         BuildServerGrid(homeView);
-        BuildSocialBar(homeView);
         mainGrid.Children.Add(new Viewbox { Stretch = Stretch.Uniform, Child = homeView });
     }
 
-    // ---- bottom-left social links ----
-    void BuildSocialBar(Grid content)
+    // ---- social links (a horizontal icon row, placed under the hero CTA) ----
+    StackPanel SocialRow(Thickness margin)
     {
-        if (Socials == null || Socials.Count == 0) return;
-        var bar = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(64, 0, 0, 30)
-        };
+        if (Socials == null || Socials.Count == 0) return null;
+        var bar = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left, Margin = margin };
         foreach (var s in Socials)
         {
             var btn = SocialButton(s);
             if (btn != null) bar.Children.Add(btn);
         }
-        if (bar.Children.Count > 0) content.Children.Add(bar);
+        return bar.Children.Count > 0 ? bar : null;
     }
 
     Border SocialButton(SocialEntry s)
@@ -672,6 +666,9 @@ public class LauncherWindow : Window
         row.Children.Add(playBtn);
         row.Children.Add(installBtn);
         hero.Children.Add(row);
+
+        var social = SocialRow(new Thickness(1, 26, 0, 0));   // social icons directly under the PLAY/INSTALL row
+        if (social != null) hero.Children.Add(social);
 
         progTrack = new Border
         {

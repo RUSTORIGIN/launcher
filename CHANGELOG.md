@@ -22,8 +22,8 @@ Initial launcher (not yet tagged/published). Highlights:
 - **Vertical server cards** with per-server cover art, and **live A2S player counts** (green/red
   status dot + `players/max`, queried over Steam A2S when a card's args include `+connect host:port`,
   refreshed ~60s).
-- **Social links** bar (bottom-left): configurable `Social=platform|url` icons with built-in
-  Discord / YouTube / TikTok brand marks (inline vectors, no extra assets).
+- **Social links** row under the hero PLAY/INSTALL buttons: configurable `Social=platform|url`
+  icons with built-in Discord / YouTube / TikTok brand marks (inline vectors, no extra assets).
 - Two installers: **NSIS setup `.exe`** (Program Files) and **per-user MSI**.
 - CI: build-check (compile + updater-parsing tests on every push/PR) and a tag-triggered release
   workflow (builds exe + installers, checksums, GitHub Release).
