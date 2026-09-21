@@ -51,3 +51,7 @@ jobs:
       - name: Test updater parsing
         shell: pwsh
         run: .\scripts\test_updater_parsing.ps1
+
+      - name: Test A2S server-status parsing
+        shell: pwsh
+        run: .\scripts\test_a2s_parsing.ps1

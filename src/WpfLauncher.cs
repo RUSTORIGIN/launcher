@@ -113,6 +113,8 @@ public class LauncherWindow : Window
     string Tagline     = "RUSTORIGIN is a private Rust world on the January 2021 build. Craft, raid and survive with a tight community - one click to jump in.";
     string PlayerName  = "White Pegasus";
     List<ServerEntry> Servers = new List<ServerEntry>();
+    readonly List<Action> serverStatusRefreshers = new List<Action>();   // one live-status re-query per card
+    bool serverStatusTimerStarted;
 
     // ---- state ----
     bool      busy;
@@ -606,6 +608,7 @@ public class LauncherWindow : Window
     // ---- right column: server cards ----
     void BuildServerGrid(Grid content)
     {
+        serverStatusRefreshers.Clear();
         var wrap = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 64, 0) };
         var grid = new System.Windows.Controls.Primitives.UniformGrid { Columns = 1 };   // vertical list
         string[][] pal = {
@@ -614,6 +617,7 @@ public class LauncherWindow : Window
         for (int i = 0; i < Servers.Count && i < 6; i++)
             grid.Children.Add(ServerTile(Servers[i], pal[i % pal.Length][0], pal[i % pal.Length][1]));
         wrap.Children.Add(grid);
+        StartServerStatusTimer();
 
         var more = new Border
         {
@@ -669,15 +673,31 @@ public class LauncherWindow : Window
             texts.Children.Add(new TextBlock { Text = srv.Tag.ToUpperInvariant(), Foreground = TextDim, FontFamily = Brand, FontWeight = FontWeights.SemiBold, FontSize = 9.5, Margin = new Thickness(0, 3, 0, 0), Opacity = 0.9 });
         tile.Children.Add(texts);
 
-        if (srv.Players.Length > 0)
+        // Live status badge: status dot + player count. When the server's connect endpoint is known
+        // (+connect host:port in its args, else the global LaunchArgs) we query it over A2S and show a
+        // live "X/Y" with a green/red dot; otherwise we just show the static Players text from config.
+        string qHost; int qPort;
+        bool canQuery = TryParseConnect(srv.Args.Length > 0 ? srv.Args : LaunchArgs, out qHost, out qPort);
+        if (srv.Players.Length > 0 || canQuery)
         {
+            var dot = new Ellipse { Width = 8, Height = 8, Fill = B("#9AA0A6"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
+            var count = new TextBlock { Text = srv.Players.Length > 0 ? srv.Players : "• • •", Foreground = TextHi, FontFamily = Brand, FontWeight = FontWeights.SemiBold, FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
+            var row = new StackPanel { Orientation = Orientation.Horizontal };
+            row.Children.Add(dot); row.Children.Add(count);
             var badge = new Border
             {
                 Background = B("#B3000000"), CornerRadius = new CornerRadius(8), Padding = new Thickness(8, 3, 8, 4),
                 HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 10, 10, 0),
-                Child = new TextBlock { Text = srv.Players, Foreground = TextHi, FontFamily = Brand, FontWeight = FontWeights.SemiBold, FontSize = 11 }
+                Child = row
             };
             tile.Children.Add(badge);
+
+            if (canQuery)
+            {
+                Action refresh = delegate { QueryServerStatus(qHost, qPort, dot, count); };
+                serverStatusRefreshers.Add(refresh);
+                refresh();   // initial query on build
+            }
         }
 
         var edge = new Border { CornerRadius = new CornerRadius(14), BorderBrush = B("#1FFFFFFF"), BorderThickness = new Thickness(1), Background = Brushes.Transparent, IsHitTestVisible = false };
@@ -687,6 +707,45 @@ public class LauncherWindow : Window
         tile.MouseLeave += (s, e) => { edge.BorderBrush = B("#1FFFFFFF"); };
         tile.MouseLeftButtonUp += (s, e) => { e.Handled = true; if (!busy) Play(srv.Args.Length > 0 ? srv.Args : LaunchArgs); };
         return tile;
+    }
+
+    // Pull "host:port" out of a "+connect host:port" launch-args string (the A2S query endpoint).
+    static bool TryParseConnect(string args, out string host, out int port)
+    {
+        host = null; port = 0;
+        if (string.IsNullOrEmpty(args)) return false;
+        var m = System.Text.RegularExpressions.Regex.Match(args, @"\+connect\s+([^\s:]+):(\d{1,5})");
+        if (!m.Success) return false;
+        host = m.Groups[1].Value;
+        return int.TryParse(m.Groups[2].Value, out port) && port > 0 && port <= 65535;
+    }
+
+    // Query one server's live player count over A2S on a background thread and update its badge.
+    // dot: amber = checking, green = online (shows X/Y), red = unreachable (shows "Offline").
+    void QueryServerStatus(string host, int port, Ellipse dot, TextBlock count)
+    {
+        dot.Fill = B("#E0B341");   // amber: checking (called on the UI thread)
+        var t = new Thread(delegate ()
+        {
+            int players, max;
+            bool ok = A2S.TryQueryInfo(host, port, 2500, out players, out max);
+            Dispatcher.BeginInvoke((Action)delegate
+            {
+                if (ok) { dot.Fill = B("#3FB950"); count.Text = players + "/" + max; }
+                else    { dot.Fill = B("#F85149"); count.Text = "Offline"; }
+            });
+        }) { IsBackground = true, Name = "a2s" };
+        t.Start();
+    }
+
+    // Re-query every card's live status once a minute (started once, after the grid is built).
+    void StartServerStatusTimer()
+    {
+        if (serverStatusTimerStarted) return;
+        serverStatusTimerStarted = true;
+        var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
+        t.Tick += delegate { foreach (var r in serverStatusRefreshers.ToArray()) { try { r(); } catch { } } };
+        t.Start();
     }
 
     // ---------- config ----------

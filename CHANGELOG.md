@@ -18,6 +18,9 @@ Initial launcher (not yet tagged/published). Highlights:
 - **Rounded, frameless native window** via `WindowChrome`: drag from anywhere, resize, maximize,
   Aero Snap, taskbar, system menu, custom min/max/close buttons; content scales on resize.
 - **Cross-fading screenshot background** (four embedded JPEGs, ~7s switch).
+- **Vertical server cards** with per-server cover art, and **live A2S player counts** (green/red
+  status dot + `players/max`, queried over Steam A2S when a card's args include `+connect host:port`,
+  refreshed ~60s).
 - Two installers: **NSIS setup `.exe`** (Program Files) and **per-user MSI**.
 - CI: build-check (compile + updater-parsing tests on every push/PR) and a tag-triggered release
   workflow (builds exe + installers, checksums, GitHub Release).

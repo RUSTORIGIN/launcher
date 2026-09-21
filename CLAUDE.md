@@ -170,13 +170,15 @@ The WinForms `RustLauncher.exe` builds via the SDK-style project (`net48`, verif
 dotnet build -c Release src\RustLauncher.csproj   # -> src\bin\Release\RustLauncher.exe
 ```
 
-There is no `cargo` or clippy here. The only automated test is
-`scripts\test_updater_parsing.ps1`, which compiles `src\UpdateParsing.cs` with `Add-Type` and
-unit-tests the self-update JSON/`SHA256SUMS`/version parsing. Two GitHub Actions workflows exist:
-**build-check** (`.github/workflows/build-check.yml`) compiles both builds **and runs that test** on
-every push/PR, and **release** (`.github/workflows/release.yml`) builds and publishes on a version
-tag (see the release checklist). Do not reference commands that don't exist here. After changing
-`src\WpfLauncher.cs`, the fastest correctness check is a clean `csc` compile (as `build.bat` does).
+There is no `cargo` or clippy here. Two `Add-Type`-based test scripts exist:
+`scripts\test_updater_parsing.ps1` (compiles `src\UpdateParsing.cs`, unit-tests the self-update
+JSON/`SHA256SUMS`/version parsing) and `scripts\test_a2s_parsing.ps1` (compiles `src\A2S.cs`,
+unit-tests the A2S reply parser and runs one end-to-end query against a loopback UDP responder).
+Two GitHub Actions workflows exist: **build-check** (`.github/workflows/build-check.yml`) compiles
+both builds **and runs both tests** on every push/PR, and **release**
+(`.github/workflows/release.yml`) builds and publishes on a version tag (see the release checklist).
+Do not reference commands that don't exist here. After changing `src\WpfLauncher.cs`, the fastest
+correctness check is a clean `csc` compile (as `build.bat` does).
 
 ## Installers
 
@@ -287,7 +289,7 @@ Plain `Key=Value`, `#`/`;` comments. Loaded embedded-defaults-first, then overri
 | `Tagline` | Description line under the title. |
 | `Player` | Parsed into `PlayerName` but currently **not displayed** (the user pill was removed). Kept for compatibility / future use. |
 | `UpdateRepo` | `owner/repo` checked for launcher self-updates via GitHub Releases (public repos only). Blank disables. Default `RUSTORIGIN/launcher`. |
-| `Server` | Repeatable, up to 6: `Server=Tag\|Name\|launch args\|players\|cover` (everything after Name optional). `cover` is an embedded image file name (e.g. `main.jpg`) used as the card background, else the shared `server-cover.png`, else a gradient. Cards stack vertically. A source that defines `Server=` lines replaces the list from the previous source. |
+| `Server` | Repeatable, up to 6: `Server=Tag\|Name\|launch args\|players\|cover` (everything after Name optional). `cover` is an embedded image file name (e.g. `main.jpg`) used as the card background, else the shared `server-cover.png`, else a gradient. Cards stack vertically. **Live status:** when the launch args contain `+connect HOST:PORT`, the launcher queries that endpoint over Steam A2S (`src/A2S.cs`) and shows a live green/red dot + `players/max` (refreshed ~60s), overriding the static `players` field; without a `+connect` endpoint it shows the static text. A source that defines `Server=` lines replaces the list from the previous source. |
 
 ## Settings vs config: `launcher.cfg` (host) vs `Prefs` (per-user)
 
@@ -317,6 +319,7 @@ settings screen to wire it into - users set it in `prefs.cfg`.
 ├── src/                     # C# source (WpfLauncher.cs + UpdateParsing.cs build RustOrigin.exe)
 │   ├── WpfLauncher.cs       #   PRIMARY launcher (WPF, single file) -> RustOrigin.exe
 │   ├── UpdateParsing.cs     #   pure self-update parsers (tested by scripts/test_updater_parsing.ps1)
+│   ├── A2S.cs               #   Steam A2S_INFO query for live server status (tested by scripts/test_a2s_parsing.ps1)
 │   ├── Launcher.cs          #   older standalone WinForms downloader (reference-only)
 │   ├── Program.cs           #   minimal WinForms find-and-launch UI -> RustLauncher.exe
 │   ├── RustLauncher.csproj  #   SDK-style project (net48); builds Program.cs only
@@ -337,6 +340,7 @@ settings screen to wire it into - users set it in `prefs.cfg`.
 │   ├── build_msi.ps1        # build the per-user MSI installer (WiX)
 │   ├── build_installer_exe.ps1 # build the NSIS setup .exe (electron-builder style, Program Files)
 │   ├── test_updater_parsing.ps1 # unit tests for src/UpdateParsing.cs (run in build-check CI)
+│   ├── test_a2s_parsing.ps1 # unit + loopback tests for src/A2S.cs live server status (run in build-check CI)
 │   └── installer/
 │       ├── RustOrigin.wxs   # WiX source for the MSI (WixUI_InstallDir wizard)
 │       ├── RustOrigin.nsi   # NSIS source for the setup .exe (MUI2 wizard)
