@@ -900,13 +900,11 @@ public class LauncherWindow : Window
 
         tile.MouseEnter += (s, e) =>
         {
-            edge.BorderBrush = StrokeHi;
             join.BeginAnimation(OpacityProperty, new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(140))));
             coverBlur.BeginAnimation(System.Windows.Media.Effects.BlurEffect.RadiusProperty, new DoubleAnimation(10, new Duration(TimeSpan.FromMilliseconds(140))));
         };
         tile.MouseLeave += (s, e) =>
         {
-            edge.BorderBrush = B("#1FFFFFFF");
             join.BeginAnimation(OpacityProperty, new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(140))));
             coverBlur.BeginAnimation(System.Windows.Media.Effects.BlurEffect.RadiusProperty, new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(140))));
         };
