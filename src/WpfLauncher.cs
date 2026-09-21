@@ -239,8 +239,8 @@ public class LauncherWindow : Window
 
         System.Windows.Shell.WindowChrome.SetWindowChrome(this, new System.Windows.Shell.WindowChrome
         {
-            CaptionHeight = 46,                          // top strip drags the window (double-click maximizes)
-            ResizeBorderThickness = new Thickness(6),
+            CaptionHeight = 0,                           // no native caption strip - we drag from anywhere (below)
+            ResizeBorderThickness = new Thickness(6),    // still gives native resize grips at the edges
             CornerRadius = new CornerRadius(0),
             GlassFrameThickness = new Thickness(0),
             UseAeroCaptionButtons = false
@@ -261,6 +261,23 @@ public class LauncherWindow : Window
 
         BuildCaption(mainGrid);
         ApplyRounding();
+
+        // Drag the window from ANY empty area (not just the top). Interactive controls are marked
+        // with a Hand cursor, so IsInteractive skips them and they still get their clicks. Using the
+        // native NCLBUTTONDOWN/HTCAPTION move keeps Aero Snap (drag to an edge / the top to maximize).
+        MouseLeftButtonDown += (s, e) =>
+        {
+            if (e.ButtonState != MouseButtonState.Pressed) return;
+            if (IsInteractive(e.OriginalSource as DependencyObject)) return;
+            if (e.ClickCount == 2) { ToggleMaximize(); return; }   // double-click empty area = maximize/restore
+            try
+            {
+                IntPtr hwnd = new WindowInteropHelper(this).Handle;
+                ReleaseCapture();
+                SendMessage(hwnd, 0xA1, (IntPtr)0x2, IntPtr.Zero);  // WM_NCLBUTTONDOWN, HTCAPTION
+            }
+            catch { }
+        };
 
         // (background slideshow starts its own timer in BuildBackground)
 
@@ -346,6 +363,8 @@ public class LauncherWindow : Window
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, int flags);
     [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+    [DllImport("user32.dll")] static extern bool ReleaseCapture();
+    [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
     protected override void OnSourceInitialized(EventArgs e)
     {
