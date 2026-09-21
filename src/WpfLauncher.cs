@@ -18,9 +18,9 @@ using System.Runtime.InteropServices;
 using System.Windows.Interop;
 using System.Windows.Media.Animation;
 
-[assembly: AssemblyTitle("RustOrigin Launcher")]
-[assembly: AssemblyProduct("RustOrigin")]
-[assembly: AssemblyDescription("RustOrigin game launcher - downloads, installs and launches the client")]
+[assembly: AssemblyTitle("RustOriginLauncher")]
+[assembly: AssemblyProduct("RustOriginLauncher")]
+[assembly: AssemblyDescription("RustOriginLauncher - downloads, installs and launches the client")]
 [assembly: AssemblyCompany("RustOrigin")]
 [assembly: AssemblyCopyright("RustOrigin 2026")]
 [assembly: AssemblyVersion("1.0.0.0")]
@@ -228,7 +228,7 @@ public class LauncherWindow : Window
         try { string la = Prefs.Get("LaunchArgs", null); if (la != null) LaunchArgs = la; } catch { }
 
         // ---- window chrome (native Windows title bar + standard window features) ----
-        Title = "RustOrigin Launcher";
+        Title = "RustOriginLauncher";
         try
         {
             var ico = System.Drawing.Icon.ExtractAssociatedIcon(Process.GetCurrentProcess().MainModule.FileName);
@@ -346,7 +346,7 @@ public class LauncherWindow : Window
         {
             tray = new System.Windows.Forms.NotifyIcon();
             try { tray.Icon = System.Drawing.Icon.ExtractAssociatedIcon(Process.GetCurrentProcess().MainModule.FileName); } catch { }
-            tray.Text = "RustOrigin Launcher";
+            tray.Text = "RustOriginLauncher";
             tray.Visible = true;
             tray.DoubleClick += delegate { ShowFromTray(); };
             tray.MouseClick += (s, e) => { if (e.Button == System.Windows.Forms.MouseButtons.Left) ShowFromTray(); };
@@ -1677,7 +1677,7 @@ public class LauncherWindow : Window
             }
             catch { installed = self; }   // fall back to the running exe if the copy is blocked
             string target = installed;
-            Dispatcher.Invoke((Action)(() => CreateDesktopShortcut(target, "RustOrigin")));   // STA thread for COM
+            Dispatcher.Invoke((Action)(() => CreateDesktopShortcut(target, "RustOriginLauncher")));   // STA thread for COM
             Log("shortcut -> " + target);
         }
         catch (Exception ex) { Log("shortcut step failed: " + ex.Message); }
@@ -1697,7 +1697,7 @@ public class LauncherWindow : Window
             t.InvokeMember("TargetPath", BindingFlags.SetProperty, null, sc, new object[] { targetExe });
             t.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, sc, new object[] { Path.GetDirectoryName(targetExe) });
             t.InvokeMember("IconLocation", BindingFlags.SetProperty, null, sc, new object[] { targetExe + ",0" });
-            t.InvokeMember("Description", BindingFlags.SetProperty, null, sc, new object[] { "RustOrigin Launcher" });
+            t.InvokeMember("Description", BindingFlags.SetProperty, null, sc, new object[] { "RustOriginLauncher" });
             t.InvokeMember("Save", BindingFlags.InvokeMethod, null, sc, null);
         }
         catch { }
@@ -1746,7 +1746,7 @@ public class LauncherWindow : Window
         Dispatcher.Invoke((Action)(() =>
         {
             go = MessageBox.Show(this,
-                "A new version of RustOrigin Launcher is available.\n\nInstalled:  v" + current + "\nLatest:     " + tag + "\n\nDownload and update now?",
+                "A new version of RustOriginLauncher is available.\n\nInstalled:  v" + current + "\nLatest:     " + tag + "\n\nDownload and update now?",
                 "Update available", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes;
         }));
         if (!go) return;
