@@ -207,8 +207,8 @@ public class LauncherWindow : Window
         LoadConfig();
         if (Servers.Count == 0)
         {
-            Servers.Add(new ServerEntry("Vanilla",  "RustOrigin Main", "", "", "main.jpg"));
-            Servers.Add(new ServerEntry("Training", "Aim Train",       "", "", "train.jpg"));
+            Servers.Add(new ServerEntry("Training", "Training Grounds", "", "", "train.jpg"));
+            Servers.Add(new ServerEntry("Vanilla",  "RustOrigin Main",  "", "", "main.jpg"));
         }
         logoBmp = LoadBitmap(Path.Combine(Assets.Dir, "logo.png")) ?? LoadBitmap(Path.Combine(AppDir(), "logo.png"));
         coverBmp = LoadBitmap(Path.Combine(Assets.Dir, "server-cover.png")) ?? LoadBitmap(Path.Combine(AppDir(), "server-cover.png"));
