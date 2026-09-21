@@ -1666,7 +1666,7 @@ public class LauncherWindow : Window
         try
         {
             string self = Process.GetCurrentProcess().MainModule.FileName;
-            string installed = Path.Combine(InstallDir, "RustOrigin.exe");
+            string installed = Path.Combine(InstallDir, "RustOriginLauncher.exe");
             try
             {
                 if (!string.Equals(Path.GetFullPath(self), Path.GetFullPath(installed), StringComparison.OrdinalIgnoreCase))
@@ -1705,7 +1705,7 @@ public class LauncherWindow : Window
 
     // ---------- launcher self-update ----------
     // Checks the configured GitHub repo's latest release, and if it is newer than this build,
-    // downloads the new RustOrigin.exe, VERIFIES its SHA-256 against the release's SHA256SUMS.txt,
+    // downloads the new RustOriginLauncher.exe, VERIFIES its SHA-256 against the release's SHA256SUMS.txt,
     // and swaps itself out (rename-running-exe trick) before relaunching. A failed hash check
     // rejects the update - the launcher never runs an unverified replacement, same as the client.
     void StartUpdateCheck()
@@ -1737,9 +1737,9 @@ public class LauncherWindow : Window
         string tag = UpdateParsing.JsonStr(json, "tag_name");
         if (!UpdateParsing.IsNewer(AppVer(), tag)) { Log("update check: up to date (v" + current + " vs tag " + (tag ?? "?") + ")"); return; }
 
-        string exeUrl  = UpdateParsing.AssetUrl(json, "RustOrigin.exe");
+        string exeUrl  = UpdateParsing.AssetUrl(json, "RustOriginLauncher.exe");
         string sumsUrl = UpdateParsing.AssetUrl(json, "SHA256SUMS.txt");
-        if (exeUrl == null || sumsUrl == null) { Log("update: release " + tag + " missing RustOrigin.exe or SHA256SUMS.txt asset"); return; }
+        if (exeUrl == null || sumsUrl == null) { Log("update: release " + tag + " missing RustOriginLauncher.exe or SHA256SUMS.txt asset"); return; }
         Log("update available: v" + current + " -> " + tag);
 
         bool go = false;
@@ -1751,7 +1751,7 @@ public class LauncherWindow : Window
         }));
         if (!go) return;
 
-        string expected = UpdateParsing.HashFromSums(HttpGetString(sumsUrl), "RustOrigin.exe");
+        string expected = UpdateParsing.HashFromSums(HttpGetString(sumsUrl), "RustOriginLauncher.exe");
         if (expected == null) { UpdateFail("Could not read the update checksum."); return; }
 
         string self = SelfPath();

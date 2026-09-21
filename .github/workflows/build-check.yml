@@ -41,8 +41,8 @@ jobs:
         shell: pwsh
         run: |
           .\scripts\make_release.ps1 -Version 0.0.0
-          if (-not (Test-Path 'release\RustOrigin.exe')) { throw 'RustOrigin.exe was not produced' }
-          Write-Host 'RustOrigin.exe built OK'
+          if (-not (Test-Path 'release\RustOriginLauncher.exe')) { throw 'RustOriginLauncher.exe was not produced' }
+          Write-Host 'RustOriginLauncher.exe built OK'
 
       - name: Build WinForms project (RustLauncher.csproj)
         shell: pwsh

@@ -4,7 +4,7 @@
 #   .\scripts\build_installer_exe.ps1                 -> release\RustOrigin-Launcher-1.0.0-x64.exe
 #   .\scripts\build_installer_exe.ps1 -Version 1.1.0
 #
-# Steps: (1) build the fresh single-file release\RustOrigin.exe via make_release.ps1,
+# Steps: (1) build the fresh single-file release\RustOriginLauncher.exe via make_release.ps1,
 #        (2) compile scripts\installer\RustOrigin.nsi with NSIS (makensis).
 #
 # Requires NSIS once:  winget install NSIS.NSIS

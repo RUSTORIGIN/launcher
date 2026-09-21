@@ -24,7 +24,7 @@ Unicode true
 
 !define APPNAME     "RustOrigin Launcher"
 !define PUBLISHER   "RustOrigin"
-!define EXENAME     "RustOrigin.exe"
+!define EXENAME     "RustOriginLauncher.exe"
 !define ARPKEY      "Software\Microsoft\Windows\CurrentVersion\Uninstall\RustOriginLauncher"
 
 Name "${APPNAME}"

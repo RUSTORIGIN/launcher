@@ -3,7 +3,7 @@
 #   .\scripts\build_msi.ps1                 -> release\RustOriginLauncher-1.0.0.msi
 #   .\scripts\build_msi.ps1 -Version 1.1.0  (also stamps the version into the exe + MSI)
 #
-# Steps: (1) build the fresh single-file release\RustOrigin.exe via make_release.ps1,
+# Steps: (1) build the fresh single-file release\RustOriginLauncher.exe via make_release.ps1,
 #        (2) compile the MSI from scripts\installer\RustOrigin.wxs with the WiX toolset.
 #
 # Requires the WiX v4+ tool once:  dotnet tool install --global wix

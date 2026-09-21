@@ -12,7 +12,7 @@ RustClient.zip.sha256
 *.part.meta
 
 # Loose built executables at the repo root
-/RustOrigin.exe
+/RustOriginLauncher.exe
 /RustClient.exe
 
 # Design scratch

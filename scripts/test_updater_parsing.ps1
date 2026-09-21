@@ -9,17 +9,17 @@ function Check($name, $cond) { if ($cond) { Write-Host "  PASS  $name" } else { 
 
 $base = 'https://github.com/RUSTORIGIN/launcher/releases/download/v1.2.0'
 $json = '{"tag_name":"v1.2.0","name":"RustOrigin Launcher 1.2.0","assets":[' +
-        '{"name":"RustOrigin.exe","browser_download_url":"' + $base + '/RustOrigin.exe"},' +
+        '{"name":"RustOriginLauncher.exe","browser_download_url":"' + $base + '/RustOriginLauncher.exe"},' +
         '{"name":"SHA256SUMS.txt","browser_download_url":"' + $base + '/SHA256SUMS.txt"}]}'
-$sums = "716fb0f17748da6eb90ca46c6b184dc9ad567c871008098ded0eb7579a6519d8  RustOrigin.exe`n" +
+$sums = "716fb0f17748da6eb90ca46c6b184dc9ad567c871008098ded0eb7579a6519d8  RustOriginLauncher.exe`n" +
         "0000000000000000000000000000000000000000000000000000000000000000  other.bin`n"
 
 Check "JsonStr tag_name"          ([UpdateParsing]::JsonStr($json,'tag_name') -eq 'v1.2.0')
 Check "JsonStr missing -> null"   ($null -eq [UpdateParsing]::JsonStr($json,'nope'))
-Check "AssetUrl RustOrigin.exe"   ([UpdateParsing]::AssetUrl($json,'RustOrigin.exe') -eq "$base/RustOrigin.exe")
+Check "AssetUrl RustOriginLauncher.exe"   ([UpdateParsing]::AssetUrl($json,'RustOriginLauncher.exe') -eq "$base/RustOriginLauncher.exe")
 Check "AssetUrl SHA256SUMS.txt"   ([UpdateParsing]::AssetUrl($json,'SHA256SUMS.txt') -eq "$base/SHA256SUMS.txt")
 Check "AssetUrl missing -> null"  ($null -eq [UpdateParsing]::AssetUrl($json,'nope.exe'))
-Check "HashFromSums exe"          ([UpdateParsing]::HashFromSums($sums,'RustOrigin.exe') -eq '716fb0f17748da6eb90ca46c6b184dc9ad567c871008098ded0eb7579a6519d8')
+Check "HashFromSums exe"          ([UpdateParsing]::HashFromSums($sums,'RustOriginLauncher.exe') -eq '716fb0f17748da6eb90ca46c6b184dc9ad567c871008098ded0eb7579a6519d8')
 Check "HashFromSums missing null" ($null -eq [UpdateParsing]::HashFromSums($sums,'zzz.exe'))
 Check "IsNewer newer -> true"     ([UpdateParsing]::IsNewer('1.0.0.0','v1.2.0'))
 Check "IsNewer equal -> false"    (-not [UpdateParsing]::IsNewer('1.2.0.0','v1.2.0'))

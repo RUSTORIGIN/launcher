@@ -1,6 +1,6 @@
 # Builds and publishes the RustOrigin launcher on a version tag.
 #
-# Trigger: push a tag like `v1.0.0`  ->  builds RustOrigin.exe, the NSIS setup .exe, and the MSI,
+# Trigger: push a tag like `v1.0.0`  ->  builds RustOriginLauncher.exe, the NSIS setup .exe, and the MSI,
 # generates SHA-256 checksums, (optionally) attests build provenance, and creates a GitHub Release
 # with all artifacts attached. Can also be run manually (workflow_dispatch) to just build artifacts.
 #
@@ -57,7 +57,7 @@ jobs:
         shell: pwsh
         run: choco install nsis -y --no-progress
 
-      - name: Build launcher (RustOrigin.exe)
+      - name: Build launcher (RustOriginLauncher.exe)
         shell: pwsh
         run: .\scripts\make_release.ps1 -Version ${{ steps.ver.outputs.version }}
 
@@ -83,7 +83,7 @@ jobs:
         uses: actions/attest-build-provenance@v1
         with:
           subject-path: |
-            release/RustOrigin.exe
+            release/RustOriginLauncher.exe
             release/*-x64.exe
             release/*.msi
 
@@ -92,7 +92,7 @@ jobs:
         with:
           name: rustorigin-launcher-${{ steps.ver.outputs.version }}
           path: |
-            release/RustOrigin.exe
+            release/RustOriginLauncher.exe
             release/*-x64.exe
             release/*.msi
             release/SHA256SUMS.txt
@@ -104,7 +104,7 @@ jobs:
           name: RustOrigin Launcher ${{ steps.ver.outputs.version }}
           generate_release_notes: true
           files: |
-            release/RustOrigin.exe
+            release/RustOriginLauncher.exe
             release/*-x64.exe
             release/*.msi
             release/SHA256SUMS.txt

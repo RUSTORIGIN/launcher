@@ -2,7 +2,7 @@
 
 A refined, native Windows launcher with a **cross-fading screenshot background** and the OG
 brand mark. It downloads the RUSTORIGIN client from a URL you host, then launches it. The launcher
-is a **single self-contained `RustOrigin.exe`** (the background screenshots, logo, fonts and
+is a **single self-contained `RustOriginLauncher.exe`** (the background screenshots, logo, fonts and
 `launcher.cfg` are embedded), not the full 16 GB client. See **Releases** below.
 
 Built with WPF against .NET Framework 4.x, so it runs on any Windows 10/11 with **no
@@ -15,7 +15,7 @@ if none load, the launcher shows a dark gradient backdrop instead and keeps work
 
 | File | Purpose |
 |------|---------|
-| `RustOrigin.exe` | The launcher (already built). |
+| `RustOriginLauncher.exe` | The launcher (already built). |
 | `assets/1.jpg`-`3.jpg` | The three night background screenshots (cross-fading slideshow). Swap them and rebuild to change the background. |
 | `logo.png` | The RUSTORIGIN OG monogram (your original PNG, transparent bg, tight-cropped). Shown top-left and as the hero logo; swap the file to change it - no rebuild needed. |
 | `logo-original.png` | Untouched copy of the original 2000x1333 logo PNG, kept for reference. |
@@ -24,12 +24,12 @@ if none load, the launcher shows a dark gradient backdrop instead and keeps work
 | `src/WpfLauncher.cs` | Source of the launcher (WPF). |
 | `src/Launcher.cs` | Source of an older plain WinForms version (optional). |
 | `scripts/build.bat` | Dev compile check of `src/WpfLauncher.cs`. |
-| `scripts/make_release.ps1` | Build the shippable single-file `RustOrigin.exe`. |
+| `scripts/make_release.ps1` | Build the shippable single-file `RustOriginLauncher.exe`. |
 | `scripts/package_client.ps1` | Zips your client folder into `RustClient.zip` for hosting. |
 
 The repo is organized into `src/` (code), `assets/` (embedded media + fonts), `config/`
 (`launcher.cfg`), `scripts/` (build/packaging), and `docs/`. The media, fonts, and
-`launcher.cfg` above are embedded into the exe at build time - only `RustOrigin.exe` ships.
+`launcher.cfg` above are embedded into the exe at build time - only `RustOriginLauncher.exe` ships.
 
 ## Typography
 
@@ -99,7 +99,7 @@ readability.
 
 ## What players do
 
-1. Run `RustOrigin.exe`.
+1. Run `RustOriginLauncher.exe`.
 2. Click **Install** - it downloads the zip (live progress + speed, resumable) and extracts it to
    `C:\RUSTORIGIN` (the `InstallDir` set in `launcher.cfg`).
 3. Click **PLAY** - launches `RustClient.exe`.
@@ -141,13 +141,13 @@ Clicking **Install** again re-downloads and overwrites = updates.
 
 ## Releases (what players download)
 
-The launcher ships as a **single file**: `RustOrigin.exe` (~3 MB). The night background
+The launcher ships as a **single file**: `RustOriginLauncher.exe` (~3 MB). The night background
 screenshots, logo, Montserrat fonts (+ OFL license) and the default `launcher.cfg` are embedded
 as resources and unpacked at first run to `%LOCALAPPDATA%\RUSTORIGIN\assets\<version>\`. Nothing
 else needs to sit next to the exe.
 
 ```powershell
-.\scripts\make_release.ps1 -Version 1.0.0     # -> release\RustOrigin.exe
+.\scripts\make_release.ps1 -Version 1.0.0     # -> release\RustOriginLauncher.exe
 ```
 
 The script stamps the version into the exe, embeds the current `launcher.cfg`, `logo.png`,
@@ -157,9 +157,9 @@ here and rebuild. A `launcher.cfg` placed **next to the exe** overrides the embe
 runtime (handy for a test server) - a file that defines `Server=` lines replaces the list.
 
 Hosted in the R2 bucket next to the client:
-`https://pub-d8992e85a2df42be8ca5d1757ce64cd8.r2.dev/RustOrigin.exe`
+`https://pub-d8992e85a2df42be8ca5d1757ce64cd8.r2.dev/RustOriginLauncher.exe`
 Publish a new build with
-`rclone copyto release\RustOrigin.exe r2:rustorigin/RustOrigin.exe --s3-no-check-bucket`.
+`rclone copyto release\RustOriginLauncher.exe r2:rustorigin/RustOriginLauncher.exe --s3-no-check-bucket`.
 
 Before publishing, set real `Server=` lines (IP:port of your servers) and `Player=` in
 `launcher.cfg`. The exe is **unsigned** until a code-signing certificate is added, so
