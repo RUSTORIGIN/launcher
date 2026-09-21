@@ -51,7 +51,7 @@ static class Assets
 {
     public static string Dir = "";
     static readonly string[] Files = {
-        "1.jpg", "2.jpg", "3.jpg", "4.jpg", "main.jpg", "train.jpg",
+        "1.jpg", "2.jpg", "3.jpg", "main.jpg", "train.jpg",
         "logo.png", "server-cover.png", "launcher.cfg",
         "fonts/Montserrat-Regular.ttf", "fonts/Montserrat-Medium.ttf",
         "fonts/Montserrat-SemiBold.ttf", "fonts/Montserrat-Bold.ttf", "fonts/OFL.txt" };
@@ -468,9 +468,9 @@ public class LauncherWindow : Window
     // ---------- background slideshow (cross-fading screenshots) ----------
     void BuildBackground()
     {
-        // Load the embedded screenshots (unpacked to Assets.Dir; fall back to a copy next to the exe).
+        // Load the embedded night screenshots (unpacked to Assets.Dir; fall back to a copy next to the exe).
         var list = new List<BitmapImage>();
-        foreach (string n in new[] { "1.jpg", "2.jpg", "3.jpg", "4.jpg" })
+        foreach (string n in new[] { "1.jpg", "2.jpg", "3.jpg" })
         {
             BitmapImage bmp = LoadBitmap(Path.Combine(Assets.Dir, n)) ?? LoadBitmap(Path.Combine(AppDir(), n));
             if (bmp != null) list.Add(bmp);

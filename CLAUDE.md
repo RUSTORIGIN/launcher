@@ -38,11 +38,11 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
 ```
 
 - The launcher holds **no** R2/cloud credentials. `DownloadUrl` is just a public direct link.
-- Everything the UI needs (the four background screenshots `1.jpg`-`4.jpg`, `logo.png`,
+- Everything the UI needs (the night background screenshots `1.jpg`-`3.jpg`, `logo.png`,
   `server-cover.png`, `launcher.cfg`, Montserrat fonts) is **embedded in the exe** as manifest
   resources and unpacked at first run to `%LOCALAPPDATA%\RustOrigin\assets\<version>\` (loaded from
   real files for the images and private fonts).
-- The background is a **cross-fading slideshow** of `1.jpg`-`4.jpg` (switches every ~7s; see
+- The background is a **cross-fading slideshow** of the night screenshots `1.jpg`-`3.jpg` (switches every ~7s; see
   `BuildBackground` / `NextSlide` / `ShowSlide`), **softly blurred** (a `BlurEffect` on `bgHost`,
   half-res cached) under a light uniform scrim (`BuildGradient`) so the foreground UI reads cleanly -
   no vignette or side gradients. Glass panels are flat translucent. Toggle the auto-switch via the
@@ -137,7 +137,7 @@ dir, so no admin rights needed):
 
 | Path | Purpose |
 |------|---------|
-| `assets\<version>\` | Screenshots (`1.jpg`-`4.jpg`)/logo/fonts/`launcher.cfg` unpacked from the exe at first run. Keyed by assembly version, so a new build unpacks fresh. |
+| `assets\<version>\` | Screenshots (`1.jpg`-`3.jpg`)/logo/fonts/`launcher.cfg` unpacked from the exe at first run. Keyed by assembly version, so a new build unpacks fresh. |
 | `RustClient.zip.part` + `.part.meta` | Resumable-download buffer and its identity (URL+ETag+size) for validating a resume. |
 | `RustClient.zip` | The verified download, briefly, between finalize and extract (deleted after). |
 | `launcher.log` | Timestamped diagnostics of every download/verify step - ask players for this when an install misbehaves. |
@@ -335,7 +335,7 @@ settings screen to wire it into - users set it in `prefs.cfg`.
 │   ├── app.manifest         #   Win32 manifest (csc /win32manifest, csproj ApplicationManifest)
 │   └── app.ico              #   WinForms app icon (csproj ApplicationIcon)
 ├── assets/                  # build-time embedded resources + icon sources
-│   ├── 1.jpg / 2.jpg / 3.jpg / 4.jpg   # cross-fading background screenshots
+│   ├── 1.jpg / 2.jpg / 3.jpg           # night background screenshots (embedded + cross-faded)
 │   ├── logo.png / logo-original.png / server-cover.png
 │   ├── release_icon.ico     #   applied to RustOrigin.exe by make_release.ps1
 │   ├── app_icon_source.png
@@ -389,7 +389,7 @@ are normalized to LF (CRLF for `.bat`/`.ps1`).
 - key/cert/secret file types (`*.pem`, `*.key`, `*.pfx`, `.env`, `rclone.conf`, ...)
 
 Do commit source (`src/*.cs`, `src/*.csproj`), scripts (`scripts/*`), `config/launcher.cfg`,
-build-time `assets/` (`1.jpg`-`4.jpg`, `logo*.png`, `server-cover.png`, `fonts/`, `release_icon.ico`),
+build-time `assets/` (`1.jpg`-`3.jpg`, `logo*.png`, `server-cover.png`, `fonts/`, `release_icon.ico`),
 and docs. When it goes public, remember the commit history exposes the author email.
 
 ## Threading model
@@ -430,7 +430,7 @@ There are no automated tests; verify by running the exe:
 - After changing `src/WpfLauncher.cs`, rebuild with `scripts\build.bat` (or `scripts\make_release.ps1`)
   and confirm the exe launches; there are no automated tests to rely on.
 - Asset/branding note: `assets/app_icon_source.png` -> `src/app.ico` / `assets/release_icon.ico`;
-  embedded assets (`assets/1.jpg`-`4.jpg`, `assets/logo*.png`, `assets/server-cover.png`,
+  embedded assets (`assets/1.jpg`-`3.jpg`, `assets/logo*.png`, `assets/server-cover.png`,
   `assets/fonts/`) and `config/launcher.cfg` are wired in by `scripts/make_release.ps1`.
 
 ## Disclaimer

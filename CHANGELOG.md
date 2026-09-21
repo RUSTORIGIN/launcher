@@ -20,8 +20,8 @@ Initial launcher (not yet tagged/published). Highlights:
   Aero Snap, taskbar, system menu, circular glass min/max/close buttons; content scales on resize. The 32px
   corners come from a rounded window region (not a layered window), so the **native Windows
   minimize/maximize/restore animations** are preserved.
-- **Cross-fading screenshot background** (four embedded JPEGs, ~7s switch) with **carousel dot
-  indicators** at the bottom (click a dot to jump to a screenshot).
+- **Cross-fading night screenshot background** (three embedded JPEGs, ~7s switch) with **carousel
+  dot indicators** at the bottom (click a dot to jump to a screenshot).
 - **Vertical server cards** with per-server cover art, a **"click to join" hover overlay**, and
   **live A2S player counts** (green/red status dot + `players/max`, queried over Steam A2S when a
   card's args include `+connect host:port`, refreshed ~60s).
