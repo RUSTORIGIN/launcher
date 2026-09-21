@@ -315,6 +315,7 @@ public class LauncherWindow : Window
             if (string.IsNullOrEmpty(DiscordAppId) || !Prefs.GetBool("DiscordRpc", true)) return;
             sessionStartUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             discord = new DiscordRpc();
+            discord.OnLog = m => Log("discord: " + m);
             discord.Start(DiscordAppId);
             SetDiscord("In the launcher");
         }

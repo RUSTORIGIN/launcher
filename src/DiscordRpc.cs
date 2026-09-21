@@ -1,22 +1,31 @@
 using System;
 using System.IO;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
 // Minimal, dependency-free Discord Rich Presence over the local Discord IPC named pipe
 // (\\.\pipe\discord-ipc-0 .. -9). Pure BCL - no NuGet, no native Discord SDK - so it fits the
 // launcher's single-file csc build. Everything is best-effort: it silently no-ops when Discord
-// is not running or no app id is set, reconnects if Discord starts later, and never throws to
-// the caller. JSON payloads are hand-built (the messages are tiny).
+// is not running or no app id is set, reconnects if Discord starts later, and never throws.
+//
+// Single-threaded on purpose: one background thread both reads and writes the same pipe, never
+// concurrently (a concurrent blocking read on a second thread deadlocks the write on the same
+// handle). Incoming frames are polled non-blockingly with PeekNamedPipe, so writes always happen
+// while no read is in flight.
 public sealed class DiscordRpc
 {
-    readonly object _writeLock = new object();
-    volatile bool _stop, _ready, _dirty;
-    volatile NamedPipeClientStream _pipe;
-    string _clientId;
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool PeekNamedPipe(SafeHandle hNamedPipe, byte[] lpBuffer, uint nBufferSize,
+        out uint lpBytesRead, out uint lpTotalBytesAvail, out uint lpBytesLeftThisMessage);
 
-    // current presence snapshot
+    volatile bool _stop, _ready, _dirty;
+    NamedPipeClientStream _pipe;
+    string _clientId;
+    public Action<string> OnLog;
+    void L(string m) { try { if (OnLog != null) OnLog(m); } catch { } }
+
     volatile string _details = "", _state = "", _largeImage = "", _largeText = "";
     long _startUnix;
 
@@ -25,10 +34,9 @@ public sealed class DiscordRpc
         if (string.IsNullOrEmpty(clientId)) return;
         _clientId = clientId.Trim();
         _stop = false;
-        new Thread(ManagerLoop) { IsBackground = true, Name = "discord-rpc" }.Start();
+        new Thread(Loop) { IsBackground = true, Name = "discord-rpc" }.Start();
     }
 
-    // Update what Discord shows. Thread-safe; the manager thread pushes it when connected.
     public void SetPresence(string details, string state, long startUnix, string largeImage, string largeText)
     {
         _details = details ?? ""; _state = state ?? ""; _startUnix = startUnix;
@@ -36,44 +44,49 @@ public sealed class DiscordRpc
         _dirty = true;
     }
 
-    public void Stop()
-    {
-        _stop = true;
-        Disconnect();
-    }
+    public void Stop() { _stop = true; Disconnect(); }
 
-    void ManagerLoop()
+    void Loop()
     {
         while (!_stop)
         {
             try
             {
-                if (_pipe == null) Connect();
-                if (_pipe != null && _ready && _dirty) { WriteFrame(1, BuildActivity()); _dirty = false; }
+                if (_pipe == null) { if (!Connect()) { Thread.Sleep(15000); continue; } }
+                if (_ready && _dirty) { WriteFrame(1, BuildActivity()); _dirty = false; L("activity sent"); }
+
+                if (Available() >= 8)
+                {
+                    int op; string json;
+                    if (!ReadFrame(_pipe, out op, out json)) { Disconnect(); continue; }
+                    if (op == 1 && json.IndexOf("\"READY\"", StringComparison.Ordinal) >= 0) { _ready = true; _dirty = true; L("ready"); }
+                    else if (op == 3) WriteFrame(4, json);                 // PING -> PONG
+                    else if (op == 2) { L("closed: " + json); Disconnect(); }
+                }
+                else Thread.Sleep(250);
             }
-            catch { Disconnect(); }
-            Thread.Sleep(_pipe == null ? 15000 : 500);   // slow retry while Discord is absent
+            catch (Exception ex) { L("error: " + ex.GetType().Name + ": " + ex.Message); Disconnect(); Thread.Sleep(3000); }
         }
         Disconnect();
     }
 
-    void Connect()
+    bool Connect()
     {
         for (int i = 0; i < 10 && !_stop; i++)
         {
             NamedPipeClientStream p = null;
             try
             {
-                p = new NamedPipeClientStream(".", "discord-ipc-" + i, PipeDirection.InOut, PipeOptions.Asynchronous);
+                p = new NamedPipeClientStream(".", "discord-ipc-" + i, PipeDirection.InOut);
                 p.Connect(500);
                 _pipe = p; _ready = false;
                 WriteFrame(0, "{\"v\":1,\"client_id\":\"" + Esc(_clientId) + "\"}");   // handshake
-                new Thread(ReaderLoop) { IsBackground = true, Name = "discord-rpc-read" }.Start(p);
-                return;
+                L("connected on discord-ipc-" + i);
+                return true;
             }
             catch { try { if (p != null) p.Dispose(); } catch { } }
         }
-        // none answered -> leave _pipe null and retry later
+        return false;
     }
 
     void Disconnect()
@@ -83,22 +96,12 @@ public sealed class DiscordRpc
         try { if (p != null) p.Dispose(); } catch { }
     }
 
-    void ReaderLoop(object state)
+    int Available()
     {
-        var p = (NamedPipeClientStream)state;
-        try
-        {
-            while (!_stop && p != null && p.IsConnected)
-            {
-                int op; string json;
-                if (!ReadFrame(p, out op, out json)) break;
-                if (op == 3) { try { WriteFrame(4, json); } catch { } }                                   // PING -> PONG
-                else if (op == 1 && json.IndexOf("\"READY\"", StringComparison.Ordinal) >= 0) { _ready = true; _dirty = true; }
-                else if (op == 2) break;                                                                    // CLOSE
-            }
-        }
+        var p = _pipe; if (p == null) return 0;
+        try { uint r, a, m; if (PeekNamedPipe(p.SafePipeHandle, null, 0, out r, out a, out m)) return (int)a; }
         catch { }
-        if (_pipe == p) Disconnect();
+        return 0;
     }
 
     string BuildActivity()
@@ -108,8 +111,8 @@ public sealed class DiscordRpc
         sb.Append(System.Diagnostics.Process.GetCurrentProcess().Id);
         sb.Append(",\"activity\":{");
         bool any = false;
-        if (_details.Length > 0) { sb.Append("\"details\":\"").Append(Esc(_details)).Append("\""); any = true; }
-        if (_state.Length > 0) { if (any) sb.Append(','); sb.Append("\"state\":\"").Append(Esc(_state)).Append("\""); any = true; }
+        if (_details.Length > 0) { sb.Append("\"details\":\"").Append(Esc(_details)).Append('"'); any = true; }
+        if (_state.Length > 0) { if (any) sb.Append(','); sb.Append("\"state\":\"").Append(Esc(_state)).Append('"'); any = true; }
         if (_startUnix > 0) { if (any) sb.Append(','); sb.Append("\"timestamps\":{\"start\":").Append(_startUnix).Append('}'); any = true; }
         if (_largeImage.Length > 0)
         {
@@ -128,7 +131,7 @@ public sealed class DiscordRpc
         byte[] data = Encoding.UTF8.GetBytes(json);
         var header = new byte[8];
         WriteInt(header, 0, op); WriteInt(header, 4, data.Length);
-        lock (_writeLock) { p.Write(header, 0, 8); p.Write(data, 0, data.Length); p.Flush(); }
+        p.Write(header, 0, 8); p.Write(data, 0, data.Length); p.Flush();
     }
 
     static bool ReadFrame(Stream s, out int op, out string json)
