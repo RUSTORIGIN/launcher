@@ -27,10 +27,10 @@ $refs = @("/r:$fw\WPF\PresentationFramework.dll","/r:$fw\WPF\PresentationCore.dl
           "/r:System.IO.Compression.dll","/r:System.IO.Compression.FileSystem.dll","/r:System.Windows.Forms.dll","/r:System.Drawing.dll")
 # NOTE: the resource NAME (after the comma) must stay "assets/..." - that is what the code
 # reads at runtime (Assets.Ensure / ConfigLines). Only the source PATH (before the comma) moved.
-$res = @("/resource:assets\1.png,assets/1.png",
-         "/resource:assets\2.png,assets/2.png",
-         "/resource:assets\3.png,assets/3.png",
-         "/resource:assets\4.png,assets/4.png",
+$res = @("/resource:assets\1.jpg,assets/1.jpg",
+         "/resource:assets\2.jpg,assets/2.jpg",
+         "/resource:assets\3.jpg,assets/3.jpg",
+         "/resource:assets\4.jpg,assets/4.jpg",
          "/resource:assets\logo.png,assets/logo.png",
          "/resource:assets\server-cover.png,assets/server-cover.png",
          "/resource:config\launcher.cfg,assets/launcher.cfg",

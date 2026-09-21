@@ -14,7 +14,7 @@ if none load, the launcher shows a dark gradient backdrop instead and keeps work
 | File | Purpose |
 |------|---------|
 | `RustOrigin.exe` | The launcher (already built). |
-| `assets/1.png`-`4.png` | The four background screenshots (cross-fading slideshow). Swap them and rebuild to change the background. |
+| `assets/1.jpg`-`4.jpg` | The four background screenshots (cross-fading slideshow). Swap them and rebuild to change the background. |
 | `logo.png` | The RUSTORIGIN OG monogram (your original PNG, transparent bg, tight-cropped). Shown top-left and as the hero logo; swap the file to change it - no rebuild needed. |
 | `logo-original.png` | Untouched copy of the original 2000x1333 logo PNG, kept for reference. |
 | `fonts\` | Bundled Montserrat brand font (4 weights + OFL license). Must ship next to the exe. |
@@ -133,7 +133,7 @@ Clicking **Install** again re-downloads and overwrites = updates.
 
 ## Releases (what players download)
 
-The launcher ships as a **single file**: `RustOrigin.exe` (~16 MB). The four background
+The launcher ships as a **single file**: `RustOrigin.exe` (~3 MB). The four background
 screenshots, logo, Montserrat fonts (+ OFL license) and the default `launcher.cfg` are embedded
 as resources and unpacked at first run to `%LOCALAPPDATA%\RUSTORIGIN\assets\<version>\`. Nothing
 else needs to sit next to the exe.
@@ -143,7 +143,7 @@ else needs to sit next to the exe.
 ```
 
 The script stamps the version into the exe, embeds the current `launcher.cfg`, `logo.png`,
-the `assets\1.png`-`4.png` screenshots and `fonts\`, and applies the app icon (`release_icon.ico`) and manifest.
+the `assets\1.jpg`-`4.jpg` screenshots and `fonts\`, and applies the app icon (`release_icon.ico`) and manifest.
 To change the embedded defaults (servers, download URL, install dir), edit `launcher.cfg`
 here and rebuild. A `launcher.cfg` placed **next to the exe** overrides the embedded one at
 runtime (handy for a test server) - a file that defines `Server=` lines replaces the list.
