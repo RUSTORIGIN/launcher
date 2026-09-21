@@ -1031,7 +1031,26 @@ public class LauncherWindow : Window
         return null;
     }
 
-    bool IsInstalled() { return FindGameExe() != null; }
+    string InstallMarkerPath() { return Path.Combine(InstallDir, ".rustorigin-installed"); }
+
+    // A finished install has the game exe AND is structurally complete: either our completion marker
+    // is present (written after a successful extract), or the Unity data folder (<exe>_Data) sits next
+    // to the exe. A half-extracted install that has RustClient.exe but no RustClient_Data does NOT
+    // count as installed - so the launcher shows INSTALL/RESUME instead of a PLAY that would launch a
+    // broken client. Also accepts a valid pre-existing install placed there outside the launcher.
+    bool IsInstalled()
+    {
+        string exe = FindGameExe();
+        if (exe == null) return false;
+        try { if (File.Exists(InstallMarkerPath())) return true; } catch { }
+        try
+        {
+            string dir = Path.GetDirectoryName(exe);
+            string data = Path.Combine(dir, Path.GetFileNameWithoutExtension(exe) + "_Data");
+            return Directory.Exists(data);
+        }
+        catch { return false; }
+    }
 
     bool HasPartial()
     {
@@ -1286,8 +1305,10 @@ public class LauncherWindow : Window
                     try { File.Delete(metaPath); } catch { }
                     Log("finalized+verified zip (" + new FileInfo(zipPath).Length + " bytes), extracting to " + InstallDir);
                     SetStatus("Extracting... this can take several minutes.");
+                    try { Directory.CreateDirectory(InstallDir); File.Delete(InstallMarkerPath()); } catch { }  // clear any old marker: not "installed" until extract finishes
                     ExtractZip(zipPath, InstallDir);
                     Log("extract done");
+                    try { File.WriteAllText(InstallMarkerPath(), DateTime.Now.ToString("o")); } catch { }        // mark the install complete only after a full extract
                     try { File.Delete(zipPath); } catch { }
                     InstallLauncherAndShortcut();
                 }
