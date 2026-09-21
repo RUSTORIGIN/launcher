@@ -713,9 +713,6 @@ public class LauncherWindow : Window
         row.Children.Add(installBtn);
         hero.Children.Add(row);
 
-        var social = SocialRow(new Thickness(1, 26, 0, 0));   // social icons directly under the PLAY/INSTALL row
-        if (social != null) hero.Children.Add(social);
-
         progTrack = new Border
         {
             Height = 5, Width = 380, CornerRadius = new CornerRadius(3), Background = B("#33202531"),
@@ -785,6 +782,8 @@ public class LauncherWindow : Window
     {
         serverStatusRefreshers.Clear();
         var wrap = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 64, 0) };
+        var social = SocialRow(new Thickness(9, 0, 0, 12));   // social icons above the server cards
+        if (social != null) wrap.Children.Add(social);
         var grid = new System.Windows.Controls.Primitives.UniformGrid { Columns = 1 };   // vertical list
         string[][] pal = {
             new[]{"#3A2E5A","#141020"}, new[]{"#2C4A3A","#121C17"}, new[]{"#2F3D5A","#12161F"},
