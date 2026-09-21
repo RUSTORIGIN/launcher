@@ -390,7 +390,8 @@ and docs. When it goes public, remember the commit history exposes the author em
 There are no automated tests; verify by running the exe:
 
 - Launch `release\RustOrigin.exe` (or a `scripts\build.bat` exe with assets beside it). The window
-  renders at 1440x860 with the screenshot slideshow, PLAY, INSTALL, the server grid, and minimize/close.
+  opens at 1440x860 in a **native resizable window** (standard title bar: icon, min/max/close, Aero
+  snap) with the screenshot slideshow, PLAY, INSTALL, and the server grid.
 - **Integrity smoke test:** blank `Sha256` -> INSTALL refused; correct `Sha256` -> download -> verify
   -> extract; wrong `Sha256` -> download rejected, nothing installed. (Also in docs/IMPLEMENTATION_PLAN.md section 5.)
 

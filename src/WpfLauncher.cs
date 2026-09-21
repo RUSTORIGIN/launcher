@@ -209,43 +209,34 @@ public class LauncherWindow : Window
         try { string sfile = Path.Combine(cacheDir, "installdir.txt"); if (File.Exists(sfile)) { string sv = File.ReadAllText(sfile).Trim(); if (sv.Length > 0) InstallDir = sv; } } catch { }
         try { string la = Prefs.Get("LaunchArgs", null); if (la != null) LaunchArgs = la; } catch { }
 
-        // ---- window chrome ----
+        // ---- window chrome (native Windows title bar + standard window features) ----
         Title = "RustOrigin Launcher";
+        try
+        {
+            var ico = System.Drawing.Icon.ExtractAssociatedIcon(Process.GetCurrentProcess().MainModule.FileName);
+            if (ico != null) base.Icon = System.Windows.Interop.Imaging.CreateBitmapSourceFromHIcon(
+                ico.Handle, System.Windows.Int32Rect.Empty, System.Windows.Media.Imaging.BitmapSizeOptions.FromEmptyOptions());
+        }
+        catch { }
         Width = 1440; Height = 860;
-        WindowStyle = WindowStyle.None;
-        AllowsTransparency = true;
-        Background = Brushes.Transparent;
-        ResizeMode = ResizeMode.NoResize;
+        MinWidth = 960; MinHeight = 600;
+        WindowStyle = WindowStyle.SingleBorderWindow;   // native title bar: icon, system menu, min/max/close
+        ResizeMode = ResizeMode.CanResize;              // resize, maximize, and Aero snap
+        Background = B("#0B0D12");                       // opaque window (no AllowsTransparency)
         ShowInTaskbar = true;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         FontFamily = new FontFamily("Segoe UI");
         UseLayoutRounding = true;
         SnapsToDevicePixels = true;
 
-        const double R = 32;
         mainGrid = new Grid { Background = B("#0B0D12") };
-        mainGrid.SizeChanged += (s, e) =>
-            mainGrid.Clip = new RectangleGeometry(new Rect(0, 0, e.NewSize.Width, e.NewSize.Height), R, R);
         Content = mainGrid;
 
         BuildBackground();
         BuildGradient();
         BuildContent();
 
-        mainGrid.Children.Add(new Border
-        {
-            CornerRadius = new CornerRadius(R), BorderBrush = B("#1AFFFFFF"),
-            BorderThickness = new Thickness(1), Background = Brushes.Transparent, IsHitTestVisible = false
-        });
-
         // (background slideshow starts its own timer in BuildBackground)
-        // Drag the window from empty areas only - never from buttons/cards, or DragMove
-        // would swallow the MouseLeftButtonUp those controls need.
-        MouseLeftButtonDown += (s, e) =>
-        {
-            if (e.ButtonState != MouseButtonState.Pressed || IsInteractive(e.OriginalSource as DependencyObject)) return;
-            try { DragMove(); } catch { }
-        };
 
         SetupTray();
         StartGameTimer();
@@ -374,7 +365,6 @@ public class LauncherWindow : Window
         homeView = new Grid();
         content.Children.Add(homeView);
 
-        BuildTopRight(homeView);
         BuildHero(homeView);
         BuildServerGrid(homeView);
     }
