@@ -48,7 +48,7 @@ plus the `Avatar`/`Offline` helpers) have been **removed** (section 4 T-cleanup,
 
 | Design element (draft) | Code | Status today |
 |---|---|---|
-| Rounded 32px card, 1px stroke, shadow | (removed) | ❌ replaced by a native resizable window (standard title bar) |
+| Rounded 32px card, 1px stroke, shadow | `WindowChrome` + `mainGrid.Clip` + `edgeBorder` | ✅ rendered - rounded frameless window with native behaviour (drag/resize/maximize/snap); flat when maximized |
 | Hero key-visual (CSS gradient scene) | `BuildBackground()` - cross-fading screenshot slideshow (`1.jpg`-`4.jpg`) + `BuildGradient()` overlays; gradient fallback | ✅ rendered (real screenshots, upgraded from the CSS mock) |
 | Window controls: **min / close** | `BuildTopRight()` + `MinimizeWithFade()` | ✅ rendered (settings gear removed) |
 | Hero: large OG logo | `BuildHero()` `logoBmp` image | ✅ rendered |
@@ -86,7 +86,7 @@ superseded: the reductions are the intended shipping state.
   per-file progress.
 - **Launch**: `Play` starts `LaunchExe` (default `RustClient.exe`) with per-server or default
   args; single-instance (focuses a running client instead of launching twice).
-- **Window/UX**: native resizable window (standard title bar min/max/close), system-tray icon (`SetupTray`), optional
+- **Window/UX**: rounded frameless window via `WindowChrome` with native drag/resize/maximize/Aero-snap and custom min/max/close caption buttons, system-tray icon (`SetupTray`), optional
   minimize-on-play (`MinimizeInGame` pref, default **off**), restore-on-exit (`WatchGame` /
   `RestoreFromGame`), install-time launcher self-copy + shortcut (`InstallLauncherAndShortcut`).
 - **Config**: `launcher.cfg` (embedded defaults, overridden by a copy next to the exe) drives

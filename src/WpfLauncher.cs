@@ -132,6 +132,9 @@ public class LauncherWindow : Window
     BitmapImage  logoBmp;
     BitmapImage  coverBmp;
     Grid homeView;
+    const double CornerR = 32;
+    Border edgeBorder;
+    Border maxBtn; TextBlock maxGlyph;
 
     // ---- palette ----
     static Brush B(string hex) { return new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex)); }
@@ -220,21 +223,44 @@ public class LauncherWindow : Window
         catch { }
         Width = 1440; Height = 860;
         MinWidth = 960; MinHeight = 600;
-        WindowStyle = WindowStyle.SingleBorderWindow;   // native title bar: icon, system menu, min/max/close
-        ResizeMode = ResizeMode.CanResize;              // resize, maximize, and Aero snap
-        Background = B("#0B0D12");                       // opaque window (no AllowsTransparency)
+        // Frameless + rounded corners, but a REAL native window underneath: WindowChrome keeps
+        // drag, resize, maximize, Aero Snap, taskbar and the system menu; custom caption buttons
+        // (built in BuildCaption) provide min/max/close. WM_GETMINMAXINFO keeps a maximized window
+        // inside the work area (taskbar stays visible).
+        WindowStyle = WindowStyle.None;
+        AllowsTransparency = true;                       // needed for the rounded corners to show through
+        Background = Brushes.Transparent;
+        ResizeMode = ResizeMode.CanResize;               // resize + maximize + Aero Snap
         ShowInTaskbar = true;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         FontFamily = new FontFamily("Segoe UI");
         UseLayoutRounding = true;
         SnapsToDevicePixels = true;
 
+        System.Windows.Shell.WindowChrome.SetWindowChrome(this, new System.Windows.Shell.WindowChrome
+        {
+            CaptionHeight = 46,                          // top strip drags the window (double-click maximizes)
+            ResizeBorderThickness = new Thickness(6),
+            CornerRadius = new CornerRadius(0),
+            GlassFrameThickness = new Thickness(0),
+            UseAeroCaptionButtons = false
+        });
+
         mainGrid = new Grid { Background = B("#0B0D12") };
+        mainGrid.SizeChanged += (s, e) => ApplyRounding();
         Content = mainGrid;
 
         BuildBackground();
         BuildGradient();
         BuildContent();
+
+        // 1px light edge to match the rounded card
+        edgeBorder = new Border { CornerRadius = new CornerRadius(CornerR), BorderBrush = B("#1AFFFFFF"),
+            BorderThickness = new Thickness(1), Background = Brushes.Transparent, IsHitTestVisible = false };
+        mainGrid.Children.Add(edgeBorder);
+
+        BuildCaption(mainGrid);
+        ApplyRounding();
 
         // (background slideshow starts its own timer in BuildBackground)
 
@@ -280,23 +306,89 @@ public class LauncherWindow : Window
         catch { }
     }
 
-    // ---------- minimize support ----------
-    // A borderless (WindowStyle=None) window needs WS_MINIMIZEBOX or the taskbar cannot
-    // minimize/restore it and the minimize animation is missing.
-    const int GWL_STYLE = -16, WS_MINIMIZEBOX = 0x20000;
+    // ---------- rounded frameless chrome + caption buttons ----------
+    void ApplyRounding()
+    {
+        double r = WindowState == WindowState.Maximized ? 0 : CornerR;   // square when maximized
+        try { mainGrid.Clip = new RectangleGeometry(new Rect(0, 0, mainGrid.ActualWidth, mainGrid.ActualHeight), r, r); } catch { }
+        if (edgeBorder != null) edgeBorder.CornerRadius = new CornerRadius(r);
+        if (maxGlyph != null) maxGlyph.Text = WindowState == WindowState.Maximized ? "" : "";   // restore : maximize
+    }
+
+    void BuildCaption(Grid host)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 10, 12, 0) };
+        row.Children.Add(CaptionBtn("", delegate { WindowState = WindowState.Minimized; }, false));   // minimize
+        maxBtn = CaptionBtn("", delegate { ToggleMaximize(); }, false);                                // maximize/restore
+        maxGlyph = (TextBlock)maxBtn.Child;
+        row.Children.Add(maxBtn);
+        row.Children.Add(CaptionBtn("", delegate { Close(); }, true));                                 // close
+        host.Children.Add(row);
+    }
+
+    Border CaptionBtn(string glyph, Action onClick, bool closeBtn)
+    {
+        var tb = new TextBlock { Text = glyph, FontFamily = Icons, FontSize = 11, Foreground = B("#E6E8EE"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var b = new Border { Width = 42, Height = 30, CornerRadius = new CornerRadius(8), Background = Brushes.Transparent, Cursor = Cursors.Hand, Child = tb, Margin = new Thickness(4, 0, 0, 0) };
+        System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(b, true);   // clickable inside the caption drag area
+        b.MouseEnter += (s, e) => { b.Background = closeBtn ? Accent : B("#1AFFFFFF"); };
+        b.MouseLeave += (s, e) => { b.Background = Brushes.Transparent; };
+        b.MouseLeftButtonUp += (s, e) => { e.Handled = true; onClick(); };
+        return b;
+    }
+
+    void ToggleMaximize() { WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized; }
+
+    // ---------- native window plumbing ----------
+    const int GWL_STYLE = -16, WS_MINIMIZEBOX = 0x20000, WS_MAXIMIZEBOX = 0x10000;
     [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, int flags);
+    [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
         try
         {
             IntPtr hwnd = new WindowInteropHelper(this).Handle;
-            SetWindowLong(hwnd, GWL_STYLE, GetWindowLong(hwnd, GWL_STYLE) | WS_MINIMIZEBOX);
+            SetWindowLong(hwnd, GWL_STYLE, GetWindowLong(hwnd, GWL_STYLE) | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+            HwndSource.FromHwnd(hwnd).AddHook(WndProc);
         }
         catch { }
     }
+
+    // Keep a maximized frameless window inside the monitor work area (don't cover the taskbar).
+    IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == 0x0024)   // WM_GETMINMAXINFO
+        {
+            try
+            {
+                var mmi = (MINMAXINFO)Marshal.PtrToStructure(lParam, typeof(MINMAXINFO));
+                IntPtr mon = MonitorFromWindow(hwnd, 2);   // MONITOR_DEFAULTTONEAREST
+                if (mon != IntPtr.Zero)
+                {
+                    var mi = new MONITORINFO { cbSize = Marshal.SizeOf(typeof(MONITORINFO)) };
+                    GetMonitorInfo(mon, ref mi);
+                    RECT wa = mi.rcWork, mrc = mi.rcMonitor;
+                    mmi.ptMaxPosition.x = wa.left - mrc.left;
+                    mmi.ptMaxPosition.y = wa.top  - mrc.top;
+                    mmi.ptMaxSize.x = wa.right  - wa.left;
+                    mmi.ptMaxSize.y = wa.bottom - wa.top;
+                    Marshal.StructureToPtr(mmi, lParam, true);
+                }
+            }
+            catch { }
+        }
+        return IntPtr.Zero;
+    }
+
+    [StructLayout(LayoutKind.Sequential)] struct POINT { public int x, y; }
+    [StructLayout(LayoutKind.Sequential)] struct RECT { public int left, top, right, bottom; }
+    [StructLayout(LayoutKind.Sequential)] struct MINMAXINFO { public POINT ptReserved, ptMaxSize, ptMaxPosition, ptMinTrackSize, ptMaxTrackSize; }
+    [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public int dwFlags; }
 
     // ---------- background slideshow (cross-fading screenshots) ----------
     void BuildBackground()
@@ -1111,6 +1203,7 @@ public class LauncherWindow : Window
     protected override void OnStateChanged(EventArgs e)
     {
         base.OnStateChanged(e);
+        ApplyRounding();                         // square corners when maximized, rounded otherwise
         if (WindowState == WindowState.Normal)   // fade back in on restore
         {
             try { BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(200)))); }
