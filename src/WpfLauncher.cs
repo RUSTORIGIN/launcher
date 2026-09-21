@@ -370,8 +370,8 @@ public class LauncherWindow : Window
             Cursor = Cursors.Hand, Child = tb, Margin = new Thickness(10, 0, 0, 0)
         };
         System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(b, true);   // clickable inside the caption drag area
-        b.MouseEnter += (s, e) => { b.Background = closeBtn ? Accent : B("#33FFFFFF"); b.BorderBrush = closeBtn ? Accent : StrokeHi; tb.Foreground = TextHi; };
-        b.MouseLeave += (s, e) => { b.Background = B("#1FFFFFFF"); b.BorderBrush = B("#26FFFFFF"); tb.Foreground = TextDim; };
+        b.MouseEnter += (s, e) => { b.Background = closeBtn ? Accent : B("#33FFFFFF"); tb.Foreground = TextHi; };
+        b.MouseLeave += (s, e) => { b.Background = B("#1FFFFFFF"); tb.Foreground = TextDim; };
         b.MouseLeftButtonUp += (s, e) => { e.Handled = true; onClick(); };
         return b;
     }
@@ -619,8 +619,8 @@ public class LauncherWindow : Window
             Background = B("#1FFFFFFF"), BorderBrush = B("#26FFFFFF"), BorderThickness = new Thickness(1),
             Margin = new Thickness(0, 0, 12, 0), Cursor = Cursors.Hand, Child = box, ToolTip = s.Url
         };
-        b.MouseEnter += (o, e) => { b.Background = B("#33FFFFFF"); b.BorderBrush = StrokeHi; glyph.Fill = TextHi; };
-        b.MouseLeave += (o, e) => { b.Background = B("#1FFFFFFF"); b.BorderBrush = B("#26FFFFFF"); glyph.Fill = TextDim; };
+        b.MouseEnter += (o, e) => { b.Background = B("#33FFFFFF"); glyph.Fill = TextHi; };
+        b.MouseLeave += (o, e) => { b.Background = B("#1FFFFFFF"); glyph.Fill = TextDim; };
         b.MouseLeftButtonUp += (o, e) => { e.Handled = true; OpenUrl(s.Url); };
         return b;
     }
