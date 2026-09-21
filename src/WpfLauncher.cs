@@ -470,14 +470,12 @@ public class LauncherWindow : Window
     // ---------- content ----------
     void BuildContent()
     {
-        var content = new Grid();
-        mainGrid.Children.Add(content);
-
-        homeView = new Grid();
-        content.Children.Add(homeView);
-
+        // The UI is designed on a fixed 1440x860 canvas; a Viewbox scales it uniformly to the
+        // window so it looks right when resized/maximized (the background fills behind it).
+        homeView = new Grid { Width = 1440, Height = 860 };
         BuildHero(homeView);
         BuildServerGrid(homeView);
+        mainGrid.Children.Add(new Viewbox { Stretch = Stretch.Uniform, Child = homeView });
     }
 
     // ---- small helpers ----
@@ -490,79 +488,12 @@ public class LauncherWindow : Window
         };
     }
 
-    Border IconBtn(string glyph, double size, Action onClick, bool outlined)
-    {
-        var b = new Border
-        {
-            Width = size, Height = size, CornerRadius = new CornerRadius(size / 2),
-            Background = Brushes.Transparent, Cursor = Cursors.Hand,
-            BorderBrush = outlined ? StrokeHi : Brushes.Transparent, BorderThickness = new Thickness(1),
-            Child = Icon(glyph, size * 0.42, B("#E6E8EE"))
-        };
-        b.MouseEnter += (s, e) => { b.Background = B("#1AFFFFFF"); };
-        b.MouseLeave += (s, e) => { b.Background = Brushes.Transparent; };
-        if (onClick != null) b.MouseLeftButtonUp += (s, e) => { e.Handled = true; onClick(); };
-        return b;
-    }
-
-    Border GlassPanel(double radius)
-    {
-        var panel = new Border
-        {
-            CornerRadius = new CornerRadius(radius),
-            BorderBrush = GlassEdge(), BorderThickness = new Thickness(1),
-            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 34, ShadowDepth = 9, Direction = 270, Opacity = 0.5, Color = (Color)ColorConverter.ConvertFromString("#000000") }
-        };
-        // Flat translucent panel (no backdrop blur), readable over the sharp screenshot behind it.
-        panel.Background = B("#CC0E1016");
-        return panel;
-    }
-
-    // Light-catching edge for glass panels: bright at the top, fading down.
-    static Brush GlassEdge()
-    {
-        var g = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
-        g.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString("#42FFFFFF"), 0));
-        g.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString("#12FFFFFF"), 0.5));
-        g.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString("#10000000"), 1));
-        return g;
-    }
-
-    static Border Tag(string text, double size)
-    {
-        return new Border
-        {
-            CornerRadius = new CornerRadius(999), Background = Brushes.Transparent,
-            BorderBrush = StrokeHi, BorderThickness = new Thickness(1),
-            Padding = new Thickness(size < 12 ? 9 : 12, size < 12 ? 3 : 4, size < 12 ? 9 : 12, size < 12 ? 3.5 : 4.5),
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Child = new TextBlock { Text = text, Foreground = TextHi, FontFamily = Brand, FontWeight = FontWeights.Medium, FontSize = size }
-        };
-    }
-
     static LinearGradientBrush Grad(string c1, string c2)
     {
         var lg = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 1) };
         lg.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString(c1), 0));
         lg.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString(c2), 1));
         return lg;
-    }
-
-    // ---- top-right pills + window controls ----
-    void BuildTopRight(Grid content)
-    {
-        var row = new StackPanel { Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(0, 32, 64, 0) };
-
-        // window controls (minimize + close; settings removed)
-        var min = IconBtn("", 36, () => MinimizeWithFade(), false); min.Margin = new Thickness(16, 0, 0, 0); min.Background = Glass; min.BorderBrush = Stroke;
-        var cls = IconBtn("", 36, () => Close(), false); cls.Margin = new Thickness(8, 0, 0, 0); cls.Background = Glass; cls.BorderBrush = Stroke;
-        cls.MouseEnter += (s, e) => { cls.Background = Accent; };
-        cls.MouseLeave += (s, e) => { cls.Background = Glass; };
-        row.Children.Add(min); row.Children.Add(cls);
-
-        content.Children.Add(row);
     }
 
     // ---- hero block ----
@@ -1112,6 +1043,20 @@ public class LauncherWindow : Window
         {
             int total = archive.Entries.Count, done = 0;
             string fullDest = Path.GetFullPath(dest);
+
+            // Refuse to start extracting if the target drive can't hold the uncompressed client
+            // (avoids failing halfway with a confusing error). +512 MB headroom.
+            long needed = 0;
+            foreach (var en in archive.Entries) needed += en.Length;
+            try
+            {
+                var drive = new DriveInfo(Path.GetPathRoot(fullDest));
+                if (drive.AvailableFreeSpace < needed + (512L << 20))
+                    throw new IOException("Not enough free space to install: need " + Human(needed) + " on drive "
+                        + drive.Name + ", but only " + Human(drive.AvailableFreeSpace) + " is free. Free up space and try again.");
+            }
+            catch (IOException) { throw; }
+            catch { }   // if the drive can't be queried, don't block the install
             foreach (var entry in archive.Entries)
             {
                 string target = Path.GetFullPath(Path.Combine(dest, entry.FullName));
@@ -1208,17 +1153,6 @@ public class LauncherWindow : Window
 
     // ---------- play ----------
     // ---- minimize/restore effects + game watching ----
-    void MinimizeWithFade()
-    {
-        try
-        {
-            var anim = new DoubleAnimation(1, 0, new Duration(TimeSpan.FromMilliseconds(140)));
-            anim.Completed += (s, e) => { try { WindowState = WindowState.Minimized; } catch { } };
-            BeginAnimation(OpacityProperty, anim);
-        }
-        catch { try { WindowState = WindowState.Minimized; } catch { } }
-    }
-
     protected override void OnStateChanged(EventArgs e)
     {
         base.OnStateChanged(e);
@@ -1408,10 +1342,6 @@ public class LauncherWindow : Window
 
     static string SelfPath() { return Process.GetCurrentProcess().MainModule.FileName; }
 
-    // Compare only Major.Minor.Build (GitHub tags are usually 3-part; a 2-part Version has Build = -1).
-    // Fully-qualified System.Version because the class has a string field named `Version`.
-    static System.Version NormVer(System.Version v) { return new System.Version(v.Major, v.Minor, v.Build < 0 ? 0 : v.Build); }
-
     void UpdateCheckWorker(string repo)
     {
         System.Version current;
@@ -1420,13 +1350,11 @@ public class LauncherWindow : Window
         string json = HttpGetString("https://api.github.com/repos/" + repo + "/releases/latest");
         if (json == null) return;   // private/unreleased/offline - silently skip
 
-        string tag = JsonStr(json, "tag_name");
-        System.Version latest;
-        if (string.IsNullOrEmpty(tag) || !System.Version.TryParse(tag.TrimStart('v', 'V'), out latest)) return;
-        if (NormVer(latest) <= NormVer(current)) { Log("update check: up to date (v" + current + " >= " + tag + ")"); return; }
+        string tag = UpdateParsing.JsonStr(json, "tag_name");
+        if (!UpdateParsing.IsNewer(AppVer(), tag)) { Log("update check: up to date (v" + current + " vs tag " + (tag ?? "?") + ")"); return; }
 
-        string exeUrl  = AssetUrl(json, "RustOrigin.exe");
-        string sumsUrl = AssetUrl(json, "SHA256SUMS.txt");
+        string exeUrl  = UpdateParsing.AssetUrl(json, "RustOrigin.exe");
+        string sumsUrl = UpdateParsing.AssetUrl(json, "SHA256SUMS.txt");
         if (exeUrl == null || sumsUrl == null) { Log("update: release " + tag + " missing RustOrigin.exe or SHA256SUMS.txt asset"); return; }
         Log("update available: v" + current + " -> " + tag);
 
@@ -1439,7 +1367,7 @@ public class LauncherWindow : Window
         }));
         if (!go) return;
 
-        string expected = HashFromSums(HttpGetString(sumsUrl), "RustOrigin.exe");
+        string expected = UpdateParsing.HashFromSums(HttpGetString(sumsUrl), "RustOrigin.exe");
         if (expected == null) { UpdateFail("Could not read the update checksum."); return; }
 
         string self = SelfPath();
@@ -1522,39 +1450,6 @@ public class LauncherWindow : Window
         }
     }
 
-    static string JsonStr(string json, string key)
-    {
-        if (json == null) return null;
-        var m = System.Text.RegularExpressions.Regex.Match(json,
-            "\"" + System.Text.RegularExpressions.Regex.Escape(key) + "\"\\s*:\\s*\"(.*?)\"");
-        return m.Success ? m.Groups[1].Value : null;
-    }
-
-    // First browser_download_url whose URL ends with the given asset file name.
-    static string AssetUrl(string json, string assetName)
-    {
-        if (json == null) return null;
-        var ms = System.Text.RegularExpressions.Regex.Matches(json,
-            "\"browser_download_url\"\\s*:\\s*\"(https://[^\"]+?/" + System.Text.RegularExpressions.Regex.Escape(assetName) + ")\"");
-        return ms.Count > 0 ? ms[0].Groups[1].Value : null;
-    }
-
-    // Parse a "<hex>  <name>" line out of a SHA256SUMS.txt body.
-    static string HashFromSums(string sums, string fileName)
-    {
-        if (sums == null) return null;
-        foreach (string raw in sums.Split('\n'))
-        {
-            string ln = raw.Trim();
-            if (ln.Length == 0) continue;
-            if (ln.EndsWith(fileName, StringComparison.OrdinalIgnoreCase))
-            {
-                string hash = ln.Split(new[] { ' ' }, 2)[0].Trim();
-                if (hash.Length == 64) return hash.ToLowerInvariant();
-            }
-        }
-        return null;
-    }
 
     static string Human(long bytes)
     {

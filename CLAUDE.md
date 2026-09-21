@@ -170,13 +170,13 @@ The WinForms `RustLauncher.exe` builds via the SDK-style project (`net48`, verif
 dotnet build -c Release src\RustLauncher.csproj   # -> src\bin\Release\RustLauncher.exe
 ```
 
-There is currently **no** test project, `cargo`, or clippy in the repo, and no CI *test* step.
-Two GitHub Actions workflows exist: **build-check** (`.github/workflows/build-check.yml`) compiles
-both builds on every push/PR to catch breakage, and **release** (`.github/workflows/release.yml`)
-builds and publishes on a version tag (see the release checklist). Do not reference commands that
-don't exist here. After changing `src\WpfLauncher.cs`, the fastest correctness check is to
-compile it with `csc` (as `build.bat` does) - a clean compile is the only gate, since there are no
-automated tests.
+There is no `cargo` or clippy here. The only automated test is
+`scripts\test_updater_parsing.ps1`, which compiles `src\UpdateParsing.cs` with `Add-Type` and
+unit-tests the self-update JSON/`SHA256SUMS`/version parsing. Two GitHub Actions workflows exist:
+**build-check** (`.github/workflows/build-check.yml`) compiles both builds **and runs that test** on
+every push/PR, and **release** (`.github/workflows/release.yml`) builds and publishes on a version
+tag (see the release checklist). Do not reference commands that don't exist here. After changing
+`src\WpfLauncher.cs`, the fastest correctness check is a clean `csc` compile (as `build.bat` does).
 
 ## Installers
 
@@ -314,8 +314,9 @@ settings screen to wire it into - users set it in `prefs.cfg`.
 
 ```
 .
-├── src/                     # all C# source (each .cs has its own Main; NOT compiled together)
+├── src/                     # C# source (WpfLauncher.cs + UpdateParsing.cs build RustOrigin.exe)
 │   ├── WpfLauncher.cs       #   PRIMARY launcher (WPF, single file) -> RustOrigin.exe
+│   ├── UpdateParsing.cs     #   pure self-update parsers (tested by scripts/test_updater_parsing.ps1)
 │   ├── Launcher.cs          #   older standalone WinForms downloader (reference-only)
 │   ├── Program.cs           #   minimal WinForms find-and-launch UI -> RustLauncher.exe
 │   ├── RustLauncher.csproj  #   SDK-style project (net48); builds Program.cs only
@@ -335,6 +336,7 @@ settings screen to wire it into - users set it in `prefs.cfg`.
 │   ├── package_client.ps1   # zip the client into RustClient.zip for hosting
 │   ├── build_msi.ps1        # build the per-user MSI installer (WiX)
 │   ├── build_installer_exe.ps1 # build the NSIS setup .exe (electron-builder style, Program Files)
+│   ├── test_updater_parsing.ps1 # unit tests for src/UpdateParsing.cs (run in build-check CI)
 │   └── installer/
 │       ├── RustOrigin.wxs   # WiX source for the MSI (WixUI_InstallDir wizard)
 │       ├── RustOrigin.nsi   # NSIS source for the setup .exe (MUI2 wizard)
@@ -342,6 +344,7 @@ settings screen to wire it into - users set it in `prefs.cfg`.
 ├── docs/
 │   ├── IMPLEMENTATION_PLAN.md  # design->code status record (reconciled to current code)
 │   ├── README-PLAYERS.txt
+│   ├── screenshot.png       # launcher screenshot used in README
 │   └── brand-kit/           # design system (css, style guide, docs)
 ├── .github/                 # workflows (build-check, release), PR template, ruleset, BRANCH_PROTECTION.md
 ├── discord/                 # discord assets
@@ -353,6 +356,7 @@ settings screen to wire it into - users set it in `prefs.cfg`.
 ├── LICENSE                  # MIT
 ├── SECURITY.md              # vulnerability-reporting policy (rustorigin@proton.me)
 ├── CONTRIBUTING.md          # pull-request workflow (branch -> PR -> CI -> merge)
+├── CHANGELOG.md             # release notes
 ├── README.md                # player/host-facing docs (authoritative for behavior)
 └── CLAUDE.md                # this file
 ```
