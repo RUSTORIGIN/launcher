@@ -286,7 +286,7 @@ Plain `Key=Value`, `#`/`;` comments. Loaded embedded-defaults-first, then overri
 | `Title` | Big hero title (default `RUSTORIGIN`). |
 | `Tagline` | Description line under the title. |
 | `Player` | Parsed into `PlayerName` but currently **not displayed** (the user pill was removed). Kept for compatibility / future use. |
-| `UpdateRepo` | `owner/repo` checked for launcher self-updates via GitHub Releases (public repos only). Blank disables. Default `RUSTORIGIN/RustOriginLauncher`. |
+| `UpdateRepo` | `owner/repo` checked for launcher self-updates via GitHub Releases (public repos only). Blank disables. Default `RUSTORIGIN/launcher`. |
 | `Server` | Repeatable, up to 6: `Server=Tag\|Name\|launch args\|players\|cover` (everything after Name optional). `cover` is an embedded image file name (e.g. `main.jpg`) used as the card background, else the shared `server-cover.png`, else a gradient. Cards stack vertically. A source that defines `Server=` lines replaces the list from the previous source. |
 
 ## Settings vs config: `launcher.cfg` (host) vs `Prefs` (per-user)
@@ -364,7 +364,7 @@ settings screen to wire it into - users set it in `prefs.cfg`.
 ## Version control
 
 This is a git repository (branch `main`), pushed to a **private** GitHub repo
-(`RUSTORIGIN/RustOriginLauncher`). `.gitignore` and `.gitattributes` are in place; line endings
+(`RUSTORIGIN/launcher`). `.gitignore` and `.gitattributes` are in place; line endings
 are normalized to LF (CRLF for `.bat`/`.ps1`).
 
 `.gitignore` keeps build output and the multi-GB client out of git:

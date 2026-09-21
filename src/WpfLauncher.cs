@@ -108,7 +108,7 @@ public class LauncherWindow : Window
     string LaunchExe   = "RustClient.exe";
     string LaunchArgs  = "";
     string Version     = "";
-    string UpdateRepo  = "RUSTORIGIN/RustOriginLauncher";   // owner/repo checked for launcher self-updates (GitHub Releases). Empty disables.
+    string UpdateRepo  = "RUSTORIGIN/launcher";   // owner/repo checked for launcher self-updates (GitHub Releases). Empty disables.
     string GameTitle   = "RUSTORIGIN";
     string Tagline     = "RUSTORIGIN is a private Rust world on the January 2021 build. Craft, raid and survive with a tight community - one click to jump in.";
     string PlayerName  = "White Pegasus";
