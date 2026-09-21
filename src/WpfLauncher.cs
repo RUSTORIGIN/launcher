@@ -436,7 +436,7 @@ public class LauncherWindow : Window
         // cheap during the cross-fade.
         bgHost.Effect = new System.Windows.Media.Effects.BlurEffect
         {
-            Radius = 22,
+            Radius = 14,
             KernelType = System.Windows.Media.Effects.KernelType.Gaussian,
             RenderingBias = System.Windows.Media.Effects.RenderingBias.Performance
         };
