@@ -122,6 +122,7 @@ Clicking **Install** again re-downloads and overwrites = updates.
 | `UpdateRepo` | `owner/repo` for launcher self-updates via GitHub Releases (public repos only; blank disables). The launcher checks on launch, and only installs an update that matches the release's `SHA256SUMS.txt`. |
 | `DiscordAppId` | Discord application id to enable **Rich Presence** ("RUSTORIGIN - In the launcher / In game" on the player's Discord). Create an app at discord.com/developers, paste its Application ID. Blank disables. |
 | `DiscordLargeImage` | Optional Rich Presence art-asset key (uploaded in the Discord app) shown as the large image. |
+| `DiscordButtonLabel` / `DiscordButtonUrl` | Optional clickable button under the presence, e.g. `Play on RustOrigin` linking to `https://rustorigin.com`. |
 | `Server` | Repeatable, up to 6: `Server=Tag\|Name\|launch args\|players\|cover` (everything after Name optional). `cover` is an embedded image file name (e.g. `main.jpg`) used as the card background. Cards stack vertically; the first is the "now playing" entry. If the launch args contain `+connect HOST:PORT`, the card shows a **live** A2S player count instead of the static `players` value. |
 | `Social` | Repeatable: `Social=platform\|url` - a clickable brand icon in the bar above the server cards that opens the URL. Built-in icons: `discord`, `youtube`, `tiktok`. |
 

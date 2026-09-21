@@ -26,7 +26,7 @@ public sealed class DiscordRpc
     public Action<string> OnLog;
     void L(string m) { try { if (OnLog != null) OnLog(m); } catch { } }
 
-    volatile string _details = "", _state = "", _largeImage = "", _largeText = "";
+    volatile string _details = "", _state = "", _largeImage = "", _largeText = "", _btnLabel = "", _btnUrl = "";
     long _startUnix;
 
     public void Start(string clientId)
@@ -37,10 +37,11 @@ public sealed class DiscordRpc
         new Thread(Loop) { IsBackground = true, Name = "discord-rpc" }.Start();
     }
 
-    public void SetPresence(string details, string state, long startUnix, string largeImage, string largeText)
+    public void SetPresence(string details, string state, long startUnix, string largeImage, string largeText, string btnLabel, string btnUrl)
     {
         _details = details ?? ""; _state = state ?? ""; _startUnix = startUnix;
         _largeImage = largeImage ?? ""; _largeText = largeText ?? "";
+        _btnLabel = btnLabel ?? ""; _btnUrl = btnUrl ?? "";
         _dirty = true;
     }
 
@@ -120,6 +121,12 @@ public sealed class DiscordRpc
             sb.Append("\"assets\":{\"large_image\":\"").Append(Esc(_largeImage)).Append('"');
             if (_largeText.Length > 0) sb.Append(",\"large_text\":\"").Append(Esc(_largeText)).Append('"');
             sb.Append('}');
+        }
+        if (_btnUrl.Length > 0)
+        {
+            if (any) sb.Append(',');
+            string label = _btnLabel.Length > 0 ? _btnLabel : _btnUrl;
+            sb.Append("\"buttons\":[{\"label\":\"").Append(Esc(label)).Append("\",\"url\":\"").Append(Esc(_btnUrl)).Append("\"}]");
         }
         sb.Append("}},\"nonce\":\"").Append(Guid.NewGuid().ToString()).Append("\"}");
         return sb.ToString();

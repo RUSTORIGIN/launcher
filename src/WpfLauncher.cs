@@ -117,6 +117,8 @@ public class LauncherWindow : Window
     string UpdateRepo  = "RUSTORIGIN/launcher";   // owner/repo checked for launcher self-updates (GitHub Releases). Empty disables.
     string DiscordAppId = "";        // Discord application id for Rich Presence. Empty disables.
     string DiscordLargeImage = "";   // Rich Presence art-asset key uploaded in the Discord app.
+    string DiscordButtonLabel = "";  // Rich Presence button label (e.g. "Play on RustOrigin").
+    string DiscordButtonUrl = "";    // Rich Presence button link (e.g. https://rustorigin.com).
     DiscordRpc discord;
     long sessionStartUnix;
     string GameTitle   = "RUSTORIGIN";
@@ -326,7 +328,7 @@ public class LauncherWindow : Window
     {
         // The Discord app name is already the top line, so use details for the build and state for
         // the activity: "RUSTORIGIN" / "January Update 2021" / "In the launcher".
-        try { if (discord != null) discord.SetPresence("January Update 2021", state, sessionStartUnix, DiscordLargeImage, GameTitle + " - January Update 2021"); }
+        try { if (discord != null) discord.SetPresence("January Update 2021", state, sessionStartUnix, DiscordLargeImage, GameTitle + " - January Update 2021", DiscordButtonLabel, DiscordButtonUrl); }
         catch { }
     }
 
@@ -1015,6 +1017,8 @@ public class LauncherWindow : Window
                     case "updaterepo":  UpdateRepo = v; break;
                     case "discordappid":     DiscordAppId = v; break;
                     case "discordlargeimage": DiscordLargeImage = v; break;
+                    case "discordbuttonlabel": DiscordButtonLabel = v; break;
+                    case "discordbuttonurl":   DiscordButtonUrl = v; break;
                     case "sha256":
                     case "clientsha256":
                     case "expectedsha256": ExpectedSha256 = v; break;
