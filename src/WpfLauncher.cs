@@ -431,6 +431,16 @@ public class LauncherWindow : Window
         bgHost = new Grid();
         bgHost.Children.Add(slideBack);
         bgHost.Children.Add(slideFront);
+        // Soft blur on the whole background so the foreground UI reads cleanly. Rendered at half
+        // resolution (blur is low-frequency, so this is invisible) with a performance bias to stay
+        // cheap during the cross-fade.
+        bgHost.Effect = new System.Windows.Media.Effects.BlurEffect
+        {
+            Radius = 22,
+            KernelType = System.Windows.Media.Effects.KernelType.Gaussian,
+            RenderingBias = System.Windows.Media.Effects.RenderingBias.Performance
+        };
+        bgHost.CacheMode = new BitmapCache { RenderAtScale = 0.5, SnapsToDevicePixels = false };
         mainGrid.Children.Add(bgHost);
 
         // Auto-switch every 7s with a ~0.9s cross-fade (gated by the BgSlideshow pref).
