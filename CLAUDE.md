@@ -13,7 +13,7 @@ All three live in `src/`, each with its own `Main()` - they are *not* compiled t
 
 | Source | Output | Built by | Notes |
 |--------|--------|----------|-------|
-| `src/WpfLauncher.cs` | `RustOrigin.exe` | `csc` via `scripts/build.bat` / `scripts/make_release.ps1` | **Primary / shipping build.** WPF, single-file, video background. Downloads + **SHA-256-verifies** + extracts + launches. |
+| `src/WpfLauncher.cs` | `RustOrigin.exe` | `csc` via `scripts/build.bat` / `scripts/make_release.ps1` | **Primary / shipping build.** WPF, single-file, cross-fading screenshot background. Downloads + **SHA-256-verifies** + extracts + launches. |
 | `src/Program.cs` | `RustLauncher.exe` | `src/RustLauncher.csproj` (`dotnet build`) | Minimal WinForms UI. **Find-and-launch only - it does not download or verify.** |
 | `src/Launcher.cs` | (none) | not wired to any build | Older standalone WinForms downloader (`WebClient`, non-resumable, **no verification**). Reference-only; excluded from the csproj. |
 
@@ -38,10 +38,13 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
 ```
 
 - The launcher holds **no** R2/cloud credentials. `DownloadUrl` is just a public direct link.
-- Everything the UI needs (`background.mp4`, `logo.png`, `server-cover.png`, `launcher.cfg`,
-  Montserrat fonts) is **embedded in the exe** as manifest resources and unpacked at first run
-  to `%LOCALAPPDATA%\RustOrigin\assets\<version>\` (WPF needs real files for `MediaElement` and
-  private fonts).
+- Everything the UI needs (the four background screenshots `1.png`-`4.png`, `logo.png`,
+  `server-cover.png`, `launcher.cfg`, Montserrat fonts) is **embedded in the exe** as manifest
+  resources and unpacked at first run to `%LOCALAPPDATA%\RustOrigin\assets\<version>\` (loaded from
+  real files for the images and private fonts).
+- The background is a **cross-fading slideshow** of `1.png`-`4.png` (switches every ~7s; see
+  `BuildBackground` / `NextSlide`). The glass panels sample a blurred+tinted copy of it for real
+  backdrop blur. Toggle via the `BgSlideshow` pref.
 - A `launcher.cfg` placed **next to the exe** overrides the embedded defaults at runtime.
 
 ## Download behavior (implemented)
@@ -125,7 +128,7 @@ dir, so no admin rights needed):
 
 | Path | Purpose |
 |------|---------|
-| `assets\<version>\` | Video/logo/fonts/`launcher.cfg` unpacked from the exe at first run (WPF needs real files). Keyed by assembly version, so a new build unpacks fresh. |
+| `assets\<version>\` | Screenshots (`1.png`-`4.png`)/logo/fonts/`launcher.cfg` unpacked from the exe at first run. Keyed by assembly version, so a new build unpacks fresh. |
 | `RustClient.zip.part` + `.part.meta` | Resumable-download buffer and its identity (URL+ETag+size) for validating a resume. |
 | `RustClient.zip` | The verified download, briefly, between finalize and extract (deleted after). |
 | `launcher.log` | Timestamped diagnostics of every download/verify step - ask players for this when an install misbehaves. |
@@ -298,8 +301,7 @@ Two separate mechanisms - don't confuse them:
 | Prefs key | Default | Effect |
 |-----------|---------|--------|
 | `LaunchArgs` | (from cfg) | Overrides `launcher.cfg`'s `LaunchArgs` for the PLAY button; set via the Game settings page. |
-| `BgVideo` | `true` | Play the background video. |
-| `ShortLoop` | `true` | Restart the intro clip at 0:16 instead of playing it in full. |
+| `BgSlideshow` | `true` | Auto-switch (cross-fade) between the background screenshots. Off keeps a single still image. |
 | `MinimizeInGame` | `false` | Minimize the launcher while the client runs. |
 | `AutoUpdate` | `true` | Check `UpdateRepo`'s GitHub Releases on launch and offer a verified self-update. |
 
@@ -318,7 +320,7 @@ in the relevant `Build*Page()`; no config change needed.
 │   ├── app.manifest         #   Win32 manifest (csc /win32manifest, csproj ApplicationManifest)
 │   └── app.ico              #   WinForms app icon (csproj ApplicationIcon)
 ├── assets/                  # build-time embedded resources + icon sources
-│   ├── background.mp4
+│   ├── 1.png / 2.png / 3.png / 4.png   # cross-fading background screenshots
 │   ├── logo.png / logo-original.png / server-cover.png
 │   ├── release_icon.ico     #   applied to RustOrigin.exe by make_release.ps1
 │   ├── app_icon_source.png
@@ -368,7 +370,7 @@ are normalized to LF (CRLF for `.bat`/`.ps1`).
 - key/cert/secret file types (`*.pem`, `*.key`, `*.pfx`, `.env`, `rclone.conf`, ...)
 
 Do commit source (`src/*.cs`, `src/*.csproj`), scripts (`scripts/*`), `config/launcher.cfg`,
-build-time `assets/` (`background.mp4`, `logo*.png`, `server-cover.png`, `fonts/`, `release_icon.ico`),
+build-time `assets/` (`1.png`-`4.png`, `logo*.png`, `server-cover.png`, `fonts/`, `release_icon.ico`),
 and docs. When it goes public, remember the commit history exposes the author email.
 
 ## Threading model
@@ -379,14 +381,14 @@ and docs. When it goes public, remember the commit history exposes the author em
   `ReportProgress`, and the completion block). Follow that pattern for any new background work.
 - Cancellation is cooperative: `volatile bool cancelRequested` (+ `activeReq.Abort()` for the
   in-flight request); long loops (download, hashing) check it and throw `OperationCanceledException`.
-- `DispatcherTimer`s (2s state refresh, video loop) run on the UI thread - keep their handlers cheap.
+- `DispatcherTimer`s (2s state refresh, 7s slideshow switch) run on the UI thread - keep their handlers cheap.
 
 ## Run & smoke-test
 
 There are no automated tests; verify by running the exe:
 
 - Launch `release\RustOrigin.exe` (or a `scripts\build.bat` exe with assets beside it). The window
-  renders at 1440x860 with the video hero, PLAY, INSTALL, the server grid, and the Settings gear.
+  renders at 1440x860 with the screenshot slideshow, PLAY, INSTALL, the server grid, and the Settings gear.
 - **Integrity smoke test:** blank `Sha256` -> INSTALL refused; correct `Sha256` -> download -> verify
   -> extract; wrong `Sha256` -> download rejected, nothing installed. (Also in docs/IMPLEMENTATION_PLAN.md section 5.)
 
@@ -401,7 +403,7 @@ There are no automated tests; verify by running the exe:
 - After changing `src/WpfLauncher.cs`, rebuild with `scripts\build.bat` (or `scripts\make_release.ps1`)
   and confirm the exe launches; there are no automated tests to rely on.
 - Asset/branding note: `assets/app_icon_source.png` -> `src/app.ico` / `assets/release_icon.ico`;
-  embedded assets (`assets/background.mp4`, `assets/logo*.png`, `assets/server-cover.png`,
+  embedded assets (`assets/1.png`-`4.png`, `assets/logo*.png`, `assets/server-cover.png`,
   `assets/fonts/`) and `config/launcher.cfg` are wired in by `scripts/make_release.ps1`.
 
 ## Disclaimer

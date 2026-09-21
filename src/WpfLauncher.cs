@@ -27,7 +27,7 @@ using System.Windows.Media.Animation;
 [assembly: AssemblyFileVersion("1.0.0.0")]
 
 // RUSTORIGIN launcher - WPF port of the Superdesign canvas composition:
-// rounded dark card, full-bleed looping video hero, floating glass UI
+// rounded dark card, full-bleed cross-fading screenshot slideshow, floating glass UI
 // (left rail, top-right pills, hero block, server column, friends rail).
 // Code-only WPF on .NET Framework 4.x: runs on any Windows 10/11, no runtime install.
 
@@ -36,7 +36,7 @@ public class App
     [STAThread]
     static void Main()
     {
-        Assets.Ensure();                 // unpack embedded video/logo/fonts/config (single-exe distribution)
+        Assets.Ensure();                 // unpack embedded screenshots/logo/fonts/config (single-exe distribution)
         LauncherWindow.ConfigureTls();
         var app = new Application();
         app.Run(new LauncherWindow());
@@ -44,14 +44,14 @@ public class App
 }
 
 // Everything the launcher needs ships INSIDE the exe as manifest resources and is unpacked once
-// per version to %LOCALAPPDATA%\RUSTORIGIN\assets\<version>\ (WPF needs real files for the
-// MediaElement and for private fonts). An optional launcher.cfg next to the exe overrides the
-// embedded defaults.
+// per version to %LOCALAPPDATA%\RUSTORIGIN\assets\<version>\ (loaded from real files for the
+// background screenshots and private fonts). An optional launcher.cfg next to the exe overrides
+// the embedded defaults.
 static class Assets
 {
     public static string Dir = "";
     static readonly string[] Files = {
-        "background.mp4", "logo.png", "server-cover.png", "launcher.cfg",
+        "1.png", "2.png", "3.png", "4.png", "logo.png", "server-cover.png", "launcher.cfg",
         "fonts/Montserrat-Regular.ttf", "fonts/Montserrat-Medium.ttf",
         "fonts/Montserrat-SemiBold.ttf", "fonts/Montserrat-Bold.ttf", "fonts/OFL.txt" };
 
@@ -125,8 +125,11 @@ public class LauncherWindow : Window
     TextBlock    statusText;
     Border       playBtn, installBtn;
     Grid         mainGrid;
-    MediaElement video;
-    Grid         blurLayer;   // blurred+tinted copy of the video that glass panels sample (real acrylic)
+    Grid         bgHost;      // background slideshow container the glass panels sample (real acrylic)
+    Image        slideBack, slideFront;   // two stacked images for cross-fading between screenshots
+    BitmapImage[] slides = new BitmapImage[0];
+    int          slideIndex;
+    Grid         blurLayer;   // blurred+tinted copy of the slideshow that glass panels sample (real acrylic)
     BitmapImage  logoBmp;
     BitmapImage  coverBmp;
     Border settingsPanel; TextBlock settingsPathLabel; TextBlock settingsStatus; TextBlock settingsCacheLabel, settingsDiskLabel; ColumnDefinition settingsDiskFillCol, settingsDiskRestCol; Grid homeView; bool settingsOpen;
@@ -237,7 +240,7 @@ public class LauncherWindow : Window
             BorderThickness = new Thickness(1), Background = Brushes.Transparent, IsHitTestVisible = false
         });
 
-        Loaded += (s, e) => { try { if (Prefs.GetBool("BgVideo", true)) video.Play(); } catch { } };
+        // (background slideshow starts its own timer in BuildBackground)
         // Drag the window from empty areas only - never from buttons/cards, or DragMove
         // would swallow the MouseLeftButtonUp those controls need.
         MouseLeftButtonDown += (s, e) =>
@@ -306,45 +309,69 @@ public class LauncherWindow : Window
         catch { }
     }
 
-    // ---------- background video ----------
+    // ---------- background slideshow (cross-fading screenshots) ----------
     void BuildBackground()
     {
-        string vid = Path.Combine(Assets.Dir, "background.mp4");
-        if (!File.Exists(vid)) vid = Path.Combine(AppDir(), "background.mp4");
-        video = new MediaElement
+        // Load the embedded screenshots (unpacked to Assets.Dir; fall back to a copy next to the exe).
+        var list = new List<BitmapImage>();
+        foreach (string n in new[] { "1.png", "2.png", "3.png", "4.png" })
         {
-            LoadedBehavior = MediaState.Manual, UnloadedBehavior = MediaState.Manual,
-            Stretch = Stretch.UniformToFill, IsMuted = true, Volume = 0, ScrubbingEnabled = false
-        };
-        video.MediaEnded += (s, e) => { try { video.Position = TimeSpan.Zero; video.Play(); } catch { } };
-        video.MediaFailed += (s, e) => ShowFallbackBackdrop();
-        if (File.Exists(vid)) { try { video.Source = new Uri(vid, UriKind.Absolute); } catch { ShowFallbackBackdrop(); } }
-        else ShowFallbackBackdrop();
+            BitmapImage bmp = LoadBitmap(Path.Combine(Assets.Dir, n)) ?? LoadBitmap(Path.Combine(AppDir(), n));
+            if (bmp != null) list.Add(bmp);
+        }
+        slides = list.ToArray();
 
-        // Frosted-glass source: a blurred + tinted copy of the video. Glass panels sample the
-        // region of this layer directly behind them, giving real backdrop blur. It sits under
-        // the sharp video (never shown directly) but still renders so VisualBrush can read it.
+        blurLayer = new Grid();
+        if (slides.Length == 0)   // no images found - plain gradient, glass panels still get a tint
+        {
+            ShowFallbackBackdrop();
+            blurLayer.Children.Add(new Rectangle { Fill = B("#8A0E1016") });
+            mainGrid.Children.Add(blurLayer);
+            return;
+        }
+
+        // Two stacked images: slideBack shows the current screenshot, slideFront fades the next one in.
+        slideBack  = new Image { Stretch = Stretch.UniformToFill, Source = slides[0] };
+        slideFront = new Image { Stretch = Stretch.UniformToFill, Opacity = 0 };
+        RenderOptions.SetBitmapScalingMode(slideBack, BitmapScalingMode.HighQuality);
+        RenderOptions.SetBitmapScalingMode(slideFront, BitmapScalingMode.HighQuality);
+        bgHost = new Grid();
+        bgHost.Children.Add(slideBack);
+        bgHost.Children.Add(slideFront);
+
+        // Frosted-glass source: a blurred + tinted copy of the slideshow. Glass panels sample the
+        // region of this layer directly behind them, giving real backdrop blur. It sits under the
+        // sharp slideshow (never shown directly) but still renders so VisualBrush can read it.
         var blurRect = new Rectangle
         {
-            Fill = new VisualBrush(video) { Stretch = Stretch.UniformToFill },
+            Fill = new VisualBrush(bgHost) { Stretch = Stretch.UniformToFill },
             Effect = new System.Windows.Media.Effects.BlurEffect { Radius = 26, KernelType = System.Windows.Media.Effects.KernelType.Gaussian, RenderingBias = System.Windows.Media.Effects.RenderingBias.Performance }
         };
         RenderOptions.SetBitmapScalingMode(blurRect, BitmapScalingMode.LowQuality);
-        blurLayer = new Grid();
         blurLayer.Children.Add(blurRect);
         blurLayer.Children.Add(new Rectangle { Fill = B("#8A0E1016") });   // frosted tint baked in (keeps text legible over bright frames)
-        // Rasterize the blurred video ONCE per frame at half resolution - blur is low-frequency,
-        // so half-res is invisible, and every glass panel then samples this cheap cache instead
-        // of each re-blurring the video. Major GPU saving; keeps animations fluid.
+        // Rasterize the blurred slideshow ONCE per frame at half resolution - blur is low-frequency,
+        // so half-res is invisible, and every glass panel then samples this cheap cache instead of
+        // each re-blurring the images. Major GPU saving; keeps animations fluid.
         blurLayer.CacheMode = new BitmapCache { RenderAtScale = 0.5, SnapsToDevicePixels = false };
         mainGrid.Children.Add(blurLayer);
-        mainGrid.Children.Add(video);
+        mainGrid.Children.Add(bgHost);
 
-        // Loop only the first 0:16 of the intro clip (the good part) and restart from the top.
-        var loopAt = TimeSpan.FromSeconds(16);
-        var loopTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
-        loopTimer.Tick += (s, e) => { try { if (Prefs.GetBool("ShortLoop", true) && video.Source != null && video.Position >= loopAt) video.Position = TimeSpan.Zero; } catch { } };
-        loopTimer.Start();
+        // Auto-switch every 7s with a ~0.9s cross-fade (gated by the BgSlideshow pref).
+        slideIndex = 0;
+        var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(7) };
+        t.Tick += (s, e) => { try { if (slides.Length > 1 && Prefs.GetBool("BgSlideshow", true)) NextSlide(); } catch { } };
+        t.Start();
+    }
+
+    void NextSlide()
+    {
+        int next = (slideIndex + 1) % slides.Length;
+        slideFront.Source = slides[next];
+        var fade = new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(900)));
+        fade.Completed += (s, e) => { try { slideBack.Source = slides[next]; } catch { } };   // settle the fade onto the back layer
+        slideFront.BeginAnimation(UIElement.OpacityProperty, fade);
+        slideIndex = next;
     }
 
     void ShowFallbackBackdrop()
@@ -1311,7 +1338,7 @@ public class LauncherWindow : Window
     void BuildSettingsPanel(Grid content)
     {
         // A real Settings tab: it replaces the whole home view (hero, grid, rail) but keeps the
-        // launcher's video background showing through a dark scrim, in the home design language.
+        // launcher's background slideshow showing through a dark scrim, in the home design language.
         var panel = new Border { Background = B("#CC0A0C11"), Visibility = Visibility.Collapsed, Opacity = 0 };
         panel.RenderTransform = new TranslateTransform();
         var rootg = new Grid();
@@ -1568,8 +1595,7 @@ public class LauncherWindow : Window
     {
         var col = new StackPanel();
         PageHeader(col, "APPEARANCE", "Look & motion");
-        col.Children.Add(ToggleRow("Background video", "Play the animated intro behind the launcher.", Prefs.GetBool("BgVideo", true), delegate(bool v) { Prefs.Set("BgVideo", v); try { if (video != null) { if (v) video.Play(); else video.Pause(); } } catch { } }));
-        col.Children.Add(ToggleRow("Loop intro only (0:16)", "Restart the clip at the 16-second mark instead of playing it in full.", Prefs.GetBool("ShortLoop", true), delegate(bool v) { Prefs.Set("ShortLoop", v); }));
+        col.Children.Add(ToggleRow("Background slideshow", "Auto-switch between the background screenshots. Off keeps a single still image.", Prefs.GetBool("BgSlideshow", true), delegate(bool v) { Prefs.Set("BgSlideshow", v); }));
         return col;
     }
 
@@ -1970,7 +1996,6 @@ public class LauncherWindow : Window
             CancelDownload();
         }
         try { if (tray != null) { tray.Visible = false; tray.Dispose(); } } catch { }
-        try { video.Stop(); video.Close(); } catch { }
         base.OnClosing(e);
     }
 }

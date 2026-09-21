@@ -1,11 +1,10 @@
 RUSTORIGIN Launcher
 ===================
 
-1. Unzip this folder anywhere (for example C:\RUSTORIGIN\Launcher).
-   Keep all the files together: RustLauncher.exe, launcher.cfg, logo.png,
-   background.mp4 and the fonts folder.
+1. Put RustOrigin.exe anywhere (for example your Desktop). It is a single
+   self-contained file - nothing else needs to sit next to it.
 
-2. Run RustLauncher.exe and click INSTALL.
+2. Run RustOrigin.exe and click INSTALL.
    The client (about 9.5 GB) downloads and installs to C:\RUSTORIGIN.
    You can close the launcher at any time - the download is saved and the
    button becomes RESUME next time.

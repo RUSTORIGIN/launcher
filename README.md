@@ -1,25 +1,25 @@
 # RUSTORIGIN Launcher
 
-A refined, borderless Windows launcher with a **looping video background** and the OG
-brand mark. It downloads the RUSTORIGIN client from a URL you host, then launches it.
-Players only need the ~6 MB launcher zip (`RustOrigin.exe` + `background.mp4` + `logo.png` + `launcher.cfg`
-+ the `fonts` folder), not the full 16 GB. See **Releases** below.
+A refined, borderless Windows launcher with a **cross-fading screenshot background** and the OG
+brand mark. It downloads the RUSTORIGIN client from a URL you host, then launches it. The launcher
+is a **single self-contained `RustOrigin.exe`** (the background screenshots, logo, fonts and
+`launcher.cfg` are embedded), not the full 16 GB client. See **Releases** below.
 
 Built with WPF against .NET Framework 4.x, so it runs on any Windows 10/11 with **no
-runtime install**. The video plays via the OS media stack (H.264 `.mp4` recommended); if a
-machine can't decode it, the launcher shows a dark gradient backdrop instead and keeps working.
+runtime install**. The background is a slideshow of four screenshots that switch every ~7 seconds;
+if none load, the launcher shows a dark gradient backdrop instead and keeps working.
 
 ## Files (ship the first three together)
 
 | File | Purpose |
 |------|---------|
 | `RustOrigin.exe` | The launcher (already built). |
-| `background.mp4` | The background video. Swap this file to change the background. |
+| `assets/1.png`-`4.png` | The four background screenshots (cross-fading slideshow). Swap them and rebuild to change the background. |
 | `logo.png` | The RUSTORIGIN OG monogram (your original PNG, transparent bg, tight-cropped). Shown top-left and as the hero logo; swap the file to change it - no rebuild needed. |
 | `logo-original.png` | Untouched copy of the original 2000x1333 logo PNG, kept for reference. |
 | `fonts\` | Bundled Montserrat brand font (4 weights + OFL license). Must ship next to the exe. |
 | `launcher.cfg` | Config: download URL, install folder, exe, title, tagline. |
-| `src/WpfLauncher.cs` | Source of the video launcher. |
+| `src/WpfLauncher.cs` | Source of the launcher (WPF). |
 | `src/Launcher.cs` | Source of an older plain WinForms version (optional). |
 | `scripts/build.bat` | Dev compile check of `src/WpfLauncher.cs`. |
 | `scripts/make_release.ps1` | Build the shippable single-file `RustOrigin.exe`. |
@@ -39,7 +39,7 @@ readability.
 
 ## The window (1440x860, ported from the Superdesign canvas design)
 
-- Rounded (32px), borderless card over a full-bleed looping video hero, draggable from empty areas.
+- Rounded (32px), borderless card over a full-bleed cross-fading screenshot slideshow, draggable from empty areas.
 - **Top-left**: OG logo mark in a glass pill. **Left rail**: games / library / collections icons.
 - **Top-right**: recent-games pill (star, thumbnails, link) + user pill (chat, bell, avatar,
   player name, now-playing) + minimize/close.
@@ -133,17 +133,17 @@ Clicking **Install** again re-downloads and overwrites = updates.
 
 ## Releases (what players download)
 
-The launcher ships as a **single file**: `RustOrigin.exe` (~7 MB). The video, logo,
-Montserrat fonts (+ OFL license) and the default `launcher.cfg` are embedded as resources
-and unpacked at first run to `%LOCALAPPDATA%\RUSTORIGIN\assets\<version>\` (WPF needs real
-files for the video and private fonts). Nothing else needs to sit next to the exe.
+The launcher ships as a **single file**: `RustOrigin.exe` (~16 MB). The four background
+screenshots, logo, Montserrat fonts (+ OFL license) and the default `launcher.cfg` are embedded
+as resources and unpacked at first run to `%LOCALAPPDATA%\RUSTORIGIN\assets\<version>\`. Nothing
+else needs to sit next to the exe.
 
 ```powershell
 .\scripts\make_release.ps1 -Version 1.0.0     # -> release\RustOrigin.exe
 ```
 
 The script stamps the version into the exe, embeds the current `launcher.cfg`, `logo.png`,
-`background.mp4` and `fonts\`, and applies the app icon (`release_icon.ico`) and manifest.
+the `assets\1.png`-`4.png` screenshots and `fonts\`, and applies the app icon (`release_icon.ico`) and manifest.
 To change the embedded defaults (servers, download URL, install dir), edit `launcher.cfg`
 here and rebuild. A `launcher.cfg` placed **next to the exe** overrides the embedded one at
 runtime (handy for a test server) - a file that defines `Server=` lines replaces the list.

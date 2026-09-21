@@ -49,7 +49,7 @@ plus the `Avatar`/`Offline` helpers) have been **removed** (section 4 T-cleanup,
 | Design element (draft) | Code | Status today |
 |---|---|---|
 | Rounded 32px card, 1px stroke, shadow | window chrome + `mainGrid.Clip` + edge Border | ✅ rendered |
-| Hero key-visual (CSS gradient scene) | `BuildBackground()` - looping `background.mp4` + `BuildGradient()` overlays; gradient fallback | ✅ rendered (real video, upgraded from the CSS mock) |
+| Hero key-visual (CSS gradient scene) | `BuildBackground()` - cross-fading screenshot slideshow (`1.png`-`4.png`) + `BuildGradient()` overlays; gradient fallback | ✅ rendered (real screenshots, upgraded from the CSS mock) |
 | Window controls: **gear (Settings) / min / close** | `BuildTopRight()` + `OpenSettings()` / `MinimizeWithFade()` | ✅ rendered (app-only; not in the web mock) |
 | Hero: large OG logo | `BuildHero()` `logoBmp` image | ✅ rendered |
 | Hero: wordmark (`GameTitle`) | `BuildHero()` @ 54px | ✅ rendered |
