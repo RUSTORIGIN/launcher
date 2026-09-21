@@ -115,6 +115,10 @@ public class LauncherWindow : Window
     string LaunchArgs  = "";
     string Version     = "";
     string UpdateRepo  = "RUSTORIGIN/launcher";   // owner/repo checked for launcher self-updates (GitHub Releases). Empty disables.
+    string DiscordAppId = "";        // Discord application id for Rich Presence. Empty disables.
+    string DiscordLargeImage = "";   // Rich Presence art-asset key uploaded in the Discord app.
+    DiscordRpc discord;
+    long sessionStartUnix;
     string GameTitle   = "RUSTORIGIN";
     string Tagline     = "RUSTORIGIN is a private Rust world on the January 2021 build. Craft, raid and survive with a tight community - one click to jump in.";
     string PlayerName  = "White Pegasus";
@@ -300,6 +304,33 @@ public class LauncherWindow : Window
         StartGameTimer();
         RefreshState();
         StartUpdateCheck();
+        StartDiscord();
+    }
+
+    // ---------- Discord Rich Presence ----------
+    void StartDiscord()
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(DiscordAppId) || !Prefs.GetBool("DiscordRpc", true)) return;
+            sessionStartUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            discord = new DiscordRpc();
+            discord.Start(DiscordAppId);
+            SetDiscord("In the launcher");
+        }
+        catch { }
+    }
+
+    void SetDiscord(string state)
+    {
+        try { if (discord != null) discord.SetPresence(GameTitle, state, sessionStartUnix, DiscordLargeImage, GameTitle + " - January Update 2021"); }
+        catch { }
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        try { if (discord != null) discord.Stop(); } catch { }
+        base.OnClosed(e);
     }
 
     // ---------- system tray icon (notification area) ----------
@@ -979,6 +1010,8 @@ public class LauncherWindow : Window
                 {
                     case "downloadurl": DownloadUrl = v; break;
                     case "updaterepo":  UpdateRepo = v; break;
+                    case "discordappid":     DiscordAppId = v; break;
+                    case "discordlargeimage": DiscordLargeImage = v; break;
                     case "sha256":
                     case "clientsha256":
                     case "expectedsha256": ExpectedSha256 = v; break;
@@ -1530,6 +1563,7 @@ public class LauncherWindow : Window
         try
         {
             gameProc = null;   // our client has exited
+            SetDiscord("In the launcher");
             try { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; Activate(); } } catch { }
             RefreshState();
             statusText.Foreground = TextMute; statusText.Text = "Ready to play.";
@@ -1562,7 +1596,7 @@ public class LauncherWindow : Window
             var psi = new ProcessStartInfo(exe) { WorkingDirectory = Path.GetDirectoryName(exe) };
             if (!string.IsNullOrEmpty(args)) psi.Arguments = args;
             var proc = Process.Start(psi);
-            if (proc != null) { gameProc = proc; WatchGame(proc); if (Prefs.GetBool("MinimizeInGame", false)) { try { WindowState = WindowState.Minimized; } catch { } } }
+            if (proc != null) { gameProc = proc; WatchGame(proc); SetDiscord("In game"); if (Prefs.GetBool("MinimizeInGame", false)) { try { WindowState = WindowState.Minimized; } catch { } } }
             statusText.Foreground = TextMute; statusText.Text = "Launching...";
         }
         catch (Exception ex) { statusText.Foreground = AccentHi; statusText.Text = "Launch error: " + ex.Message; }

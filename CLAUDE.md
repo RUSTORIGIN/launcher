@@ -85,6 +85,20 @@ Notes / limits:
 - The `SHA256SUMS.txt` is **not signed** - whoever controls the repo's releases controls the update
   (same caveat as the unsigned client manifest). Signing is future work.
 
+## Discord Rich Presence
+
+`src/DiscordRpc.cs` is a **dependency-free** Discord Rich Presence client: it talks the Discord IPC
+protocol directly over the local named pipe (`\\.\pipe\discord-ipc-0..9`) using only `System.IO.Pipes`
+and hand-built JSON - no NuGet, no native Discord SDK - so it stays compatible with the single-file
+`csc` build. It runs on background threads, reconnects if Discord starts later, answers pings, and
+silently no-ops when Discord isn't running.
+
+Wiring in `WpfLauncher.cs`: `StartDiscord()` (constructor) starts it when `DiscordAppId` is set and
+the `DiscordRpc` pref is on; `SetDiscord(state)` updates the presence to "In the launcher" on start,
+"In game" when the client launches (`Play`), and back on exit (`RestoreFromGame`); `OnClosed` stops
+it. Needs a **Discord Application ID** (`DiscordAppId` in `launcher.cfg`) - blank leaves the feature
+dormant. An optional `DiscordLargeImage` names a Rich Presence art asset uploaded in the Discord app.
+
 ## Security model - current state (READ THIS)
 
 **Implemented - SHA-256 verification (mandatory):** the launcher hashes the finished download and
@@ -297,6 +311,8 @@ Plain `Key=Value`, `#`/`;` comments. Loaded embedded-defaults-first, then overri
 | `Tagline` | Description line under the title. |
 | `Player` | Parsed into `PlayerName` but currently **not displayed** (the user pill was removed). Kept for compatibility / future use. |
 | `UpdateRepo` | `owner/repo` checked for launcher self-updates via GitHub Releases (public repos only). Blank disables. Default `RUSTORIGIN/launcher`. |
+| `DiscordAppId` | Discord application id enabling **Rich Presence** (`src/DiscordRpc.cs`) - shows "RUSTORIGIN - In the launcher / In game" on the player's Discord. Blank disables. |
+| `DiscordLargeImage` | Optional Rich Presence art-asset key (uploaded in the Discord app) shown as the large image. |
 | `Server` | Repeatable, up to 6: `Server=Tag\|Name\|launch args\|players\|cover` (everything after Name optional). `cover` is an embedded image file name (e.g. `main.jpg`) used as the card background, else the shared `server-cover.png`, else a gradient. Cards stack vertically. **Live status:** when the launch args contain `+connect HOST:PORT`, the launcher queries that endpoint over Steam A2S (`src/A2S.cs`) and shows a live green/red dot + `players/max` (refreshed ~60s), overriding the static `players` field; without a `+connect` endpoint it shows the static text. A source that defines `Server=` lines replaces the list from the previous source. |
 | `Social` | Repeatable: `Social=platform\|url` -> a clickable brand icon in the bar above the server cards (opens the URL in the browser). Built-in brand marks (inline vector paths in `SocialGlyph`): `discord`, `youtube`, `tiktok`; an unknown platform key is skipped. A source that defines `Social=` lines replaces the list from the previous source. |
 
@@ -317,6 +333,7 @@ Two separate mechanisms - don't confuse them:
 | `BgSlideshow` | `true` | Auto-switch (cross-fade) between the background screenshots. Off keeps a single still image. |
 | `MinimizeInGame` | `false` | Minimize the launcher while the client runs. |
 | `AutoUpdate` | `true` | Check `UpdateRepo`'s GitHub Releases on launch and offer a verified self-update. |
+| `DiscordRpc` | `true` | Publish Discord Rich Presence (needs `DiscordAppId` set in `launcher.cfg`). |
 
 To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect. There is no
 settings screen to wire it into - users set it in `prefs.cfg`.
@@ -329,6 +346,7 @@ settings screen to wire it into - users set it in `prefs.cfg`.
 │   ├── WpfLauncher.cs       #   PRIMARY launcher (WPF, single file) -> RustOrigin.exe
 │   ├── UpdateParsing.cs     #   pure self-update parsers (tested by scripts/test_updater_parsing.ps1)
 │   ├── A2S.cs               #   Steam A2S_INFO query for live server status (tested by scripts/test_a2s_parsing.ps1)
+│   ├── DiscordRpc.cs        #   dependency-free Discord Rich Presence over the Discord IPC named pipe
 │   ├── Launcher.cs          #   older standalone WinForms downloader (reference-only)
 │   ├── Program.cs           #   minimal WinForms find-and-launch UI -> RustLauncher.exe
 │   ├── RustLauncher.csproj  #   SDK-style project (net48); builds Program.cs only

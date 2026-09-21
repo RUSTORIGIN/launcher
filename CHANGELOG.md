@@ -16,6 +16,8 @@ Initial launcher (not yet tagged/published). Highlights:
   extraction. The hero button **pauses/resumes** an in-progress download (PAUSE while downloading,
   RESUME to continue from the saved partial), and **PLAY is hidden until the client is installed**.
 - **Self-update** from GitHub Releases, verified against the release `SHA256SUMS.txt`.
+- **Discord Rich Presence** (optional, `DiscordAppId`): shows "RUSTORIGIN - In the launcher / In game"
+  on the player's Discord, via a dependency-free Discord IPC client (`src/DiscordRpc.cs`).
 - **Rounded, frameless native window** via `WindowChrome`: drag from anywhere, resize, maximize,
   Aero Snap, taskbar, system menu, circular glass min/max/close buttons; content scales on resize. The 32px
   corners come from a rounded window region (not a layered window), so the **native Windows
