@@ -2390,7 +2390,7 @@ public class LauncherWindow : Window
         string self = SelfPath();
         string newPath = self + ".new";
         try { if (File.Exists(newPath)) File.Delete(newPath); } catch { }
-        if (!HttpDownload(exeUrl, newPath)) { GateFail(repo, "The update download failed."); return; }
+        if (!HttpDownload(exeUrl, newPath, SetUpdateProgress)) { GateFail(repo, "The update download failed."); return; }
 
         string actual = Sha256File(newPath);
         if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
@@ -2419,7 +2419,7 @@ public class LauncherWindow : Window
         }
     }
 
-    Grid updateGate; TextBlock updateGateMsg;
+    Grid updateGate; TextBlock updateGateMsg; Border updateGateFill; const double UpdateBarW = 260;
 
     // Full-screen blocking gate for a mandatory update: the launcher can't be used until it updates
     // (or the player quits). Added last, so it sits on top of everything including the caption buttons.
@@ -2435,6 +2435,8 @@ public class LauncherWindow : Window
                 box.Children.Add(DialogHeader(heading, true));
                 updateGateMsg = new TextBlock { Text = message, Foreground = Ink200, FontFamily = Site, FontSize = 13, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 12, 0, 0) };
                 box.Children.Add(updateGateMsg);
+                updateGateFill = new Border { Height = 6, Width = 0, CornerRadius = new CornerRadius(3), Background = Brand500, HorizontalAlignment = HorizontalAlignment.Left };
+                box.Children.Add(new Border { Width = UpdateBarW, Height = 6, CornerRadius = new CornerRadius(3), Background = GlassSoft, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 16, 0, 0), Child = updateGateFill });
                 var quit = DialogBtn("Quit", false, delegate { try { if (tray != null) tray.Visible = false; } catch { } Application.Current.Shutdown(); });
                 quit.HorizontalAlignment = HorizontalAlignment.Center; quit.Margin = new Thickness(0, 20, 0, 0);
                 box.Children.Add(quit);
@@ -2442,6 +2444,20 @@ public class LauncherWindow : Window
                 mainGrid.Children.Add(updateGate);
             }
             else if (updateGateMsg != null) updateGateMsg.Text = message;
+        }));
+    }
+
+    // Update the gate's download progress bar + byte count (called from the download thread).
+    void SetUpdateProgress(long have, long total)
+    {
+        Dispatcher.BeginInvoke((Action)(() =>
+        {
+            try
+            {
+                if (updateGateFill != null) updateGateFill.Width = total > 0 ? UpdateBarW * Math.Max(0.0, Math.Min(1.0, (double)have / total)) : 0;
+                if (updateGateMsg != null && total > 0) updateGateMsg.Text = "Downloading update  " + Human(have) + " / " + Human(total);
+            }
+            catch { }
         }));
     }
 
@@ -2467,7 +2483,7 @@ public class LauncherWindow : Window
         catch (Exception ex) { Log("GET " + url + " failed: " + ex.Message); return null; }
     }
 
-    bool HttpDownload(string url, string dest)
+    bool HttpDownload(string url, string dest, Action<long, long> onProgress = null)
     {
         try
         {
@@ -2476,7 +2492,18 @@ public class LauncherWindow : Window
             using (var resp = (HttpWebResponse)req.GetResponse())
             using (var s = resp.GetResponseStream())
             using (var fs = new FileStream(dest, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
-                s.CopyTo(fs);
+            {
+                long total = resp.ContentLength, have = 0;
+                if (onProgress != null) onProgress(0, total);
+                byte[] buf = new byte[1 << 16];
+                int n;
+                while ((n = s.Read(buf, 0, buf.Length)) > 0)
+                {
+                    fs.Write(buf, 0, n);
+                    have += n;
+                    if (onProgress != null) onProgress(have, total);
+                }
+            }
             return true;
         }
         catch (Exception ex) { Log("download " + url + " failed: " + ex.Message); return false; }
