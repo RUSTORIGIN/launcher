@@ -1,4 +1,4 @@
-; NSIS installer for the RustOrigin Launcher - a single self-contained setup .exe
+; NSIS installer for the Rustorigin Launcher - a single self-contained setup .exe
 ; in the same style as electron-builder's NSIS output (e.g. AppName-x.y.z-x64.exe).
 ;
 ; Wizard: Welcome -> License -> Choose install folder -> Install (progress) -> Finish (run).
@@ -22,7 +22,7 @@ Unicode true
   !define REPO ".."
 !endif
 
-!define APPNAME     "RustOrigin Launcher"
+!define APPNAME     "Rustorigin Launcher"
 !define PUBLISHER   "RustOrigin"
 !define EXENAME     "RustOriginLauncher.exe"
 !define ARPKEY      "Software\Microsoft\Windows\CurrentVersion\Uninstall\RustOriginLauncher"

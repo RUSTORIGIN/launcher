@@ -1,4 +1,4 @@
-# Builds the RustOrigin Launcher MSI (per-user installer).
+# Builds the Rustorigin Launcher MSI (per-user installer).
 #
 #   .\scripts\build_msi.ps1                 -> release\RustOriginLauncher-1.0.0.msi
 #   .\scripts\build_msi.ps1 -Version 1.1.0  (also stamps the version into the exe + MSI)
@@ -29,4 +29,4 @@ if ($LASTEXITCODE -ne 0) { throw "MSI build failed" }
 
 $msi = Get-Item $out
 Write-Host ("built MSI: {0}  ({1:N2} MB)" -f $msi.FullName, ($msi.Length / 1MB))
-Write-Host "per-user install (no admin): %LOCALAPPDATA%\Programs\RustOrigin Launcher\ + Start Menu/Desktop shortcuts"
+Write-Host "per-user install (no admin): %LOCALAPPDATA%\Programs\Rustorigin Launcher\ + Start Menu/Desktop shortcuts"

@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  WiX (v4+/v7) source for the RustOrigin Launcher MSI.
+  WiX (v4+/v7) source for the Rustorigin Launcher MSI.
 
   Per-user install (no admin / no UAC): the launcher goes into
-  %LOCALAPPDATA%\Programs\RustOrigin Launcher\ with Start Menu + Desktop shortcuts and an
+  %LOCALAPPDATA%\Programs\Rustorigin Launcher\ with Start Menu + Desktop shortcuts and an
   Add/Remove Programs entry. Only the ~7 MB single-file launcher is installed; it downloads
   and SHA-256-verifies the game client itself at runtime.
 
@@ -15,7 +15,7 @@
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
-  <Package Name="RustOrigin Launcher"
+  <Package Name="Rustorigin Launcher"
            Manufacturer="RustOrigin"
            Version="!(bind.FileVersion.RustOriginExe)"
            UpgradeCode="5C476A54-DD8A-4419-899B-A53AA4FCE177"
@@ -40,7 +40,7 @@
     <!-- Install locations -->
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="ProgramsFolder" Name="Programs">
-        <Directory Id="INSTALLFOLDER" Name="RustOrigin Launcher" />
+        <Directory Id="INSTALLFOLDER" Name="Rustorigin Launcher" />
       </Directory>
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder" />
@@ -57,15 +57,15 @@
         <RegistryValue Root="HKCU" Key="Software\RustOrigin\Launcher"
                        Name="installed" Type="integer" Value="1" KeyPath="yes" />
         <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder"
-                  Name="RustOrigin Launcher" Description="Launch RustOrigin"
+                  Name="Rustorigin Launcher" Description="Launch RustOrigin"
                   Target="[#RustOriginExe]" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
         <Shortcut Id="DesktopShortcut" Directory="DesktopFolder"
-                  Name="RustOrigin Launcher" Description="Launch RustOrigin"
+                  Name="Rustorigin Launcher" Description="Launch RustOrigin"
                   Target="[#RustOriginExe]" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
       </Component>
     </ComponentGroup>
 
-    <Feature Id="Main" Title="RustOrigin Launcher" Level="1">
+    <Feature Id="Main" Title="Rustorigin Launcher" Level="1">
       <ComponentGroupRef Id="AppComponents" />
     </Feature>
   </Package>

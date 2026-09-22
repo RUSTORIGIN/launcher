@@ -8,7 +8,7 @@ $script:fail = 0
 function Check($name, $cond) { if ($cond) { Write-Host "  PASS  $name" } else { Write-Host "  FAIL  $name"; $script:fail++ } }
 
 $base = 'https://github.com/RUSTORIGIN/RustOriginLauncher/releases/download/v1.2.0'
-$json = '{"tag_name":"v1.2.0","name":"RustOrigin Launcher 1.2.0","assets":[' +
+$json = '{"tag_name":"v1.2.0","name":"Rustorigin Launcher 1.2.0","assets":[' +
         '{"name":"RustOriginLauncher.exe","browser_download_url":"' + $base + '/RustOriginLauncher.exe"},' +
         '{"name":"SHA256SUMS.txt","browser_download_url":"' + $base + '/SHA256SUMS.txt"}]}'
 $sums = "716fb0f17748da6eb90ca46c6b184dc9ad567c871008098ded0eb7579a6519d8  RustOriginLauncher.exe`n" +
