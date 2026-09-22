@@ -27,8 +27,8 @@ jobs:
         shell: pwsh
         run: |
           .\scripts\make_release.ps1 -Version 0.0.0
-          if (-not (Test-Path 'release\RustOriginLauncher.exe')) { throw 'RustOriginLauncher.exe was not produced' }
-          Write-Host 'RustOriginLauncher.exe built OK'
+          if (-not (Test-Path 'release\RustoriginLauncher.exe')) { throw 'RustoriginLauncher.exe was not produced' }
+          Write-Host 'RustoriginLauncher.exe built OK'
 
       - name: Test updater parsing
         shell: pwsh

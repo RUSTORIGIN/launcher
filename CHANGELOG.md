@@ -8,7 +8,7 @@ All notable changes to the RustOrigin launcher are documented here. Format loose
 Initial launcher (not yet tagged/published). Highlights:
 
 ### Added
-- Single-file WPF launcher (`RustOriginLauncher.exe`, ~3 MB) - downloads, verifies, extracts and launches
+- Single-file WPF launcher (`RustoriginLauncher.exe`, ~3 MB) - downloads, verifies, extracts and launches
   the Rust ("January 2021") client.
 - **Mandatory SHA-256 verification** of the downloaded client (rejects any mismatch; Install is
   blocked without a configured hash).

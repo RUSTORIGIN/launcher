@@ -24,14 +24,14 @@ Unicode true
 
 !define APPNAME     "Rustorigin Launcher"
 !define PUBLISHER   "RustOrigin"
-!define EXENAME     "RustOriginLauncher.exe"
-!define ARPKEY      "Software\Microsoft\Windows\CurrentVersion\Uninstall\RustOriginLauncher"
+!define EXENAME     "RustoriginLauncher.exe"
+!define ARPKEY      "Software\Microsoft\Windows\CurrentVersion\Uninstall\RustoriginLauncher"
 
 Name "${APPNAME}"
 !ifdef OUTFILE
   OutFile "${OUTFILE}"
 !else
-  OutFile "RustOriginLauncher-${VERSION}-x64.exe"
+  OutFile "RustoriginLauncher-${VERSION}-x64.exe"
 !endif
 InstallDir "$PROGRAMFILES64\${APPNAME}"
 InstallDirRegKey HKLM "Software\RustOrigin\Launcher" "InstallDir"

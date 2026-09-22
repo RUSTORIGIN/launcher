@@ -2306,7 +2306,7 @@ public class LauncherWindow : Window
         try
         {
             string self = Process.GetCurrentProcess().MainModule.FileName;
-            string installed = Path.Combine(InstallDir, "RustOriginLauncher.exe");
+            string installed = Path.Combine(InstallDir, "RustoriginLauncher.exe");
             try
             {
                 if (!string.Equals(Path.GetFullPath(self), Path.GetFullPath(installed), StringComparison.OrdinalIgnoreCase))
@@ -2345,7 +2345,7 @@ public class LauncherWindow : Window
 
     // ---------- launcher self-update ----------
     // Checks the configured GitHub repo's latest release, and if it is newer than this build,
-    // downloads the new RustOriginLauncher.exe, VERIFIES its SHA-256 against the release's SHA256SUMS.txt,
+    // downloads the new RustoriginLauncher.exe, VERIFIES its SHA-256 against the release's SHA256SUMS.txt,
     // and swaps itself out (rename-running-exe trick) before relaunching. A failed hash check
     // rejects the update - the launcher never runs an unverified replacement, same as the client.
     void StartUpdateCheck()
@@ -2376,9 +2376,9 @@ public class LauncherWindow : Window
         string tag = UpdateParsing.JsonStr(json, "tag_name");
         if (!UpdateParsing.IsNewer(AppVer(), tag)) { Log("update check: up to date (v" + current + " vs tag " + (tag ?? "?") + ")"); return; }
 
-        string exeUrl  = UpdateParsing.AssetUrl(json, "RustOriginLauncher.exe");
+        string exeUrl  = UpdateParsing.AssetUrl(json, "RustoriginLauncher.exe");
         string sumsUrl = UpdateParsing.AssetUrl(json, "SHA256SUMS.txt");
-        if (exeUrl == null || sumsUrl == null) { Log("update: release " + tag + " missing RustOriginLauncher.exe or SHA256SUMS.txt asset"); return; }
+        if (exeUrl == null || sumsUrl == null) { Log("update: release " + tag + " missing RustoriginLauncher.exe or SHA256SUMS.txt asset"); return; }
         Log("update available: v" + current + " -> " + tag);
 
         // Update available: show the prompt. It does NOT auto-download - the player presses Update.
@@ -2434,7 +2434,7 @@ public class LauncherWindow : Window
     void PerformUpdate()
     {
         string repo = pendingRepo, exeUrl = pendingExeUrl, sumsUrl = pendingSumsUrl, tag = pendingTag;
-        string expected = UpdateParsing.HashFromSums(HttpGetString(sumsUrl), "RustOriginLauncher.exe");
+        string expected = UpdateParsing.HashFromSums(HttpGetString(sumsUrl), "RustoriginLauncher.exe");
         if (expected == null) { GateFail(repo, "Could not read the update checksum."); return; }
 
         string self = SelfPath();

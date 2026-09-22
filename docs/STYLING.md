@@ -1,6 +1,6 @@
 # Launcher Styling Guide
 
-Visual and UI conventions for **RustOriginLauncher** — a code-only WPF app whose entire
+Visual and UI conventions for **RustoriginLauncher** — a code-only WPF app whose entire
 interface is built imperatively in C# in [`src/WpfLauncher.cs`](../src/WpfLauncher.cs).
 No XAML, no `ResourceDictionary`, no `Style` objects. It targets .NET Framework 4.x and
 compiles with the `csc.exe` that ships with Windows 10/11 (BCL + `PresentationFramework`,

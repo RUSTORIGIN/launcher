@@ -1,10 +1,10 @@
 # Builds the single-file NSIS setup .exe (electron-builder style):
-#   RustOriginLauncher-<version>-x64.exe  (Welcome -> License -> Choose folder -> Install -> Finish)
+#   RustoriginLauncher-<version>-x64.exe  (Welcome -> License -> Choose folder -> Install -> Finish)
 #
-#   .\scripts\build_installer_exe.ps1                 -> release\RustOriginLauncher-1.0.0-x64.exe
+#   .\scripts\build_installer_exe.ps1                 -> release\RustoriginLauncher-1.0.0-x64.exe
 #   .\scripts\build_installer_exe.ps1 -Version 1.1.0
 #
-# Steps: (1) build the fresh single-file release\RustOriginLauncher.exe via make_release.ps1,
+# Steps: (1) build the fresh single-file release\RustoriginLauncher.exe via make_release.ps1,
 #        (2) compile scripts\installer\RustOrigin.nsi with NSIS (makensis).
 #
 # Requires NSIS once:  winget install NSIS.NSIS
@@ -22,7 +22,7 @@ if (-not (Test-Path $makensis)) { $makensis = "$env:ProgramFiles\NSIS\makensis.e
 if (-not (Test-Path $makensis)) { throw "NSIS not found. Install it with:  winget install NSIS.NSIS" }
 
 # 3) compile the setup .exe
-$out = "$repo\release\RustOriginLauncher-$Version-x64.exe"
+$out = "$repo\release\RustoriginLauncher-$Version-x64.exe"
 & $makensis "/DVERSION=$Version" "/DVERSION4=$Version.0" "/DREPO=$repo" "/DOUTFILE=$out" "$PSScriptRoot\installer\RustOrigin.nsi"
 if ($LASTEXITCODE -ne 0) { throw "NSIS build failed" }
 

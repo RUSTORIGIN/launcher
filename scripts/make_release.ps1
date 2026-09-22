@@ -1,10 +1,10 @@
-# Builds the SINGLE-FILE RustOriginLauncher.exe: the video, logo, Montserrat fonts (+OFL license)
+# Builds the SINGLE-FILE RustoriginLauncher.exe: the video, logo, Montserrat fonts (+OFL license)
 # and launcher.cfg are embedded as resources and unpacked at first run.
 #
-#   .\scripts\make_release.ps1                 -> release\RustOriginLauncher.exe
+#   .\scripts\make_release.ps1                 -> release\RustoriginLauncher.exe
 #   .\scripts\make_release.ps1 -Version 1.1.0  (also stamps the version into the exe)
 #
-# Ship / host ONLY release\RustOriginLauncher.exe. Edit config\launcher.cfg (servers, URL, install
+# Ship / host ONLY release\RustoriginLauncher.exe. Edit config\launcher.cfg (servers, URL, install
 # dir) and rebuild to change the embedded defaults; a launcher.cfg placed next to the exe
 # by an admin still overrides them at runtime.
 #
@@ -46,14 +46,14 @@ $res = @("/resource:assets\1.jpg,assets/1.jpg",
          "/resource:assets\fonts\Poppins-Bold.ttf,assets/fonts/Poppins-Bold.ttf",
          "/resource:assets\fonts\Poppins-OFL.txt,assets/fonts/Poppins-OFL.txt")
 
-Get-Process RustOriginLauncher -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process RustoriginLauncher -ErrorAction SilentlyContinue | Stop-Process -Force
 & "$fw\csc.exe" /nologo /nowarn:0108 /target:winexe /optimize+ `
     /win32icon:assets\release_icon.ico /win32manifest:src\app.manifest `
-    /out:RustOriginLauncher.exe $refs $res src\WpfLauncher.cs src\UpdateParsing.cs src\A2S.cs src\DiscordRpc.cs
+    /out:RustoriginLauncher.exe $refs $res src\WpfLauncher.cs src\UpdateParsing.cs src\A2S.cs src\DiscordRpc.cs
 if ($LASTEXITCODE -ne 0) { throw "BUILD FAILED" }
 
 New-Item -ItemType Directory -Force "$repo\release" | Out-Null
-Copy-Item "$repo\RustOriginLauncher.exe" "$repo\release\RustOriginLauncher.exe" -Force
-$exe = Get-Item "$repo\release\RustOriginLauncher.exe"
+Copy-Item "$repo\RustoriginLauncher.exe" "$repo\release\RustoriginLauncher.exe" -Force
+$exe = Get-Item "$repo\release\RustoriginLauncher.exe"
 Write-Host ("built single-file launcher: {0}  ({1:N2} MB, v{2})" -f $exe.FullName, ($exe.Length / 1MB), $Version)
 Write-Host "embedded: 3 night background screenshots, 2 server covers, logo.png, server-cover.png, launcher.cfg, 4x Montserrat + 4x Poppins + OFL"

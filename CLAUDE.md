@@ -13,7 +13,7 @@ All three live in `src/`, each with its own `Main()` - they are *not* compiled t
 
 | Source | Output | Built by | Notes |
 |--------|--------|----------|-------|
-| `src/WpfLauncher.cs` | `RustOriginLauncher.exe` | `csc` via `scripts/build.bat` / `scripts/make_release.ps1` | The single shipping build. WPF, single-file, cross-fading screenshot background. Downloads + **SHA-256-verifies** + extracts + launches. |
+| `src/WpfLauncher.cs` | `RustoriginLauncher.exe` | `csc` via `scripts/build.bat` / `scripts/make_release.ps1` | The single shipping build. WPF, single-file, cross-fading screenshot background. Downloads + **SHA-256-verifies** + extracts + launches. |
 | `src/UpdateParsing.cs`, `src/A2S.cs`, `src/DiscordRpc.cs` | (compiled in) | same `csc` build | Self-update parsing, Steam A2S live status, and Discord Rich Presence helpers. |
 
 Nearly all real work happens in `src/WpfLauncher.cs`. It is one self-contained code-only WPF file
@@ -23,7 +23,7 @@ downloader all live there.
 ## How it works
 
 ```
-RustOriginLauncher.exe (launcher)
+RustoriginLauncher.exe (launcher)
    |  HTTPS GET (resumable, TLS 1.2+)
    v
 DownloadUrl from launcher.cfg  (e.g. Cloudflare R2 public bucket)
@@ -86,7 +86,7 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
 
 On launch (background thread, gated by the `AutoUpdate` pref, default on), the launcher checks
 `UpdateRepo`'s **latest GitHub Release** and compares the tag to its own version. If newer, it
-prompts, downloads the release's `RustOriginLauncher.exe`, **verifies its SHA-256 against the release's
+prompts, downloads the release's `RustoriginLauncher.exe`, **verifies its SHA-256 against the release's
 `SHA256SUMS.txt`**, and self-replaces (rename running exe -> `.old`, drop the new exe in, relaunch).
 A hash mismatch is rejected - it never runs an unverified replacement, same trust model as the
 client download. See `StartUpdateCheck` / `UpdateCheckWorker` in `src/WpfLauncher.cs`.
@@ -190,14 +190,14 @@ scripts\build.bat
 ```
 
 `build.bat` does **not** embed resources, icon, or manifest and does not stamp the version - its
-`RustOriginLauncher.exe` (written to the repo root) needs the assets beside it to run. Use it only for a
+`RustoriginLauncher.exe` (written to the repo root) needs the assets beside it to run. Use it only for a
 fast compile check; never ship it on its own.
 
 Build the real single-file release exe (stamps version, embeds all resources, applies icon +
 manifest - everything is baked in, nothing needs to sit beside it):
 
 ```powershell
-.\scripts\make_release.ps1 -Version 1.0.0   # -> release\RustOriginLauncher.exe
+.\scripts\make_release.ps1 -Version 1.0.0   # -> release\RustoriginLauncher.exe
 ```
 
 There is no `cargo` or clippy here. Two `Add-Type`-based test scripts exist:
@@ -221,7 +221,7 @@ A single self-contained setup executable, the same *kind* electron-builder's NSI
 (`AppName-x.y.z-x64.exe`).
 
 ```powershell
-.\scripts\build_installer_exe.ps1 -Version 1.0.0   # -> release\RustOriginLauncher-1.0.0-x64.exe
+.\scripts\build_installer_exe.ps1 -Version 1.0.0   # -> release\RustoriginLauncher-1.0.0-x64.exe
 ```
 
 - **Wizard:** Welcome -> License (MIT) -> **Choose install folder** -> Install (progress) ->
@@ -237,7 +237,7 @@ A single self-contained setup executable, the same *kind* electron-builder's NSI
 ### B) MSI (per-user, no admin)
 
 ```powershell
-.\scripts\build_msi.ps1 -Version 1.0.0   # -> release\RustOriginLauncher-1.0.0.msi
+.\scripts\build_msi.ps1 -Version 1.0.0   # -> release\RustoriginLauncher-1.0.0.msi
 ```
 
 - **Full wizard UI** (`WixUI_InstallDir`): Welcome -> License -> **Choose install location (Browse)**
@@ -277,11 +277,11 @@ these steps move together - never upload a repackaged zip without rebuilding the
 1. `.\scripts\package_client.ps1` - produces `RustClient.zip` + prints/writes its SHA-256.
 2. Put that hash in `config\launcher.cfg` -> `Sha256=...`, and set `DownloadUrl=` to the file's direct link.
 3. `.\scripts\make_release.ps1 -Version <x.y.z>` - bakes the updated `config\launcher.cfg` (hence the
-   hash) into `release\RustOriginLauncher.exe`. Confirm the hash is embedded (it appears in the exe's
+   hash) into `release\RustoriginLauncher.exe`. Confirm the hash is embedded (it appears in the exe's
    `launcher.cfg` resource).
 4. Upload **that exact** `RustClient.zip` to the `DownloadUrl` host (e.g.
    `rclone copyto RustClient.zip r2:rustorigin/RustClient.zip --s3-no-check-bucket`).
-5. Publish `release\RustOriginLauncher.exe` (e.g. to the R2 bucket next to the client).
+5. Publish `release\RustoriginLauncher.exe` (e.g. to the R2 bucket next to the client).
 
 If the uploaded zip and the embedded hash ever drift apart, players get a (correct) integrity
 rejection and cannot install - re-run from step 1.
@@ -293,7 +293,7 @@ publishes the launcher on a version tag:
 git tag v1.0.0 && git push origin v1.0.0
 ```
 
-That builds `RustOriginLauncher.exe`, the NSIS setup `.exe`, and the MSI from the **committed**
+That builds `RustoriginLauncher.exe`, the NSIS setup `.exe`, and the MSI from the **committed**
 `config/launcher.cfg`, generates `SHA256SUMS.txt`, and creates a GitHub Release with all
 artifacts attached. **It does not touch the game client** (that 9 GB zip is never in CI), so
 steps 1-2 and 4 above (package the client, set the matching `Sha256`, upload the zip to R2)
@@ -357,8 +357,8 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 
 ```
 .
-├── src/                     # C# source (WpfLauncher.cs + UpdateParsing.cs build RustOriginLauncher.exe)
-│   ├── WpfLauncher.cs       #   PRIMARY launcher (WPF, single file) -> RustOriginLauncher.exe
+├── src/                     # C# source (WpfLauncher.cs + UpdateParsing.cs build RustoriginLauncher.exe)
+│   ├── WpfLauncher.cs       #   PRIMARY launcher (WPF, single file) -> RustoriginLauncher.exe
 │   ├── UpdateParsing.cs     #   pure self-update parsers (tested by scripts/test_updater_parsing.ps1)
 │   ├── A2S.cs               #   Steam A2S_INFO query for live server status (tested by scripts/test_a2s_parsing.ps1)
 │   ├── DiscordRpc.cs        #   dependency-free Discord Rich Presence over the Discord IPC named pipe
@@ -367,7 +367,7 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 ├── assets/                  # build-time embedded resources + icon sources
 │   ├── 1.jpg / 2.jpg / 3.jpg           # night background screenshots (embedded + cross-faded)
 │   ├── logo.png / logo-original.png / server-cover.png
-│   ├── release_icon.ico     #   applied to RustOriginLauncher.exe by make_release.ps1
+│   ├── release_icon.ico     #   applied to RustoriginLauncher.exe by make_release.ps1
 │   ├── app_icon_source.png
 │   └── fonts/               #   bundled Montserrat (4 weights) + OFL.txt
 ├── config/
@@ -392,7 +392,7 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 ├── .github/                 # workflows (build-check, release), PR template, ruleset, BRANCH_PROTECTION.md
 ├── discord/                 # discord assets
 ├── .superdesign/            # design canvas scratch (HTML mockups)
-├── release/                 # built RustOriginLauncher.exe output (git-ignored)
+├── release/                 # built RustoriginLauncher.exe output (git-ignored)
 ├── src/bin/ , src/obj/      # dotnet build output, not source of truth (git-ignored)
 ├── RustClient.zip(.sha256)  # packaged client + hash, ~9 GB (git-ignored; from package_client.ps1)
 ├── .gitignore  .gitattributes
@@ -414,7 +414,7 @@ are normalized to LF (CRLF for `.bat`/`.ps1`).
 
 - `bin/`, `obj/`, `release/` - build output (dotnet output lands in `src/bin`, `src/obj`)
 - `RustClient.zip`, `RustClient.zip.sha256`, `*.part` - packaged client (9+ GB) and download temp
-- loose built exes at the repo root (`RustOriginLauncher.exe`, `RustClient.exe`)
+- loose built exes at the repo root (`RustoriginLauncher.exe`, `RustClient.exe`)
 - `.superdesign/tmp/` - design scratch
 - key/cert/secret file types (`*.pem`, `*.key`, `*.pfx`, `.env`, `rclone.conf`, ...)
 
@@ -436,7 +436,7 @@ and docs. When it goes public, remember the commit history exposes the author em
 
 There are no automated tests; verify by running the exe:
 
-- Launch `release\RustOriginLauncher.exe` (or a `scripts\build.bat` exe with assets beside it). The window
+- Launch `release\RustoriginLauncher.exe` (or a `scripts\build.bat` exe with assets beside it). The window
   opens at 1440x860 in a **rounded frameless window** with full native behaviour (drag from anywhere,
   resize, maximize, Aero Snap, taskbar) via `WindowChrome`, custom **settings (gear) / minimize / close**
   caption buttons (there is no maximize button - maximize via double-click or Aero Snap), the
