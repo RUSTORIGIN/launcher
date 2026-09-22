@@ -94,9 +94,9 @@ static class Assets
 
 public class ServerEntry
 {
-    public string Tag, Name, Args, Players, Cover;
-    public ServerEntry(string tag, string name, string args, string players = "", string cover = "")
-    { Tag = tag; Name = name; Args = args; Players = players; Cover = cover; }
+    public string Tag, Name, Args, Players, Cover, StatusUrl;
+    public ServerEntry(string tag, string name, string args, string players = "", string cover = "", string statusUrl = "")
+    { Tag = tag; Name = name; Args = args; Players = players; Cover = cover; StatusUrl = statusUrl; }
 }
 
 public class SocialEntry
@@ -885,12 +885,14 @@ public class LauncherWindow : Window
             texts.Children.Add(new TextBlock { Text = srv.Tag.ToUpperInvariant(), Foreground = TextDim, FontFamily = Brand, FontWeight = FontWeights.SemiBold, FontSize = 9.5, Margin = new Thickness(0, 3, 0, 0), Opacity = 0.9 });
         tile.Children.Add(texts);
 
-        // Live status badge: status dot + player count. When the server's connect endpoint is known
-        // (+connect host:port in its args, else the global LaunchArgs) we query it over A2S and show a
-        // live "X/Y" with a green/red dot; otherwise we just show the static Players text from config.
+        // Live status badge: status dot + player count. Preferred source is the website stats feed
+        // (the server's StatusUrl, 6th Server= field) since this build doesn't answer raw A2S. If no
+        // StatusUrl is set we fall back to an A2S query of the +connect host:port; otherwise we just
+        // show the static Players text from config.
         string qHost; int qPort;
         bool canQuery = TryParseConnect(srv.Args.Length > 0 ? srv.Args : LaunchArgs, out qHost, out qPort);
-        if (srv.Players.Length > 0 || canQuery)
+        bool hasWeb = !string.IsNullOrEmpty(srv.StatusUrl);
+        if (srv.Players.Length > 0 || canQuery || hasWeb)
         {
             var dot = new Ellipse { Width = 8, Height = 8, Fill = B("#9AA0A6"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
             var count = new TextBlock { Text = srv.Players.Length > 0 ? srv.Players : "• • •", Foreground = TextHi, FontFamily = Brand, FontWeight = FontWeights.SemiBold, FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
@@ -904,7 +906,14 @@ public class LauncherWindow : Window
             };
             tile.Children.Add(badge);
 
-            if (canQuery)
+            if (hasWeb)
+            {
+                string url = srv.StatusUrl;
+                Action refresh = delegate { QueryServerStatusWeb(url, dot, count); };
+                serverStatusRefreshers.Add(refresh);
+                refresh();   // initial query on build
+            }
+            else if (canQuery)
             {
                 Action refresh = delegate { QueryServerStatus(qHost, qPort, dot, count); };
                 serverStatusRefreshers.Add(refresh);
@@ -974,6 +983,45 @@ public class LauncherWindow : Window
         t.Start();
     }
 
+    // Read a server's live player count from the website stats feed instead of A2S (this build does
+    // not answer raw A2S). The feed is the OriginStatsPublisher payload for ONE server: its top-level
+    // "server" block carries "players"/"maxPlayers". A slim {"players":N,"maxPlayers":N} works too.
+    // Runs on a background thread; updates the badge on the UI thread. dot: amber = checking,
+    // green = online (X/Y), red = unreachable ("Offline").
+    void QueryServerStatusWeb(string url, Ellipse dot, TextBlock count)
+    {
+        dot.Fill = B("#E0B341");   // amber: checking (called on the UI thread)
+        var t = new Thread(delegate ()
+        {
+            int players = 0, max = 0;
+            bool ok = false;
+            try
+            {
+                using (var wc = new WebClient())
+                {
+                    wc.Headers[HttpRequestHeader.CacheControl] = "no-cache";
+                    string bust = url + (url.IndexOf('?') >= 0 ? "&" : "?") + "t=" + DateTime.UtcNow.Ticks;
+                    string json = wc.DownloadString(bust);
+                    // "players"/"maxPlayers" appear only in the server block, so the first match is it.
+                    var mp = System.Text.RegularExpressions.Regex.Match(json, "\"players\"\\s*:\\s*(\\d+)");
+                    var mm = System.Text.RegularExpressions.Regex.Match(json, "\"maxPlayers\"\\s*:\\s*(\\d+)");
+                    if (mp.Success && int.TryParse(mp.Groups[1].Value, out players))
+                    {
+                        ok = true;
+                        if (mm.Success) int.TryParse(mm.Groups[1].Value, out max);
+                    }
+                }
+            }
+            catch { ok = false; }
+            Dispatcher.BeginInvoke((Action)delegate
+            {
+                if (ok) { dot.Fill = B("#3FB950"); count.Text = max > 0 ? (players + "/" + max) : players.ToString(); }
+                else    { dot.Fill = B("#F85149"); count.Text = "Offline"; }
+            });
+        }) { IsBackground = true, Name = "status-web" };
+        t.Start();
+    }
+
     // Re-query every card's live status once a minute (started once, after the grid is built).
     void StartServerStatusTimer()
     {
@@ -1030,14 +1078,15 @@ public class LauncherWindow : Window
                     case "tagline":     if (v.Length > 0) Tagline = v; break;
                     case "player":      if (v.Length > 0) PlayerName = v; break;
                     case "server":
-                        // Server=Tag|Name|launch args|players|cover   (all but Name optional). A source
-                        // that defines servers replaces the list from the previous source, not appends.
+                        // Server=Tag|Name|launch args|players|cover|statusUrl   (all but Name optional).
+                        // statusUrl is a website stats-feed URL for live player count (preferred over
+                        // A2S). A source that defines servers replaces the list from the previous source.
                         if (!clearedServers) { Servers.Clear(); clearedServers = true; }
-                        var parts = v.Split(new[] { '|' }, 5);
+                        var parts = v.Split(new[] { '|' }, 6);
                         if (parts.Length >= 2)
                             Servers.Add(new ServerEntry(parts[0].Trim(), parts[1].Trim(),
                                 parts.Length > 2 ? parts[2].Trim() : "", parts.Length > 3 ? parts[3].Trim() : "",
-                                parts.Length > 4 ? parts[4].Trim() : ""));
+                                parts.Length > 4 ? parts[4].Trim() : "", parts.Length > 5 ? parts[5].Trim() : ""));
                         break;
                     case "social":
                         // Social=platform|url  -> bottom-left social icon linking out. A source that
