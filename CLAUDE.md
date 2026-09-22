@@ -61,9 +61,11 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
   from the saved byte. One handler, `OnDownloadButton`, dispatches on `busy`; `RefreshState` sets the
   label/glyph. The **PLAY** button is hidden unless the client is installed (or our client is running).
 - **Cached-zip reuse (self-healing repair)**: `DownloadWorker` step 0 checks for an already-cached
-  `RustClient.zip` (e.g. left when an extract was interrupted). If present it re-verifies the hash and
-  extracts it directly - **no re-download**. On mismatch the cached zip is discarded and a fresh
-  download runs. So a **REPAIR** after a broken extract reuses the ~9.5 GB zip instead of pulling it again.
+  `RustClient.zip` (e.g. left when an extract was interrupted). It was SHA-256-verified when written,
+  so it is extracted directly - **no re-download and no re-hash**. If extraction fails (corrupt zip)
+  it is discarded and a fresh, verified download runs. So a **REPAIR** after a broken extract reuses
+  the ~9.5 GB zip instead of pulling it again. (Verification on a *fresh* download is unchanged - the
+  trust anchor stays mandatory; only the redundant re-hash of the already-verified cache was removed.)
 - **Completeness check / REPAIR**: `IsInstalled` requires the exe AND a non-empty `<exe>_Data` folder
   plus `UnityPlayer.dll` (or the post-extract marker). A structurally-incomplete install shows a
   **REPAIR** button and is refused by `Play()`, so a half-extracted client never launches into a

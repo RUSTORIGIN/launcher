@@ -1276,22 +1276,20 @@ public class LauncherWindow : Window
         string error = null; bool cancelled = false; bool verifyFailed = false; string verifyMsg = null;
         try
         {
-            // 0) Reuse a cached, verified RustClient.zip (e.g. left by an interrupted extract) rather
-            //    than re-downloading the whole client. Re-verify it first; on mismatch discard it and
-            //    download fresh, so a corrupt cached file is never extracted.
+            // 0) Reuse a cached RustClient.zip (e.g. left by an interrupted extract) rather than
+            //    re-downloading the whole client. It was already SHA-256-verified when it was written,
+            //    so it is extracted directly - no re-hash. If extraction fails (the zip is corrupt),
+            //    it's discarded and a fresh, verified download runs. (The mandatory verification on a
+            //    fresh download - the trust anchor - is unchanged; only the redundant re-hash is gone.)
             bool usedCache = false;
             if (!cancelRequested && File.Exists(zipPath))
             {
-                Log("cached zip present (" + new FileInfo(zipPath).Length + " bytes); verifying before reuse");
-                SetStatus("Verifying cached download...");
-                string zhash = ""; bool zok;
-                try { zok = VerifyDownload(zipPath, out zhash); }
-                catch (OperationCanceledException) { cancelled = true; zok = false; }
-                if (!cancelled && zok)
+                Log("cached zip present (" + new FileInfo(zipPath).Length + " bytes); reusing without re-download");
+                SetStatus("Extracting... this can take several minutes.");
+                try
                 {
-                    Log("cached zip verified; extracting to " + InstallDir + " (no download needed)");
-                    SetStatus("Extracting... this can take several minutes.");
-                    try { Directory.CreateDirectory(InstallDir); File.Delete(InstallMarkerPath()); } catch { }
+                    Directory.CreateDirectory(InstallDir);
+                    try { File.Delete(InstallMarkerPath()); } catch { }
                     ExtractZip(zipPath, InstallDir);
                     Log("extract done (from cached zip)");
                     try { File.WriteAllText(InstallMarkerPath(), DateTime.Now.ToString("o")); } catch { }
@@ -1299,7 +1297,11 @@ public class LauncherWindow : Window
                     InstallLauncherAndShortcut();
                     usedCache = true;
                 }
-                else if (!cancelled) { Log("cached zip failed verification; discarding and downloading fresh"); try { File.Delete(zipPath); } catch { } }
+                catch (Exception cex)
+                {
+                    Log("cached zip extract failed (" + cex.Message + "); discarding and downloading fresh");
+                    try { File.Delete(zipPath); } catch { }   // corrupt cached zip -> re-download
+                }
             }
 
             if (!usedCache && !cancelled)
