@@ -44,8 +44,7 @@ Grab the latest [**release**](https://github.com/RUSTORIGIN/launcher/releases/la
 | Asset | Use |
 |-------|-----|
 | **`RustoriginLauncher.exe`** | The single-file launcher: portable, just run it. |
-| **`RustoriginLauncher-Setup.msi`** | Installer with Start Menu + Desktop shortcuts (per-user, no admin). Stable name for a website download link. |
-| `RustoriginLauncher-<version>.msi` | The same installer, version-stamped. |
+| **`RustoriginLauncher-Setup.msi`** | Installer with Start Menu + Desktop shortcuts (per-user, no admin). Stable name for a permanent website download link. |
 
 Every asset is listed in `SHA256SUMS.txt`. The exe is unsigned, so SmartScreen may warn on first
 run (*More info → Run anyway*). **Requires Windows 10/11**; no .NET download needed.
