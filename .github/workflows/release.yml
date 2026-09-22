@@ -53,25 +53,20 @@ jobs:
           $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
           wix extension add -g WixToolset.UI.wixext/5.0.2
 
-      - name: Install NSIS
-        shell: pwsh
-        run: choco install nsis -y --no-progress
-
       - name: Build launcher (RustoriginLauncher.exe)
         shell: pwsh
         run: .\scripts\make_release.ps1 -Version ${{ steps.ver.outputs.version }}
-
-      - name: Build NSIS setup .exe
-        shell: pwsh
-        run: .\scripts\build_installer_exe.ps1 -Version ${{ steps.ver.outputs.version }}
 
       - name: Build MSI
         shell: pwsh
         run: .\scripts\build_msi.ps1 -Version ${{ steps.ver.outputs.version }}
 
+      # We ship the MSI (not an NSIS .exe) as the installer: unsigned NSIS self-extractors reliably
+      # trip the Trojan:Win32/Wacatac.B!ml machine-learning false positive, while the MSI scans clean
+      # and creates the same Start Menu + Desktop shortcuts (per-user, no admin).
       - name: Stable-named installer copy (permanent website download link)
         shell: pwsh
-        run: Copy-Item "release\RustoriginLauncher-${{ steps.ver.outputs.version }}-x64.exe" "release\RustoriginLauncher-Setup.exe"
+        run: Copy-Item "release\RustoriginLauncher-${{ steps.ver.outputs.version }}.msi" "release\RustoriginLauncher-Setup.msi"
 
       - name: Generate SHA-256 checksums
         shell: pwsh
@@ -88,8 +83,6 @@ jobs:
         with:
           subject-path: |
             release/RustoriginLauncher.exe
-            release/*-x64.exe
-            release/RustoriginLauncher-Setup.exe
             release/*.msi
 
       - name: Upload workflow artifacts
@@ -98,8 +91,6 @@ jobs:
           name: rustorigin-launcher-${{ steps.ver.outputs.version }}
           path: |
             release/RustoriginLauncher.exe
-            release/*-x64.exe
-            release/RustoriginLauncher-Setup.exe
             release/*.msi
             release/SHA256SUMS.txt
 
@@ -111,7 +102,5 @@ jobs:
           generate_release_notes: true
           files: |
             release/RustoriginLauncher.exe
-            release/*-x64.exe
-            release/RustoriginLauncher-Setup.exe
             release/*.msi
             release/SHA256SUMS.txt
