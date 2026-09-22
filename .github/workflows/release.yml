@@ -101,7 +101,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          name: RustOrigin Launcher ${{ steps.ver.outputs.version }}
+          name: Rustorigin Launcher ${{ steps.ver.outputs.version }}
           generate_release_notes: true
           files: |
             release/RustOriginLauncher.exe

@@ -9,7 +9,7 @@ Built with WPF against .NET Framework 4.x, so it runs on any Windows 10/11 with 
 runtime install**. The background is a slideshow of three night screenshots that switch every ~7 seconds;
 if none load, the launcher shows a dark gradient backdrop instead and keeps working.
 
-![RustOrigin Launcher](docs/screenshot.png)
+![Rustorigin Launcher](docs/screenshot.png)
 
 ## Files (ship the first three together)
 

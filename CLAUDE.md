@@ -1,4 +1,4 @@
-# RustOrigin Launcher
+# Rustorigin Launcher
 
 A Windows launcher for a community-hosted Rust ("January 2021" build) server. The launcher
 downloads the Rust client from a URL the host controls, extracts it, and launches it. Players
@@ -243,7 +243,7 @@ A single self-contained setup executable, the same *kind* electron-builder's NSI
 - **Full wizard UI** (`WixUI_InstallDir`): Welcome -> License -> **Choose install location (Browse)**
   -> Ready -> Progress -> Finish, plus Start Menu + Desktop shortcuts, an Add/Remove Programs entry,
   and clean uninstall/upgrade. The license page shows `scripts/installer/license.rtf` (MIT).
-- **Per-user install, no admin/UAC:** default location `%LOCALAPPDATA%\Programs\RustOrigin Launcher\`,
+- **Per-user install, no admin/UAC:** default location `%LOCALAPPDATA%\Programs\Rustorigin Launcher\`,
   matching the launcher's no-admin design. The user can change it on the install-location page - but
   because it's a per-user (non-elevated) MSI, picking a protected folder like `Program Files` will
   fail; keep the default or a writable path. (The launcher then installs the client to `C:\RustOrigin`.)
