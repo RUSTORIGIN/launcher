@@ -86,7 +86,7 @@ For server owners distributing the game:
 Push a version tag and CI does everything:
 
 ```bash
-git tag v1.0.3 && git push origin v1.0.3
+git tag v1.0.0 && git push origin v1.0.0
 ```
 
 The **Release** workflow builds the launcher, NSIS setup, and MSI; generates `SHA256SUMS.txt`;
@@ -100,14 +100,14 @@ Uses the .NET Framework `csc` that ships with Windows 10/11 (no SDK or NuGet).
 
 ```powershell
 .\scripts\build.bat                        # quick compile check
-.\scripts\make_release.ps1 -Version 1.0.3  # -> release\RustoriginLauncher.exe (single file)
+.\scripts\make_release.ps1 -Version 1.0.0  # -> release\RustoriginLauncher.exe (single file)
 ```
 
 Installers are optional and need WiX v5 + NSIS:
 
 ```powershell
-.\scripts\build_installer_exe.ps1 -Version 1.0.3   # NSIS setup .exe
-.\scripts\build_msi.ps1 -Version 1.0.3             # MSI
+.\scripts\build_installer_exe.ps1 -Version 1.0.0   # NSIS setup .exe
+.\scripts\build_msi.ps1 -Version 1.0.0             # MSI
 ```
 
 ## How it works
