@@ -121,7 +121,7 @@ public class LauncherWindow : Window
     string DiscordButtonUrl = "";    // Rich Presence button link (e.g. https://rustorigin.com).
     DiscordRpc discord;
     long sessionStartUnix;
-    string GameTitle   = "RUSTORIGIN";
+    string GameTitle   = "RustOriginLauncher";
     string Tagline     = "RUSTORIGIN is a private Rust world on the January 2021 build. Craft, raid and survive with a tight community - one click to jump in.";
     string PlayerName  = "White Pegasus";
     List<ServerEntry> Servers = new List<ServerEntry>();

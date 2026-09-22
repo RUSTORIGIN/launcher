@@ -1,4 +1,4 @@
-# RUSTORIGIN Launcher
+# RustOriginLauncher
 
 A refined, native Windows launcher with a **cross-fading screenshot background** and the OG
 brand mark. It downloads the RUSTORIGIN client from a URL you host, then launches it. The launcher
