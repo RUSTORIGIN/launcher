@@ -14,12 +14,14 @@ public static class UpdateParsing
         return m.Success ? m.Groups[1].Value : null;
     }
 
-    // First browser_download_url whose URL ends with the given asset file name.
+    // First browser_download_url whose URL ends with the given asset file name (case-insensitive, so a
+    // rename that only changes letter case does not break self-update).
     public static string AssetUrl(string json, string assetName)
     {
         if (json == null) return null;
         var ms = Regex.Matches(json,
-            "\"browser_download_url\"\\s*:\\s*\"(https://[^\"]+?/" + Regex.Escape(assetName) + ")\"");
+            "\"browser_download_url\"\\s*:\\s*\"(https://[^\"]+?/" + Regex.Escape(assetName) + ")\"",
+            RegexOptions.IgnoreCase);
         return ms.Count > 0 ? ms[0].Groups[1].Value : null;
     }
 
