@@ -19,7 +19,7 @@ Initial launcher (not yet tagged/published). Highlights:
 - **Discord Rich Presence** (optional, `DiscordAppId`): shows "RUSTORIGIN - In the launcher / In game"
   on the player's Discord, via a dependency-free Discord IPC client (`src/DiscordRpc.cs`).
 - **Rounded, frameless native window** via `WindowChrome`: drag from anywhere, resize, maximize,
-  Aero Snap, taskbar, system menu, circular glass min/max/close buttons; content scales on resize. The 32px
+  Aero Snap, taskbar, system menu, circular glass settings/minimize/close buttons (maximize via double-click/Aero Snap); content scales on resize. The 32px
   corners come from a rounded window region (not a layered window), so the **native Windows
   minimize/maximize/restore animations** are preserved.
 - **Cross-fading night screenshot background** (three embedded JPEGs, ~7s switch) with **carousel
@@ -27,6 +27,14 @@ Initial launcher (not yet tagged/published). Highlights:
 - **Vertical server cards** with per-server cover art, a **"click to join" hover overlay**, and
   **live A2S player counts** (green/red status dot + `players/max`, queried over Steam A2S when a
   card's args include `+connect host:port`, refreshed ~60s).
+- **In-app settings panel** (caption **gear** button): a glass overlay with the per-user toggles
+  (background slideshow, minimize-in-game, auto-update, Discord Rich Presence), the PLAY launch args,
+  and "Open log folder" / "Re-import Rust config" actions. Closes on X / Done / backdrop / Esc; prefs
+  remain editable in `prefs.cfg`.
+- **Import existing Rust keybinds (first run):** on the first completed install, the launcher finds the
+  player's existing Steam Rust `cfg` folder (default paths, registry Steam path, and all
+  `libraryfolders.vdf` libraries) and offers to copy it in so their keybinds carry over. One-time prompt
+  (`RustConfigImported` pref); graphics settings are noted as not carrying to the January-2021 build.
 - **Social links** bar above the server cards: configurable `Social=platform|url` icons with
   built-in Discord / YouTube / TikTok brand marks (inline vectors, no extra assets).
 - Two installers: **NSIS setup `.exe`** (Program Files) and **per-user MSI**.

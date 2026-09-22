@@ -39,9 +39,14 @@ License, included as `fonts\OFL.txt`) and loaded at runtime by family name - the
 falls back to Bahnschrift/Segoe UI if the folder is missing. Body text uses Segoe UI for
 readability.
 
+> **Building UI?** See the [**Styling Guide**](docs/STYLING.md) for the full palette, the
+> `B()`/`Track()` helpers, the control factories, and the frameless-window conventions used
+> throughout `src/WpfLauncher.cs`.
+
 ## The window (rounded + native, opens at 1440x860)
 
-- **Rounded, frameless** window that still behaves like a normal Windows window - **drag it from anywhere**, resize, maximize, Aero Snap, taskbar and the system menu (via WPF `WindowChrome`), with custom minimize/maximize/close buttons top-right. Corners flatten when maximized. Full-bleed cross-fading screenshot slideshow behind it, with **carousel dot indicators** at the bottom (click a dot to jump to that screenshot).
+- **Rounded, frameless** window that still behaves like a normal Windows window - **drag it from anywhere**, resize, maximize, Aero Snap, taskbar and the system menu (via WPF `WindowChrome`), with custom **settings (gear) / minimize / close** buttons top-right (maximize via double-click or Aero Snap). Corners flatten when maximized. Full-bleed cross-fading screenshot slideshow behind it, with **carousel dot indicators** at the bottom (click a dot to jump to that screenshot).
+- **Settings panel** (the gear button, top-right): toggle the background slideshow, minimize-while-in-game, auto-update and Discord Rich Presence; edit the PLAY launch arguments; open the log folder; or re-import your Rust keybinds. (Everything here is also editable in `prefs.cfg`.)
 - **Top-left**: OG logo mark in a glass pill. **Left rail**: games / library / collections icons.
 - **Top-right**: recent-games pill (star, thumbnails, link) + user pill (chat, bell, avatar,
   player name, now-playing) + minimize/close.
@@ -96,13 +101,18 @@ readability.
   (URL + ETag + size), so a new build never gets stitched onto an old partial.
 - Every download step is logged with timestamps to `%LOCALAPPDATA%\RUSTORIGIN\launcher.log`
   - ask players for this file if an install misbehaves.
+- **Keeps your keybinds:** after the first install, if you already own Rust on Steam, the launcher
+  offers (once) to copy your existing `...\steamapps\common\Rust\cfg` into RustOrigin so your
+  keybinds carry over. Graphics/quality settings don't carry - this build has its own, set them
+  in-game.
 
 ## What players do
 
 1. Run `RustOriginLauncher.exe`.
 2. Click **Install** - it downloads the zip (live progress + speed, resumable) and extracts it to
    `C:\RUSTORIGIN` (the `InstallDir` set in `launcher.cfg`).
-3. Click **PLAY** - launches `RustClient.exe`.
+3. If you already have Rust on Steam, say **Yes** to the one-time prompt to import your keybinds.
+4. Click **PLAY** - launches `RustClient.exe`.
 
 Clicking **Install** again re-downloads and overwrites = updates.
 
@@ -137,7 +147,8 @@ Clicking **Install** again re-downloads and overwrites = updates.
   `EasyAntiCheat\EasyAntiCheat_Setup.exe` once. (Many private-server builds run EAC-less -
   skip this if yours does.)
 - To rebuild after editing `src/WpfLauncher.cs`, run `scripts\build.bat` (dev check) or
-  `scripts\make_release.ps1` (shippable single-file exe).
+  `scripts\make_release.ps1` (shippable single-file exe). Follow the
+  [Styling Guide](docs/STYLING.md) when adding or changing UI.
 
 ## Releases (what players download)
 

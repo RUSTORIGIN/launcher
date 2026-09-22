@@ -39,7 +39,12 @@ $res = @("/resource:assets\1.jpg,assets/1.jpg",
          "/resource:assets\fonts\Montserrat-Medium.ttf,assets/fonts/Montserrat-Medium.ttf",
          "/resource:assets\fonts\Montserrat-SemiBold.ttf,assets/fonts/Montserrat-SemiBold.ttf",
          "/resource:assets\fonts\Montserrat-Bold.ttf,assets/fonts/Montserrat-Bold.ttf",
-         "/resource:assets\fonts\OFL.txt,assets/fonts/OFL.txt")
+         "/resource:assets\fonts\OFL.txt,assets/fonts/OFL.txt",
+         "/resource:assets\fonts\Poppins-Regular.ttf,assets/fonts/Poppins-Regular.ttf",
+         "/resource:assets\fonts\Poppins-Medium.ttf,assets/fonts/Poppins-Medium.ttf",
+         "/resource:assets\fonts\Poppins-SemiBold.ttf,assets/fonts/Poppins-SemiBold.ttf",
+         "/resource:assets\fonts\Poppins-Bold.ttf,assets/fonts/Poppins-Bold.ttf",
+         "/resource:assets\fonts\Poppins-OFL.txt,assets/fonts/Poppins-OFL.txt")
 
 Get-Process RustOriginLauncher -ErrorAction SilentlyContinue | Stop-Process -Force
 & "$fw\csc.exe" /nologo /nowarn:0108 /target:winexe /optimize+ `
@@ -51,4 +56,4 @@ New-Item -ItemType Directory -Force "$repo\release" | Out-Null
 Copy-Item "$repo\RustOriginLauncher.exe" "$repo\release\RustOriginLauncher.exe" -Force
 $exe = Get-Item "$repo\release\RustOriginLauncher.exe"
 Write-Host ("built single-file launcher: {0}  ({1:N2} MB, v{2})" -f $exe.FullName, ($exe.Length / 1MB), $Version)
-Write-Host "embedded: 3 night background screenshots, 2 server covers, logo.png, server-cover.png, launcher.cfg, 4x Montserrat + OFL"
+Write-Host "embedded: 3 night background screenshots, 2 server covers, logo.png, server-cover.png, launcher.cfg, 4x Montserrat + 4x Poppins + OFL"

@@ -18,9 +18,9 @@ using System.Runtime.InteropServices;
 using System.Windows.Interop;
 using System.Windows.Media.Animation;
 
-[assembly: AssemblyTitle("RustOriginLauncher")]
-[assembly: AssemblyProduct("RustOriginLauncher")]
-[assembly: AssemblyDescription("RustOriginLauncher - downloads, installs and launches the client")]
+[assembly: AssemblyTitle("Rustorigin Launcher")]
+[assembly: AssemblyProduct("Rustorigin Launcher")]
+[assembly: AssemblyDescription("Rustorigin Launcher - downloads, installs and launches the client")]
 [assembly: AssemblyCompany("RustOrigin")]
 [assembly: AssemblyCopyright("RustOrigin 2026")]
 [assembly: AssemblyVersion("1.0.0.0")]
@@ -54,7 +54,9 @@ static class Assets
         "1.jpg", "2.jpg", "3.jpg", "main.jpg", "train.jpg",
         "logo.png", "server-cover.png", "launcher.cfg",
         "fonts/Montserrat-Regular.ttf", "fonts/Montserrat-Medium.ttf",
-        "fonts/Montserrat-SemiBold.ttf", "fonts/Montserrat-Bold.ttf", "fonts/OFL.txt" };
+        "fonts/Montserrat-SemiBold.ttf", "fonts/Montserrat-Bold.ttf", "fonts/OFL.txt",
+        "fonts/Poppins-Regular.ttf", "fonts/Poppins-Medium.ttf",
+        "fonts/Poppins-SemiBold.ttf", "fonts/Poppins-Bold.ttf", "fonts/Poppins-OFL.txt" };
 
     public static void Ensure()
     {
@@ -121,7 +123,7 @@ public class LauncherWindow : Window
     string DiscordButtonUrl = "";    // Rich Presence button link (e.g. https://rustorigin.com).
     DiscordRpc discord;
     long sessionStartUnix;
-    string GameTitle   = "RustOriginLauncher";
+    string GameTitle   = "RUSTORIGIN";
     string Tagline     = "RUSTORIGIN is a private Rust world on the January 2021 build. Craft, raid and survive with a tight community - one click to jump in.";
     string PlayerName  = "White Pegasus";
     List<ServerEntry> Servers = new List<ServerEntry>();
@@ -153,7 +155,7 @@ public class LauncherWindow : Window
     Grid homeView;
     const double CornerR = 32;
     Border edgeBorder;
-    Border maxBtn; TextBlock maxGlyph;
+    Grid settingsOverlay;   // settings panel
 
     // ---- palette ----
     static Brush B(string hex) { return new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex)); }
@@ -164,9 +166,31 @@ public class LauncherWindow : Window
     static readonly Brush TextMute = B("#8A8E99");
     static readonly Brush Glass    = B("#8C0E1016");   // rgba(14,16,22,.55)
     static readonly Brush GlassHi  = B("#A61E222C");
-    static readonly Brush Stroke   = B("#1FFFFFFF");   // rgba(255,255,255,.12)
-    static readonly Brush StrokeHi = B("#59FFFFFF");   // rgba(255,255,255,.35) outlined pills
+    static readonly Brush Stroke   = B("#1FFFFFFF");   // rgba(255,255,255,.12) - hairline + resting glass-button fill
+    static readonly Brush StrokeHi = B("#59FFFFFF");   // rgba(255,255,255,.35) outlined pills / inactive dots
     static readonly Brush Online   = B("#3BD16F");
+    static readonly Brush GlassSoft  = B("#26FFFFFF");   // rgba(255,255,255,.15) - glass-button edge / toggle-off track
+    static readonly Brush GlassHover = B("#33FFFFFF");   // rgba(255,255,255,.20) - glass-button hover fill
+    static readonly Brush Ink        = B("#12141A");     // near-black glyph/text on the white PLAY/INSTALL pills
+    static readonly Brush WindowBg   = B("#0B0D12");     // app window / mainGrid background
+    static readonly Brush StatChecking = B("#E0B341");   // status dot: querying (amber)
+    static readonly Brush StatOnline   = B("#3FB950");   // status dot: online (green)
+    static readonly Brush StatOffline  = B("#F85149");   // status dot: unreachable (red)
+    // ---- website design tokens (rustorigin.com globals.css): flat solid gunmetal, no glass, violet brand.
+    // Used by the settings panel so it matches the site's UI (surfaces are opaque; ink-700 is the one hairline).
+    static readonly Brush Ink900   = B("#141416");   // panel surface
+    static readonly Brush Ink850   = B("#17181A");   // raised / hover surface
+    static readonly Brush Ink800   = B("#1B1C1E");   // input / neutral chip
+    static readonly Brush Ink700   = B("#2C2D31");   // the one border / hairline colour
+    static readonly Brush Ink400   = B("#6B6D74");   // faint labels / descriptions
+    static readonly Brush Ink200   = B("#A7A9B0");   // body copy
+    static readonly Brush Ink100   = B("#ECECEE");   // headings
+    static readonly Brush Brand600 = B("#7C3AED");   // brand accent fill
+    static readonly Brush Brand500 = B("#8B5CF6");   // brand accent hover / input focus
+    static readonly Brush Brand400 = B("#A78BFA");   // brand eyebrow text
+    static readonly Brush Brand300 = B("#C4B5FD");   // brand hover / lighter accent
+    static readonly Brush Live     = B("#4ADE80");   // toggle-on (the site's switch uses live green)
+    static readonly Brush Danger   = B("#F87171");   // destructive / close hover
     static readonly FontFamily Icons = new FontFamily("Segoe MDL2 Assets");
 
     // Brand typeface: bundled Montserrat, falling back to Bahnschrift/Segoe UI.
@@ -185,6 +209,25 @@ public class LauncherWindow : Window
         }
         catch { }
         return new FontFamily("Bahnschrift, Segoe UI");
+    }
+
+    // Site typeface: bundled Poppins (the rustorigin.com font), used by the settings panel. Falls
+    // back to any installed Poppins, then Segoe UI.
+    static readonly FontFamily Site = MakeSite();
+    static FontFamily MakeSite()
+    {
+        try
+        {
+            string fdir = Path.Combine(Assets.Dir, "fonts");
+            if (!Directory.Exists(fdir)) fdir = Path.Combine(AppDir(), "fonts");
+            if (File.Exists(Path.Combine(fdir, "Poppins-SemiBold.ttf")))
+            {
+                var uri = new Uri(fdir.Replace('\\', '/') + "/", UriKind.Absolute);
+                return new FontFamily(uri, "./#Poppins");
+            }
+        }
+        catch { }
+        return new FontFamily("Poppins, Segoe UI");
     }
 
     static string Track(string s, int n)
@@ -225,10 +268,9 @@ public class LauncherWindow : Window
         partPath = zipPath + ".part";
         metaPath = zipPath + ".part.meta";
         try { string sfile = Path.Combine(cacheDir, "installdir.txt"); if (File.Exists(sfile)) { string sv = File.ReadAllText(sfile).Trim(); if (sv.Length > 0) InstallDir = sv; } } catch { }
-        try { string la = Prefs.Get("LaunchArgs", null); if (la != null) LaunchArgs = la; } catch { }
 
         // ---- window chrome (native Windows title bar + standard window features) ----
-        Title = "RustOriginLauncher";
+        Title = "Rustorigin Launcher";
         try
         {
             var ico = System.Drawing.Icon.ExtractAssociatedIcon(Process.GetCurrentProcess().MainModule.FileName);
@@ -249,7 +291,7 @@ public class LauncherWindow : Window
         // 32px radius AND the real Windows min/max animations.
         WindowStyle = WindowStyle.None;
         AllowsTransparency = false;
-        Background = B("#0B0D12");
+        Background = WindowBg;
         ResizeMode = ResizeMode.CanResize;               // resize + maximize + Aero Snap
         ShowInTaskbar = true;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -266,7 +308,7 @@ public class LauncherWindow : Window
             UseAeroCaptionButtons = false
         });
 
-        mainGrid = new Grid { Background = B("#0B0D12") };
+        mainGrid = new Grid { Background = WindowBg };
         mainGrid.SizeChanged += (s, e) => ApplyRounding();
         Content = mainGrid;
 
@@ -281,7 +323,11 @@ public class LauncherWindow : Window
         mainGrid.Children.Add(edgeBorder);
 
         BuildCaption(mainGrid);
+        BuildSettingsOverlay();   // hidden glass settings panel, on top of everything (gear toggles it)
         ApplyRounding();
+
+        // Esc closes the settings panel when it's open.
+        PreviewKeyDown += (s, e) => { if (e.Key == Key.Escape && settingsOverlay != null && settingsOverlay.Visibility == Visibility.Visible) { ToggleSettings(false); e.Handled = true; } };
 
         // Drag the window from ANY empty area (not just the top). Interactive controls are marked
         // with a Hand cursor, so IsInteractive skips them and they still get their clicks. Using the
@@ -300,6 +346,7 @@ public class LauncherWindow : Window
             catch { }
         };
 
+
         // (background slideshow starts its own timer in BuildBackground)
 
         SetupTray();
@@ -307,6 +354,11 @@ public class LauncherWindow : Window
         RefreshState();
         StartUpdateCheck();
         StartDiscord();
+
+        // First-run: if the client is already installed and we haven't asked yet, offer to import the
+        // player's existing Steam Rust keybinds. Deferred to ApplicationIdle so the window is up before
+        // the modal prompt. (A fresh install triggers the same one-time prompt from DownloadWorker.)
+        Dispatcher.BeginInvoke((Action)MaybeImportRustConfig, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
     }
 
     // ---------- Discord Rich Presence ----------
@@ -346,7 +398,7 @@ public class LauncherWindow : Window
         {
             tray = new System.Windows.Forms.NotifyIcon();
             try { tray.Icon = System.Drawing.Icon.ExtractAssociatedIcon(Process.GetCurrentProcess().MainModule.FileName); } catch { }
-            tray.Text = "RustOriginLauncher";
+            tray.Text = "Rustorigin Launcher";
             tray.Visible = true;
             tray.DoubleClick += delegate { ShowFromTray(); };
             tray.MouseClick += (s, e) => { if (e.Button == System.Windows.Forms.MouseButtons.Left) ShowFromTray(); };
@@ -380,16 +432,13 @@ public class LauncherWindow : Window
         double r = WindowState == WindowState.Maximized ? 0 : CornerR;   // square when maximized
         try { mainGrid.Clip = new RectangleGeometry(new Rect(0, 0, mainGrid.ActualWidth, mainGrid.ActualHeight), r, r); } catch { }
         if (edgeBorder != null) edgeBorder.CornerRadius = new CornerRadius(r);
-        if (maxGlyph != null) maxGlyph.Text = WindowState == WindowState.Maximized ? "" : "";   // restore : maximize
     }
 
     void BuildCaption(Grid host)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 12, 14, 0) };
+        row.Children.Add(CaptionBtn("", delegate { ToggleSettings(true); }, false));            // settings (gear) - leftmost
         row.Children.Add(CaptionBtn("", delegate { WindowState = WindowState.Minimized; }, false));   // minimize
-        maxBtn = CaptionBtn("", delegate { ToggleMaximize(); }, false);                                // maximize/restore
-        maxGlyph = (TextBlock)maxBtn.Child;
-        row.Children.Add(maxBtn);
         row.Children.Add(CaptionBtn("", delegate { Close(); }, true));                                 // close
         host.Children.Add(row);
     }
@@ -402,17 +451,225 @@ public class LauncherWindow : Window
         var b = new Border
         {
             Width = 34, Height = 34, CornerRadius = new CornerRadius(17),
-            Background = B("#1FFFFFFF"), BorderBrush = B("#26FFFFFF"), BorderThickness = new Thickness(1),
+            Background = Stroke, BorderBrush = GlassSoft, BorderThickness = new Thickness(1),
             Cursor = Cursors.Hand, Child = tb, Margin = new Thickness(10, 0, 0, 0)
         };
         System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(b, true);   // clickable inside the caption drag area
-        b.MouseEnter += (s, e) => { b.Background = closeBtn ? Accent : B("#33FFFFFF"); tb.Foreground = TextHi; };
-        b.MouseLeave += (s, e) => { b.Background = B("#1FFFFFFF"); tb.Foreground = TextDim; };
+        b.MouseEnter += (s, e) => { b.Background = closeBtn ? Accent : GlassHover; tb.Foreground = TextHi; };
+        b.MouseLeave += (s, e) => { b.Background = Stroke; tb.Foreground = TextDim; };
         b.MouseLeftButtonUp += (s, e) => { e.Handled = true; onClick(); };
         return b;
     }
 
     void ToggleMaximize() { WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized; }
+
+    // ---------- settings panel (gear button) ----------
+    // A frosted-glass modal over the (blurred) launcher, toggled by the caption gear. Exposes the
+    // per-user Prefs, the PLAY launch args, and a couple of utility actions - so nothing needs editing
+    // in prefs.cfg. Toggles persist immediately; launch args apply when the panel closes. Styled to the
+    // rustorigin.com theme, laid out like a site page: a dark ink-950 scrim, an ink-900 sheet, a
+    // SectionHeading-style header (violet eyebrow + gradient rule + blurb), and settings grouped into
+    // raised ink-850 cards whose rows are split by hairlines. Violet brand accent, live-green switches. No glass.
+    void BuildSettingsOverlay()
+    {
+        // Solid dark scrim (ink-950 @ ~80%) - a flat modal dim, not a frosted-glass wash.
+        settingsOverlay = new Grid { Visibility = Visibility.Collapsed, Background = B("#CC0B0B0C") };
+        settingsOverlay.MouseLeftButtonDown += (s, e) => e.Handled = true;
+        settingsOverlay.MouseLeftButtonUp += (s, e) => { if (e.OriginalSource == settingsOverlay) ToggleSettings(false); };
+
+        var card = new Border
+        {
+            Width = 480, MaxHeight = 760,
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            Background = Ink900, CornerRadius = new CornerRadius(14), Cursor = Cursors.Arrow, Padding = new Thickness(26, 22, 26, 22),
+            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 44, ShadowDepth = 0, Opacity = 0.55, Color = Colors.Black }
+        };
+        card.MouseLeftButtonDown += (s, e) => e.Handled = true;
+        settingsOverlay.Children.Add(card);
+
+        var col = new StackPanel();
+        card.Child = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = col };
+
+        // ---- header: eyebrow + title + accent rule + blurb (SectionHeading), flat close on the right ----
+        var head = new Grid();
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var htxt = new StackPanel { VerticalAlignment = VerticalAlignment.Top };
+        htxt.Children.Add(new TextBlock { Text = Track("RUSTORIGIN", 3), Foreground = Brand400, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 11 });
+        htxt.Children.Add(new TextBlock { Text = "SETTINGS", Foreground = Ink100, FontFamily = Site, FontSize = 26, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 3, 0, 0) });
+        htxt.Children.Add(new Border { Height = 2, Width = 46, CornerRadius = new CornerRadius(1), Margin = new Thickness(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Left, Background = AccentRule() });
+        htxt.Children.Add(new TextBlock { Text = "Preferences apply instantly.", Foreground = Ink200, FontFamily = Site, FontSize = 12, Margin = new Thickness(0, 12, 0, 0) });
+        Grid.SetColumn(htxt, 0); head.Children.Add(htxt);
+        var xTb = new TextBlock { Text = "\uE711", FontFamily = Icons, FontSize = 12, Foreground = Ink400, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var x = new Border { Width = 30, Height = 30, CornerRadius = new CornerRadius(6), Background = Brushes.Transparent, Cursor = Cursors.Hand, Child = xTb, VerticalAlignment = VerticalAlignment.Top };
+        x.MouseEnter += (s, e) => { x.Background = B("#0DFFFFFF"); xTb.Foreground = Danger; };
+        x.MouseLeave += (s, e) => { x.Background = Brushes.Transparent; xTb.Foreground = Ink400; };
+        x.MouseLeftButtonUp += (s, e) => { e.Handled = true; ToggleSettings(false); };
+        Grid.SetColumn(x, 1); head.Children.Add(x);
+        col.Children.Add(head);
+
+        // ---- GENERAL ----
+        col.Children.Add(GroupLabel("GENERAL"));
+        col.Children.Add(GroupCard(
+            SettingRow("Background slideshow", "Cross-fade the screenshots behind the launcher.",
+                Prefs.GetBool("BgSlideshow", true), v => Prefs.Set("BgSlideshow", v)),
+            SettingRow("Auto-update launcher", "Check for a newer, verified release on startup.",
+                Prefs.GetBool("AutoUpdate", true), v => Prefs.Set("AutoUpdate", v)),
+            SettingRow("Discord Rich Presence", "Show your In the launcher / In game status on Discord.",
+                Prefs.GetBool("DiscordRpc", true), v => { Prefs.Set("DiscordRpc", v); ApplyDiscordPref(v); })));
+
+        // ---- GAME ----
+        col.Children.Add(GroupLabel("GAME"));
+        col.Children.Add(GroupCard(
+            SettingRow("Minimize while in game", "Hide the launcher to the tray while playing.",
+                Prefs.GetBool("MinimizeInGame", false), v => Prefs.Set("MinimizeInGame", v))));
+
+        // ---- utility actions (compact rounded-md buttons, like the site's copy button) ----
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 16, 0, 0) };
+        actions.Children.Add(UtilityBtn("\uE838", "Open log folder", delegate { try { Process.Start("explorer.exe", cacheDir); } catch { } }));
+        actions.Children.Add(UtilityBtn("\uE72C", "Re-import Rust config", delegate { ReimportRustConfig(); }));
+        col.Children.Add(actions);
+
+        // ---- footer: version (left) + Done pill (right) ----
+        col.Children.Add(new Border { Height = 1, Background = B("#0DFFFFFF"), Margin = new Thickness(0, 18, 0, 14) });
+        var foot = new Grid();
+        string vs = "1.0.0";
+        try { var vv = Assembly.GetExecutingAssembly().GetName().Version; vs = vv.Major + "." + vv.Minor + "." + vv.Build; } catch { }
+        foot.Children.Add(new TextBlock { Text = "Rustorigin Launcher  v" + vs, Foreground = Ink400, FontFamily = Site, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left });
+        foot.Children.Add(AccentPill("Done", delegate { ToggleSettings(false); }));
+        col.Children.Add(foot);
+
+        mainGrid.Children.Add(settingsOverlay);
+    }
+
+    // Left-aligned accent rule under the header (violet -> transparent), like the site's SectionHeading divider.
+    static LinearGradientBrush AccentRule()
+    {
+        var g = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 0) };
+        g.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString("#8B5CF6"), 0));
+        g.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString("#008B5CF6"), 1));
+        return g;
+    }
+
+    // Group eyebrow above a card of rows (violet, wide-tracked) - the site's section eyebrow.
+    TextBlock GroupLabel(string t)
+    {
+        return new TextBlock { Text = Track(t, 3), Foreground = Brand400, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 10.5, Margin = new Thickness(2, 18, 0, 8) };
+    }
+
+    // Raised ink-850 card holding rows split by hairlines - the site's "divide-y rounded bg-ink" list.
+    Border GroupCard(params UIElement[] rows)
+    {
+        var sp = new StackPanel();
+        for (int i = 0; i < rows.Length; i++)
+        {
+            if (i > 0) sp.Children.Add(new Border { Height = 1, Background = B("#0DFFFFFF") });   // white/5 divider
+            sp.Children.Add(rows[i]);
+        }
+        var b = new Border { Background = Ink850, CornerRadius = new CornerRadius(8), Child = sp };
+        b.SizeChanged += (s, e) => { try { b.Clip = new RectangleGeometry(new Rect(0, 0, b.ActualWidth, b.ActualHeight), 8, 8); } catch { } };
+        return b;
+    }
+
+    // One settings row: label + description on the left, switch on the right; faint hover fill.
+    Border SettingRow(string title, string desc, bool on, Action<bool> onChange)
+    {
+        var g = new Grid();
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var txt = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        txt.Children.Add(new TextBlock { Text = title, Foreground = Ink100, FontFamily = Site, FontSize = 13.5, FontWeight = FontWeights.SemiBold });
+        if (desc != null) txt.Children.Add(new TextBlock { Text = desc, Foreground = Ink400, FontFamily = Site, FontSize = 11.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) });
+        Grid.SetColumn(txt, 0); g.Children.Add(txt);
+        var tg = MakeToggle(on, onChange);
+        tg.VerticalAlignment = VerticalAlignment.Center; tg.Margin = new Thickness(18, 0, 0, 0);
+        Grid.SetColumn(tg, 1); g.Children.Add(tg);
+        var row = new Border { Padding = new Thickness(16, 13, 16, 13), Background = Brushes.Transparent, Child = g };
+        row.MouseEnter += (s, e) => row.Background = B("#0AFFFFFF");   // white/[0.03] hover
+        row.MouseLeave += (s, e) => row.Background = Brushes.Transparent;
+        return row;
+    }
+
+    // Switch: live green when on, white/15 when off (the site's toggle); white knob slides with a soft ease.
+    Border MakeToggle(bool on, Action<bool> onChange)
+    {
+        var knob = new System.Windows.Shapes.Ellipse
+        {
+            Width = 20, Height = 20, Fill = TextHi, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center,
+            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 5, ShadowDepth = 0, Opacity = 0.35, Color = Colors.Black }
+        };
+        var track = new Border { Width = 44, Height = 24, CornerRadius = new CornerRadius(12), Cursor = Cursors.Hand, Child = knob, Padding = new Thickness(2, 0, 2, 0) };
+        bool[] state = { on };
+        track.Background = state[0] ? Live : GlassSoft;
+        knob.Margin = new Thickness(state[0] ? 20 : 0, 0, 0, 0);
+        track.MouseLeftButtonUp += (s, e) =>
+        {
+            e.Handled = true; state[0] = !state[0];
+            track.Background = state[0] ? Live : GlassSoft;
+            var to = new Thickness(state[0] ? 20 : 0, 0, 0, 0);
+            knob.BeginAnimation(FrameworkElement.MarginProperty, new ThicknessAnimation(to, TimeSpan.FromMilliseconds(150)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+            onChange(state[0]);
+        };
+        return track;
+    }
+
+    // Compact rounded-md utility button (the site's copy-button style): faint fill; glyph + label lift to brand on hover.
+    Border UtilityBtn(string glyph, string label, Action onClick)
+    {
+        var sp = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
+        var ic = Icon(glyph, 12, Ink200); ic.Margin = new Thickness(0, 1, 8, 0); sp.Children.Add(ic);
+        var tb = new TextBlock { Text = Track(label.ToUpperInvariant(), 1), Foreground = Ink200, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 10.5, VerticalAlignment = VerticalAlignment.Center };
+        sp.Children.Add(tb);
+        var b = new Border { Height = 34, CornerRadius = new CornerRadius(6), Background = B("#0DFFFFFF"), Padding = new Thickness(14, 0, 14, 0), Margin = new Thickness(0, 0, 10, 0), Cursor = Cursors.Hand, Child = sp };
+        b.MouseEnter += (s, e) => { b.Background = B("#14FFFFFF"); tb.Foreground = Brand300; ic.Foreground = Brand300; };
+        b.MouseLeave += (s, e) => { b.Background = B("#0DFFFFFF"); tb.Foreground = Ink200; ic.Foreground = Ink200; };
+        b.MouseLeftButtonUp += (s, e) => { e.Handled = true; onClick(); };
+        return b;
+    }
+
+    // Filled brand pill (primary action), right-aligned. Violet accent, uppercase tracked - the site's accent button.
+    Border AccentPill(string label, Action onClick)
+    {
+        var tb = new TextBlock { Text = Track(label.ToUpperInvariant(), 1), Foreground = TextHi, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 12.5, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var b = new Border { Height = 40, MinWidth = 108, CornerRadius = new CornerRadius(20), Background = Brand600, Padding = new Thickness(22, 0, 22, 0), Cursor = Cursors.Hand, Child = tb, HorizontalAlignment = HorizontalAlignment.Right };
+        b.MouseEnter += (s, e) => b.Background = Brand500;
+        b.MouseLeave += (s, e) => b.Background = Brand600;
+        b.MouseLeftButtonUp += (s, e) => { e.Handled = true; onClick(); };
+        return b;
+    }
+    void ToggleSettings(bool show)
+    {
+        if (settingsOverlay == null) return;
+        // Website style is flat (no glass): the solid scrim dims the launcher; keep the backdrop crisp.
+        try { if (homeView != null) homeView.Effect = null; } catch { }
+        settingsOverlay.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // Start/stop Discord Rich Presence live when its toggle changes (pref is already saved by the caller).
+    void ApplyDiscordPref(bool on)
+    {
+        try
+        {
+            if (on) { if (discord == null) StartDiscord(); }
+            else if (discord != null) { discord.Stop(); discord = null; }
+        }
+        catch { }
+    }
+
+    // "Re-import Rust config" action: clear the one-time marker and run the import now (with feedback
+    // when there's nothing to do, since the normal path stays silent).
+    void ReimportRustConfig()
+    {
+        ToggleSettings(false);
+        Prefs.Set("RustConfigImported", false);
+        string exe = FindGameExe();
+        if (exe == null || !InstallComplete(exe))
+            MessageBox.Show(this, "Install the client first - then your Rust keybinds can be imported.", "Nothing to import yet", MessageBoxButton.OK, MessageBoxImage.Information);
+        else if (FindSteamRustCfg() == null)
+            MessageBox.Show(this, "No existing Steam Rust config was found to import.", "Nothing to import", MessageBoxButton.OK, MessageBoxImage.Information);
+        else
+            MaybeImportRustConfig();
+    }
 
     // ---------- native window plumbing ----------
     const int GWL_STYLE = -16, WS_MINIMIZEBOX = 0x20000, WS_MAXIMIZEBOX = 0x10000;
@@ -576,7 +833,7 @@ public class LauncherWindow : Window
             var dot = new Border
             {
                 Height = 6, Width = 6, CornerRadius = new CornerRadius(3),
-                Background = B("#59FFFFFF"), Margin = new Thickness(5, 0, 5, 0),
+                Background = StrokeHi, Margin = new Thickness(5, 0, 5, 0),
                 Cursor = Cursors.Hand, VerticalAlignment = VerticalAlignment.Center
             };
             dot.MouseLeftButtonUp += (s, e) =>
@@ -599,7 +856,7 @@ public class LauncherWindow : Window
         {
             bool active = (i == slideIndex);
             slideDots[i].Width = active ? 20 : 6;
-            slideDots[i].Background = active ? Accent : B("#59FFFFFF");
+            slideDots[i].Background = active ? Accent : StrokeHi;
         }
     }
 
@@ -652,11 +909,11 @@ public class LauncherWindow : Window
         var b = new Border
         {
             Width = 40, Height = 40, CornerRadius = new CornerRadius(20),
-            Background = B("#1FFFFFFF"), BorderBrush = B("#26FFFFFF"), BorderThickness = new Thickness(1),
+            Background = Stroke, BorderBrush = GlassSoft, BorderThickness = new Thickness(1),
             Margin = new Thickness(0, 0, 12, 0), Cursor = Cursors.Hand, Child = box, ToolTip = s.Url
         };
-        b.MouseEnter += (o, e) => { b.Background = B("#33FFFFFF"); glyph.Fill = TextHi; };
-        b.MouseLeave += (o, e) => { b.Background = B("#1FFFFFFF"); glyph.Fill = TextDim; };
+        b.MouseEnter += (o, e) => { b.Background = GlassHover; glyph.Fill = TextHi; };
+        b.MouseLeave += (o, e) => { b.Background = Stroke; glyph.Fill = TextDim; };
         b.MouseLeftButtonUp += (o, e) => { e.Handled = true; OpenUrl(s.Url); };
         return b;
     }
@@ -768,9 +1025,9 @@ public class LauncherWindow : Window
     Border PlayButton()
     {
         var sp = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var ic = Icon("", 12, B("#12141A")); ic.Margin = new Thickness(0, 1, 9, 0);
+        var ic = Icon("", 12, Ink); ic.Margin = new Thickness(0, 1, 9, 0);
         var tb = new TextBlock { Text = Track("PLAY", 1), FontSize = 14, FontFamily = Brand, FontWeight = FontWeights.SemiBold,
-            Foreground = B("#12141A"), VerticalAlignment = VerticalAlignment.Center };
+            Foreground = Ink, VerticalAlignment = VerticalAlignment.Center };
         sp.Children.Add(ic); sp.Children.Add(tb);
         var b = new Border
         {
@@ -786,9 +1043,9 @@ public class LauncherWindow : Window
     Border LinkButton(string glyph, string text, Action onClick)
     {
         var sp = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
-        var ic = Icon(glyph, 13, B("#12141A")); ic.Margin = new Thickness(0, 1, 9, 0);
+        var ic = Icon(glyph, 13, Ink); ic.Margin = new Thickness(0, 1, 9, 0);
         var tb = new TextBlock { Text = Track(text, 1), FontSize = 14, FontFamily = Brand, FontWeight = FontWeights.SemiBold,
-            Foreground = B("#12141A"), VerticalAlignment = VerticalAlignment.Center };
+            Foreground = Ink, VerticalAlignment = VerticalAlignment.Center };
         sp.Children.Add(ic); sp.Children.Add(tb);
         // Full white pill, matching PLAY. Left margin is set in RefreshState so it aligns to the
         // hero's left edge when it is the leading button (PLAY hidden).
@@ -830,7 +1087,7 @@ public class LauncherWindow : Window
         var more = new Border
         {
             Height = 40, CornerRadius = new CornerRadius(20), Background = Brushes.Transparent,
-            BorderBrush = B("#26FFFFFF"), BorderThickness = new Thickness(1), Padding = new Thickness(20, 0, 16, 0),
+            BorderBrush = GlassSoft, BorderThickness = new Thickness(1), Padding = new Thickness(20, 0, 16, 0),
             HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 16, 0, 0), Cursor = Cursors.Hand
         };
         var ms = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
@@ -937,7 +1194,7 @@ public class LauncherWindow : Window
         join.Children.Add(jsp);
         tile.Children.Add(join);
 
-        var edge = new Border { CornerRadius = new CornerRadius(14), BorderBrush = B("#1FFFFFFF"), BorderThickness = new Thickness(1), Background = Brushes.Transparent, IsHitTestVisible = false };
+        var edge = new Border { CornerRadius = new CornerRadius(14), BorderBrush = Stroke, BorderThickness = new Thickness(1), Background = Brushes.Transparent, IsHitTestVisible = false };
         tile.Children.Add(edge);
 
         tile.MouseEnter += (s, e) =>
@@ -969,15 +1226,15 @@ public class LauncherWindow : Window
     // dot: amber = checking, green = online (shows X/Y), red = unreachable (shows "Offline").
     void QueryServerStatus(string host, int port, Ellipse dot, TextBlock count)
     {
-        dot.Fill = B("#E0B341");   // amber: checking (called on the UI thread)
+        dot.Fill = StatChecking;   // amber: checking (called on the UI thread)
         var t = new Thread(delegate ()
         {
             int players, max;
             bool ok = A2S.TryQueryInfo(host, port, 2500, out players, out max);
             Dispatcher.BeginInvoke((Action)delegate
             {
-                if (ok) { dot.Fill = B("#3FB950"); count.Text = players + "/" + max; }
-                else    { dot.Fill = B("#F85149"); count.Text = "Offline"; }
+                if (ok) { dot.Fill = StatOnline; count.Text = players + "/" + max; }
+                else    { dot.Fill = StatOffline; count.Text = "Offline"; }
             });
         }) { IsBackground = true, Name = "a2s" };
         t.Start();
@@ -990,7 +1247,7 @@ public class LauncherWindow : Window
     // green = online (X/Y), red = unreachable ("Offline").
     void QueryServerStatusWeb(string url, Ellipse dot, TextBlock count)
     {
-        dot.Fill = B("#E0B341");   // amber: checking (called on the UI thread)
+        dot.Fill = StatChecking;   // amber: checking (called on the UI thread)
         var t = new Thread(delegate ()
         {
             int players = 0, max = 0;
@@ -1015,8 +1272,8 @@ public class LauncherWindow : Window
             catch { ok = false; }
             Dispatcher.BeginInvoke((Action)delegate
             {
-                if (ok) { dot.Fill = B("#3FB950"); count.Text = max > 0 ? (players + "/" + max) : players.ToString(); }
-                else    { dot.Fill = B("#F85149"); count.Text = "Offline"; }
+                if (ok) { dot.Fill = StatOnline; count.Text = max > 0 ? (players + "/" + max) : players.ToString(); }
+                else    { dot.Fill = StatOffline; count.Text = "Offline"; }
             });
         }) { IsBackground = true, Name = "status-web" };
         t.Start();
@@ -1118,6 +1375,121 @@ public class LauncherWindow : Window
         }
         catch { }
         return null;
+    }
+
+    // ---------- first-run: import the player's existing Rust keybinds/config ----------
+    // The first time the client is installed we look for an existing Steam Rust `cfg` folder and offer
+    // to copy it into this install's `cfg` folder so the player's keybinds carry over. Graphics/quality
+    // convars from a modern Rust build won't necessarily apply to this January-2021 client (it has its
+    // own), so the prompt says keybinds only. One-time: gated by the `RustConfigImported` pref, which is
+    // set once we've asked (whatever the answer) so we never nag again.
+    void MaybeImportRustConfig()
+    {
+        try
+        {
+            if (Prefs.GetBool("RustConfigImported", false)) return;   // already asked once
+            string exe = FindGameExe();
+            if (exe == null || !InstallComplete(exe)) return;         // need a real install as the destination
+            string src = FindSteamRustCfg();
+            if (src == null) return;                                  // no existing Rust config found to import
+            string dst = Path.Combine(Path.GetDirectoryName(exe), "cfg");
+
+            var res = MessageBox.Show(this,
+                "Found your existing Rust config:\n\n" + src + "\n\n" +
+                "Copy it into RustOrigin so your keybinds carry over?\n\n" +
+                "Keybinds are imported. Graphics/quality settings are NOT - this build has its own, " +
+                "so set those in-game.",
+                "Import your Rust keybinds?", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+            Prefs.Set("RustConfigImported", true);   // one-time prompt, regardless of the answer
+            if (res != MessageBoxResult.Yes) { Log("config import declined"); return; }
+
+            int n = CopyDir(src, dst);
+            Log("config import: copied " + n + " file(s) from " + src + " -> " + dst);
+            SetStatus(n > 0 ? "Imported your Rust keybinds (" + n + " file(s)) - ready to play!"
+                            : "No config files found to import - ready to play!");
+        }
+        catch (Exception ex) { Log("config import failed: " + ex.Message); }
+    }
+
+    // The player's existing Steam Rust `cfg` folder, or null. Checks the default install locations, the
+    // Steam install path from the registry, then every Steam library folder listed in libraryfolders.vdf
+    // (games can live on other drives). Returns the first `...\steamapps\common\Rust\cfg` that has files.
+    string FindSteamRustCfg()
+    {
+        var roots = new List<string>();
+        try { string p = Environment.GetEnvironmentVariable("ProgramFiles(x86)"); if (!string.IsNullOrEmpty(p)) roots.Add(Path.Combine(p, "Steam")); } catch { }
+        try { string p = Environment.GetEnvironmentVariable("ProgramFiles");      if (!string.IsNullOrEmpty(p)) roots.Add(Path.Combine(p, "Steam")); } catch { }
+        foreach (string key in new[] { @"HKEY_CURRENT_USER\Software\Valve\Steam",
+                                       @"HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Valve\Steam",
+                                       @"HKEY_LOCAL_MACHINE\SOFTWARE\Valve\Steam" })
+        {
+            try
+            {
+                object v = Microsoft.Win32.Registry.GetValue(key, "SteamPath", null)
+                        ?? Microsoft.Win32.Registry.GetValue(key, "InstallPath", null);
+                string s = v as string; if (!string.IsNullOrEmpty(s)) roots.Add(s.Replace('/', '\\'));
+            }
+            catch { }
+        }
+
+        // extra library folders: parse "path" entries out of libraryfolders.vdf (both its known locations)
+        var libs = new List<string>();
+        foreach (string steam in roots)
+        {
+            foreach (string vdf in new[] { Path.Combine(steam, "steamapps", "libraryfolders.vdf"),
+                                           Path.Combine(steam, "config", "libraryfolders.vdf") })
+            {
+                try
+                {
+                    if (!File.Exists(vdf)) continue;
+                    foreach (string line in File.ReadAllLines(vdf))
+                    {
+                        int i = line.IndexOf("\"path\"", StringComparison.OrdinalIgnoreCase);
+                        if (i < 0) continue;
+                        int a = line.IndexOf('"', i + 6); if (a < 0) continue;
+                        int b = line.IndexOf('"', a + 1); if (b < 0) continue;
+                        string p = line.Substring(a + 1, b - a - 1).Replace("\\\\", "\\");
+                        if (p.Length > 0) libs.Add(p);
+                    }
+                }
+                catch { }
+            }
+        }
+
+        foreach (string c in Enumerable_Concat(roots, libs))
+        {
+            try
+            {
+                string cfg = Path.Combine(c, "steamapps", "common", "Rust", "cfg");
+                if (Directory.Exists(cfg) && DirHasEntries(cfg)) return cfg;
+            }
+            catch { }
+        }
+        return null;
+    }
+
+    // Small helper so we don't pull in System.Linq just for one concat.
+    static IEnumerable<string> Enumerable_Concat(List<string> a, List<string> b)
+    {
+        foreach (string s in a) yield return s;
+        foreach (string s in b) yield return s;
+    }
+
+    // Recursively copy every file from src into dst (creating dst), overwriting. Returns files copied.
+    static int CopyDir(string src, string dst)
+    {
+        int n = 0;
+        Directory.CreateDirectory(dst);
+        foreach (string f in Directory.GetFiles(src))
+        {
+            try { File.Copy(f, Path.Combine(dst, Path.GetFileName(f)), true); n++; } catch { }
+        }
+        foreach (string d in Directory.GetDirectories(src))
+        {
+            try { n += CopyDir(d, Path.Combine(dst, Path.GetFileName(d))); } catch { }
+        }
+        return n;
     }
 
     string InstallMarkerPath() { return Path.Combine(InstallDir, ".rustorigin-installed"); }
@@ -1460,6 +1832,7 @@ public class LauncherWindow : Window
             else if (error != null) { statusText.Foreground = AccentHi; statusText.Text = "Download failed: " + error; }
             else { progFill.Width = progTrack.ActualWidth; statusText.Text = "Install complete - ready to play!"; }
             RefreshState();   // the .part is kept on cancel/error so Resume can continue
+            if (!cancelled && !verifyFailed && error == null) MaybeImportRustConfig();   // one-time: offer to import existing Rust keybinds
         }));
     }
 
@@ -1779,7 +2152,7 @@ public class LauncherWindow : Window
             }
             catch { installed = self; }   // fall back to the running exe if the copy is blocked
             string target = installed;
-            Dispatcher.Invoke((Action)(() => CreateDesktopShortcut(target, "RustOriginLauncher")));   // STA thread for COM
+            Dispatcher.Invoke((Action)(() => CreateDesktopShortcut(target, "Rustorigin Launcher")));   // STA thread for COM
             Log("shortcut -> " + target);
         }
         catch (Exception ex) { Log("shortcut step failed: " + ex.Message); }
@@ -1799,7 +2172,7 @@ public class LauncherWindow : Window
             t.InvokeMember("TargetPath", BindingFlags.SetProperty, null, sc, new object[] { targetExe });
             t.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, sc, new object[] { Path.GetDirectoryName(targetExe) });
             t.InvokeMember("IconLocation", BindingFlags.SetProperty, null, sc, new object[] { targetExe + ",0" });
-            t.InvokeMember("Description", BindingFlags.SetProperty, null, sc, new object[] { "RustOriginLauncher" });
+            t.InvokeMember("Description", BindingFlags.SetProperty, null, sc, new object[] { "Rustorigin Launcher" });
             t.InvokeMember("Save", BindingFlags.InvokeMethod, null, sc, null);
         }
         catch { }
@@ -1848,7 +2221,7 @@ public class LauncherWindow : Window
         Dispatcher.Invoke((Action)(() =>
         {
             go = MessageBox.Show(this,
-                "A new version of RustOriginLauncher is available.\n\nInstalled:  v" + current + "\nLatest:     " + tag + "\n\nDownload and update now?",
+                "A new version of Rustorigin Launcher is available.\n\nInstalled:  v" + current + "\nLatest:     " + tag + "\n\nDownload and update now?",
                 "Update available", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes;
         }));
         if (!go) return;

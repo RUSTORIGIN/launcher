@@ -66,6 +66,15 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
   it is discarded and a fresh, verified download runs. So a **REPAIR** after a broken extract reuses
   the ~9.5 GB zip instead of pulling it again. (Verification on a *fresh* download is unchanged - the
   trust anchor stays mandatory; only the redundant re-hash of the already-verified cache was removed.)
+- **Import existing Rust keybinds (first run)**: the first time the client is installed, the launcher
+  looks for the player's existing Steam Rust config (`...\steamapps\common\Rust\cfg` - found via the
+  default paths, the Steam install path in the registry, and every `libraryfolders.vdf` library) and
+  offers to copy it into this install's `cfg` folder so their **keybinds carry over**. Graphics/quality
+  convars from a modern build are copied too but generally won't apply to this January-2021 client (it
+  has its own), so the prompt says keybinds only. It's a **one-time** prompt, gated by the
+  `RustConfigImported` pref (set once asked, whatever the answer). Fires after a fresh install completes
+  (`DownloadWorker`) and, for an already-installed client, once at startup. See `MaybeImportRustConfig`
+  / `FindSteamRustCfg` / `CopyDir` in `src/WpfLauncher.cs`.
 - **Completeness check / REPAIR**: `IsInstalled` requires the exe AND a non-empty `<exe>_Data` folder
   plus `UnityPlayer.dll` (or the post-extract marker). A structurally-incomplete install shows a
   **REPAIR** button and is refused by `Play()`, so a half-extracted client never launches into a
@@ -335,8 +344,11 @@ Two separate mechanisms - don't confuse them:
   embedded in the exe, optionally overridden by a copy next to the exe. Parsed in `ApplyConfig`.
 - **`Prefs`** = per-user preferences read at runtime, persisted to
   `%LOCALAPPDATA%\RustOrigin\prefs.cfg` (a plain file - **not** the registry). `static class Prefs`
-  with `Get` / `GetBool` / `Set`. **There is no in-app settings UI** - the Settings tab/gear was
-  removed; users change these by editing `prefs.cfg` directly (defaults below apply otherwise).
+  with `Get` / `GetBool` / `Set`. A **settings panel** (the caption **gear** button, top-right) exposes
+  the toggles below plus the PLAY launch args, "Open log folder", and "Re-import Rust config"; it's a
+  glass overlay built in `BuildSettingsOverlay` (toggled by `ToggleSettings`, closes on the X / Done /
+  backdrop / Esc). Toggles persist immediately; launch args apply on close. Users can still edit
+  `prefs.cfg` directly (defaults below apply otherwise).
 
 | Prefs key | Default | Effect |
 |-----------|---------|--------|
@@ -345,9 +357,11 @@ Two separate mechanisms - don't confuse them:
 | `MinimizeInGame` | `false` | Minimize the launcher while the client runs. |
 | `AutoUpdate` | `true` | Check `UpdateRepo`'s GitHub Releases on launch and offer a verified self-update. |
 | `DiscordRpc` | `true` | Publish Discord Rich Presence (needs `DiscordAppId` set in `launcher.cfg`). |
+| `RustConfigImported` | `false` | Internal one-time marker (not a user toggle). Set once the launcher has offered to import the player's existing Steam Rust keybinds, so it never prompts again. Delete it in `prefs.cfg` to be asked again. |
 
-To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect. There is no
-settings screen to wire it into - users set it in `prefs.cfg`.
+To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, and (optionally) a
+`SettingRow(...)` in `BuildSettingsOverlay` so it shows in the gear panel; users can also set it in
+`prefs.cfg` directly.
 
 ## Repository layout (actual)
 
@@ -437,7 +451,8 @@ There are no automated tests; verify by running the exe:
 
 - Launch `release\RustOriginLauncher.exe` (or a `scripts\build.bat` exe with assets beside it). The window
   opens at 1440x860 in a **rounded frameless window** with full native behaviour (drag from anywhere,
-  resize, maximize, Aero Snap, taskbar) via `WindowChrome`, custom min/max/close caption buttons, the
+  resize, maximize, Aero Snap, taskbar) via `WindowChrome`, custom **settings (gear) / minimize / close**
+  caption buttons (there is no maximize button - maximize via double-click or Aero Snap), the
   screenshot slideshow, PLAY, INSTALL, and the server grid. Corners flatten when maximized.
 - **Native min/max animations:** the window is intentionally **not** layered (`AllowsTransparency =
   false`) - a layered window loses the native minimize/maximize/restore animations. The 32px rounded
