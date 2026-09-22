@@ -22,7 +22,6 @@ if none load, the launcher shows a dark gradient backdrop instead and keeps work
 | `fonts\` | Bundled Montserrat brand font (4 weights + OFL license). Must ship next to the exe. |
 | `launcher.cfg` | Config: download URL, install folder, exe, title, tagline. |
 | `src/WpfLauncher.cs` | Source of the launcher (WPF). |
-| `src/Launcher.cs` | Source of an older plain WinForms version (optional). |
 | `scripts/build.bat` | Dev compile check of `src/WpfLauncher.cs`. |
 | `scripts/make_release.ps1` | Build the shippable single-file `RustOriginLauncher.exe`. |
 | `scripts/package_client.ps1` | Zips your client folder into `RustClient.zip` for hosting. |
@@ -46,17 +45,18 @@ readability.
 ## The window (rounded + native, opens at 1440x860)
 
 - **Rounded, frameless** window that still behaves like a normal Windows window - **drag it from anywhere**, resize, maximize, Aero Snap, taskbar and the system menu (via WPF `WindowChrome`), with custom **settings (gear) / minimize / close** buttons top-right (maximize via double-click or Aero Snap). Corners flatten when maximized. Full-bleed cross-fading screenshot slideshow behind it, with **carousel dot indicators** at the bottom (click a dot to jump to that screenshot).
-- **Settings panel** (the gear button, top-right): toggle the background slideshow, minimize-while-in-game, auto-update and Discord Rich Presence; edit the PLAY launch arguments; open the log folder; or re-import your Rust keybinds. (Everything here is also editable in `prefs.cfg`.)
+- **Settings panel** (the gear button, top-right): toggle minimize-while-in-game, auto-update and Discord Rich Presence; open the log folder; re-import your Rust keybinds; or **uninstall the client** (deletes the game files, keeps the launcher). Styled like rustorigin.com. (The toggles are also editable in `prefs.cfg`; the background slideshow is always on.)
 - **Top-left**: OG logo mark in a glass pill. **Left rail**: games / library / collections icons.
 - **Top-right**: recent-games pill (star, thumbnails, link) + user pill (chat, bell, avatar,
   player name, now-playing) + minimize/close.
 - **Hero**: "Most Played" tag -> large OG logo -> RUSTORIGIN wordmark -> red "JANUARY UPDATE 2021"
   -> description -> white **PLAY** pill + **INSTALL/UPDATE** link, with a live download/extract
   progress bar.
-- **Right column**: a vertical stack of **server cards** (cover image + name + tag); clicking one
-  launches the client with that server's args. When a card's args include `+connect HOST:PORT` it
-  shows a **live player count** (green/red dot + `players/max`, queried over Steam A2S and refreshed
-  every ~60s). "DISCOVER MORE" below.
+- **Right column**: a vertical stack of **website-style server cards** (like rustorigin.com) - a cover
+  image header with an ONLINE/SOON status badge and a tag chip, a **PLAYERS ONLINE** count with a violet
+  progress bar, the name + subtitle, the connect address, and a violet **CONNECT** chip. Clicking a card
+  launches the client with that server's args. When a card's args include `+connect HOST:PORT` the count,
+  bar and dot go **live** over Steam A2S (refreshed every ~60s). "DISCOVER MORE" below.
 - **Friends rail** with 8 avatars and online/offline dots. Bottom chevron + chat icon.
 - Icons use **Segoe MDL2 Assets** (built into Windows 10/11 - nothing to bundle).
 

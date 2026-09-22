@@ -256,7 +256,7 @@ public class LauncherWindow : Window
         LoadConfig();
         if (Servers.Count == 0)
         {
-            Servers.Add(new ServerEntry("Training", "Training Grounds", "", "", "train.jpg"));
+            Servers.Add(new ServerEntry("Training", "Training Grounds", "-console +connect 185.190.143.67:28015", "", "train.jpg"));
             Servers.Add(new ServerEntry("Vanilla",  "RustOrigin Main",  "", "", "main.jpg"));
         }
         logoBmp = LoadBitmap(Path.Combine(Assets.Dir, "logo.png")) ?? LoadBitmap(Path.Combine(AppDir(), "logo.png"));
@@ -278,8 +278,8 @@ public class LauncherWindow : Window
                 ico.Handle, System.Windows.Int32Rect.Empty, System.Windows.Media.Imaging.BitmapSizeOptions.FromEmptyOptions());
         }
         catch { }
-        Width = 1440; Height = 860;
-        MinWidth = 960; MinHeight = 600;
+        Width = 1100; Height = 700;
+        MinWidth = 820; MinHeight = 520;
         // Frameless + rounded corners, but a REAL native window underneath: WindowChrome keeps
         // drag, resize, maximize, Aero Snap, taskbar and the system menu; custom caption buttons
         // (built in BuildCaption) provide min/max/close. WM_GETMINMAXINFO keeps a maximized window
@@ -323,6 +323,7 @@ public class LauncherWindow : Window
         mainGrid.Children.Add(edgeBorder);
 
         BuildCaption(mainGrid);
+        BuildSocials(mainGrid);   // social icons, top-left corner (mirrors the caption buttons top-right)
         BuildSettingsOverlay();   // hidden glass settings panel, on top of everything (gear toggles it)
         ApplyRounding();
 
@@ -481,7 +482,7 @@ public class LauncherWindow : Window
         {
             Width = 480, MaxHeight = 760,
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-            Background = Ink900, CornerRadius = new CornerRadius(14), Cursor = Cursors.Arrow, Padding = new Thickness(26, 22, 26, 22),
+            Background = Ink900, CornerRadius = new CornerRadius(17), Cursor = Cursors.Arrow, Padding = new Thickness(26, 22, 26, 22),
             Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 44, ShadowDepth = 0, Opacity = 0.55, Color = Colors.Black }
         };
         card.MouseLeftButtonDown += (s, e) => e.Handled = true;
@@ -508,15 +509,12 @@ public class LauncherWindow : Window
         Grid.SetColumn(x, 1); head.Children.Add(x);
         col.Children.Add(head);
 
-        // ---- GENERAL ----
+        // ---- GENERAL ---- (background slideshow is always on; updates are mandatory - no toggles for either)
         col.Children.Add(GroupLabel("GENERAL"));
         col.Children.Add(GroupCard(
-            SettingRow("Background slideshow", "Cross-fade the screenshots behind the launcher.",
-                Prefs.GetBool("BgSlideshow", true), v => Prefs.Set("BgSlideshow", v)),
-            SettingRow("Auto-update launcher", "Check for a newer, verified release on startup.",
-                Prefs.GetBool("AutoUpdate", true), v => Prefs.Set("AutoUpdate", v)),
             SettingRow("Discord Rich Presence", "Show your In the launcher / In game status on Discord.",
                 Prefs.GetBool("DiscordRpc", true), v => { Prefs.Set("DiscordRpc", v); ApplyDiscordPref(v); })));
+        col.Children.Add(new TextBlock { Text = "Updates are mandatory - the launcher checks on every launch and won't start on an outdated version.", Foreground = Ink400, FontFamily = Site, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 8, 2, 0) });
 
         // ---- GAME ----
         col.Children.Add(GroupLabel("GAME"));
@@ -530,13 +528,18 @@ public class LauncherWindow : Window
         actions.Children.Add(UtilityBtn("\uE72C", "Re-import Rust config", delegate { ReimportRustConfig(); }));
         col.Children.Add(actions);
 
+        // ---- uninstall (danger) ----
+        var danger = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
+        danger.Children.Add(DangerBtn("\uE74D", "Uninstall client", delegate { UninstallClient(); }));
+        col.Children.Add(danger);
+
         // ---- footer: version (left) + Done pill (right) ----
         col.Children.Add(new Border { Height = 1, Background = B("#0DFFFFFF"), Margin = new Thickness(0, 18, 0, 14) });
         var foot = new Grid();
         string vs = "1.0.0";
         try { var vv = Assembly.GetExecutingAssembly().GetName().Version; vs = vv.Major + "." + vv.Minor + "." + vv.Build; } catch { }
         foot.Children.Add(new TextBlock { Text = "Rustorigin Launcher  v" + vs, Foreground = Ink400, FontFamily = Site, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left });
-        foot.Children.Add(AccentPill("Done", delegate { ToggleSettings(false); }));
+        foot.Children.Add(PrimaryPill("Done", delegate { ToggleSettings(false); }));
         col.Children.Add(foot);
 
         mainGrid.Children.Add(settingsOverlay);
@@ -566,8 +569,8 @@ public class LauncherWindow : Window
             if (i > 0) sp.Children.Add(new Border { Height = 1, Background = B("#0DFFFFFF") });   // white/5 divider
             sp.Children.Add(rows[i]);
         }
-        var b = new Border { Background = Ink850, CornerRadius = new CornerRadius(8), Child = sp };
-        b.SizeChanged += (s, e) => { try { b.Clip = new RectangleGeometry(new Rect(0, 0, b.ActualWidth, b.ActualHeight), 8, 8); } catch { } };
+        var b = new Border { Background = Ink850, CornerRadius = new CornerRadius(17), Child = sp };
+        b.SizeChanged += (s, e) => { try { b.Clip = new RectangleGeometry(new Rect(0, 0, b.ActualWidth, b.ActualHeight), 17, 17); } catch { } };
         return b;
     }
 
@@ -627,13 +630,27 @@ public class LauncherWindow : Window
         return b;
     }
 
-    // Filled brand pill (primary action), right-aligned. Violet accent, uppercase tracked - the site's accent button.
-    Border AccentPill(string label, Action onClick)
+    // Compact rounded-md danger button (uninstall): faint red fill, red glyph+label, deeper red on hover.
+    Border DangerBtn(string glyph, string label, Action onClick)
     {
-        var tb = new TextBlock { Text = Track(label.ToUpperInvariant(), 1), Foreground = TextHi, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 12.5, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var b = new Border { Height = 40, MinWidth = 108, CornerRadius = new CornerRadius(20), Background = Brand600, Padding = new Thickness(22, 0, 22, 0), Cursor = Cursors.Hand, Child = tb, HorizontalAlignment = HorizontalAlignment.Right };
-        b.MouseEnter += (s, e) => b.Background = Brand500;
-        b.MouseLeave += (s, e) => b.Background = Brand600;
+        var sp = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
+        var ic = Icon(glyph, 12, Danger); ic.Margin = new Thickness(0, 1, 8, 0); sp.Children.Add(ic);
+        sp.Children.Add(new TextBlock { Text = Track(label.ToUpperInvariant(), 1), Foreground = Danger, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 10.5, VerticalAlignment = VerticalAlignment.Center });
+        var b = new Border { Height = 34, CornerRadius = new CornerRadius(6), Background = B("#14F87171"), Padding = new Thickness(14, 0, 14, 0), Cursor = Cursors.Hand, Child = sp };
+        b.MouseEnter += (s, e) => b.Background = B("#26F87171");
+        b.MouseLeave += (s, e) => b.Background = B("#14F87171");
+        b.MouseLeftButtonUp += (s, e) => { e.Handled = true; onClick(); };
+        return b;
+    }
+
+    // White primary pill (the site's primary button, like "PLAY NOW"): white fill, near-black label,
+    // subtle hover. Uppercase tracked Poppins. Used for the settings "Done".
+    Border PrimaryPill(string label, Action onClick)
+    {
+        var tb = new TextBlock { Text = Track(label.ToUpperInvariant(), 1), Foreground = Ink, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 12.5, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var b = new Border { Height = 40, MinWidth = 108, CornerRadius = new CornerRadius(20), Background = TextHi, Padding = new Thickness(24, 0, 24, 0), Cursor = Cursors.Hand, Child = tb, HorizontalAlignment = HorizontalAlignment.Right };
+        b.MouseEnter += (s, e) => b.Background = B("#F0F1F4");
+        b.MouseLeave += (s, e) => b.Background = TextHi;
         b.MouseLeftButtonUp += (s, e) => { e.Handled = true; onClick(); };
         return b;
     }
@@ -656,6 +673,64 @@ public class LauncherWindow : Window
         catch { }
     }
 
+    // ---------- branded modal dialogs (replace native MessageBox) ----------
+    // Shared dialog header: RUSTORIGIN eyebrow + bold title in the site font (Poppins), so every branded
+    // dialog (this modal + the update gate) reads the same as the settings panel.
+    StackPanel DialogHeader(string title, bool centered)
+    {
+        var h = centered ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+        var a = centered ? TextAlignment.Center : TextAlignment.Left;
+        var sp = new StackPanel { HorizontalAlignment = h };
+        sp.Children.Add(new TextBlock { Text = Track("RUSTORIGIN", 3), Foreground = Brand400, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 11, HorizontalAlignment = h, TextAlignment = a });
+        sp.Children.Add(new TextBlock { Text = title, Foreground = Ink100, FontFamily = Site, FontWeight = FontWeights.Bold, FontSize = 21, Margin = new Thickness(0, 6, 0, 0), TextWrapping = TextWrapping.Wrap, HorizontalAlignment = h, TextAlignment = a });
+        return sp;
+    }
+
+    // Frameless card shown over the launcher: header + message, a primary (violet) button and an
+    // optional secondary. Returns true for primary / Enter, false for secondary / Esc.
+    bool ModalDialog(string heading, string message, string okText, string cancelText)
+    {
+        bool result = false;
+        var win = new Window
+        {
+            WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Transparent,
+            SizeToContent = SizeToContent.WidthAndHeight, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ShowInTaskbar = false, ResizeMode = ResizeMode.NoResize, FontFamily = Site
+        };
+        try { win.Owner = this; } catch { }
+        var card = new Border
+        {
+            Background = Ink900, BorderBrush = Ink700, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(17),
+            Padding = new Thickness(26, 22, 26, 24), Margin = new Thickness(24),
+            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 44, ShadowDepth = 0, Opacity = 0.6, Color = Colors.Black }
+        };
+        var col = new StackPanel { MaxWidth = 380 };
+        card.Child = col;
+        col.Children.Add(DialogHeader(heading, false));
+        col.Children.Add(new TextBlock { Text = message, Foreground = Ink200, FontFamily = Site, FontSize = 13, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 0), LineHeight = 19, LineStackingStrategy = LineStackingStrategy.BlockLineHeight });
+        var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 22, 0, 0) };
+        if (cancelText != null) row.Children.Add(DialogBtn(cancelText, false, delegate { result = false; win.Close(); }));
+        row.Children.Add(DialogBtn(okText, true, delegate { result = true; win.Close(); }));
+        col.Children.Add(row);
+        win.Content = card;
+        win.KeyDown += (s, e) => { if (e.Key == Key.Escape) { result = (cancelText == null); win.Close(); } else if (e.Key == Key.Enter) { result = true; win.Close(); } };
+        try { win.ShowDialog(); } catch { }
+        return result;
+    }
+
+    Border DialogBtn(string label, bool primary, Action onClick)
+    {
+        var tb = new TextBlock { Text = Track(label.ToUpperInvariant(), 1), Foreground = primary ? TextHi : Ink100, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var b = new Border { Height = 38, MinWidth = 92, CornerRadius = new CornerRadius(17), Background = primary ? Brand600 : B("#12FFFFFF"), Padding = new Thickness(18, 0, 18, 0), Margin = new Thickness(10, 0, 0, 0), Cursor = Cursors.Hand, Child = tb };
+        b.MouseEnter += (s, e) => b.Background = primary ? Brand500 : Stroke;
+        b.MouseLeave += (s, e) => b.Background = primary ? Brand600 : B("#12FFFFFF");
+        b.MouseLeftButtonUp += (s, e) => { e.Handled = true; onClick(); };
+        return b;
+    }
+
+    void Alert(string heading, string message) { ModalDialog(heading, message, "OK", null); }
+    bool Confirm(string heading, string message, string okText, string cancelText) { return ModalDialog(heading, message, okText, cancelText); }
+
     // "Re-import Rust config" action: clear the one-time marker and run the import now (with feedback
     // when there's nothing to do, since the normal path stays silent).
     void ReimportRustConfig()
@@ -664,11 +739,82 @@ public class LauncherWindow : Window
         Prefs.Set("RustConfigImported", false);
         string exe = FindGameExe();
         if (exe == null || !InstallComplete(exe))
-            MessageBox.Show(this, "Install the client first - then your Rust keybinds can be imported.", "Nothing to import yet", MessageBoxButton.OK, MessageBoxImage.Information);
+            Alert("Nothing to import yet", "Install the client first - then your Rust keybinds can be imported.");
         else if (FindSteamRustCfg() == null)
-            MessageBox.Show(this, "No existing Steam Rust config was found to import.", "Nothing to import", MessageBoxButton.OK, MessageBoxImage.Information);
+            Alert("Nothing to import", "No existing Steam Rust config was found to import.");
         else
             MaybeImportRustConfig();
+    }
+
+    // "Uninstall client" action: delete the installed game files (frees the multi-GB client) and the
+    // download cache, after a confirm. The launcher itself is kept - even its self-copied exe under
+    // InstallDir is skipped if it's the running one - so the user can reinstall from the same window.
+    void UninstallClient()
+    {
+        if (busy) { statusText.Foreground = AccentHi; statusText.Text = "Finish or pause the download before uninstalling."; return; }
+        if (GameRunning()) { Alert("Game is running", "Close the game before uninstalling the client."); return; }
+        bool anything = IsInstalled() || IsBrokenInstall() || HasPartial();
+        try { anything = anything || File.Exists(zipPath); } catch { }
+        if (!anything) { Alert("Nothing to uninstall", "Nothing is installed to uninstall."); return; }
+        if (!Confirm("Uninstall client",
+                "Uninstall the RustOrigin client?\n\nThis permanently deletes the downloaded game files (several GB) in:\n" +
+                InstallDir + "\n\nThe launcher itself is kept - you can reinstall anytime.",
+                "Uninstall", "Cancel")) return;
+
+        ToggleSettings(false);
+        busy = true; RefreshState();
+        statusText.Foreground = TextMute; statusText.Text = "Uninstalling...";
+        var t = new Thread(delegate ()
+        {
+            string err = null;
+            try
+            {
+                string self = null;
+                try { self = Path.GetFullPath(Process.GetCurrentProcess().MainModule.FileName); } catch { }
+                DeleteDirContents(InstallDir, self);
+                try { if (Directory.Exists(InstallDir) && Directory.GetFileSystemEntries(InstallDir).Length == 0) Directory.Delete(InstallDir, false); } catch { }
+                try { File.Delete(zipPath); } catch { }
+                try { File.Delete(partPath); } catch { }
+                try { File.Delete(metaPath); } catch { }
+                Log("uninstalled client from " + InstallDir);
+            }
+            catch (Exception ex) { err = ex.Message; Log("uninstall failed: " + ex.Message); }
+            string e2 = err;
+            Dispatcher.BeginInvoke((Action)(() =>
+            {
+                busy = false;
+                if (e2 != null) { statusText.Foreground = AccentHi; statusText.Text = "Uninstall error: " + e2; }
+                else { statusText.Foreground = TextMute; statusText.Text = "Client uninstalled - click Install to download it again."; }
+                RefreshState();
+            }));
+        });
+        t.IsBackground = true; t.Start();
+    }
+
+    // Recursively delete everything under dir, skipping one file (the running launcher exe, so an
+    // in-place install can be uninstalled without failing on the locked exe). Best-effort per entry.
+    static void DeleteDirContents(string dir, string skip)
+    {
+        if (!Directory.Exists(dir)) return;
+        foreach (string f in Directory.GetFiles(dir))
+        {
+            try
+            {
+                if (skip != null && string.Equals(Path.GetFullPath(f), skip, StringComparison.OrdinalIgnoreCase)) continue;
+                try { File.SetAttributes(f, FileAttributes.Normal); } catch { }
+                File.Delete(f);
+            }
+            catch { }
+        }
+        foreach (string d in Directory.GetDirectories(dir))
+        {
+            try
+            {
+                DeleteDirContents(d, skip);
+                if (Directory.GetFileSystemEntries(d).Length == 0) Directory.Delete(d, false);
+            }
+            catch { }
+        }
     }
 
     // ---------- native window plumbing ----------
@@ -792,10 +938,11 @@ public class LauncherWindow : Window
         bgHost.CacheMode = new BitmapCache { RenderAtScale = 0.5, SnapsToDevicePixels = false };
         mainGrid.Children.Add(bgHost);
 
-        // Auto-switch every 7s with a ~0.9s cross-fade (gated by the BgSlideshow pref).
+        // Auto-switch every 7s with a ~0.9s cross-fade. Always on - the slideshow is a core part of
+        // the look, so it can't be disabled (no pref gate).
         slideIndex = 0;
         slideTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(7) };
-        slideTimer.Tick += (s, e) => { try { if (slides.Length > 1 && Prefs.GetBool("BgSlideshow", true)) NextSlide(); } catch { } };
+        slideTimer.Tick += (s, e) => { try { if (slides.Length > 1) NextSlide(); } catch { } };
         slideTimer.Start();
     }
 
@@ -856,7 +1003,7 @@ public class LauncherWindow : Window
         {
             bool active = (i == slideIndex);
             slideDots[i].Width = active ? 20 : 6;
-            slideDots[i].Background = active ? Accent : StrokeHi;
+            slideDots[i].Background = active ? TextHi : StrokeHi;   // active = solid white, inactive = translucent white
         }
     }
 
@@ -882,13 +1029,23 @@ public class LauncherWindow : Window
     {
         // The UI is designed on a fixed 1440x860 canvas; a Viewbox scales it uniformly to the
         // window so it looks right when resized/maximized (the background fills behind it).
-        homeView = new Grid { Width = 1440, Height = 860 };
+        homeView = new Grid { Width = 960, Height = 680 };
         BuildHero(homeView);
         BuildServerGrid(homeView);
         mainGrid.Children.Add(new Viewbox { Stretch = Stretch.Uniform, Child = homeView });
     }
 
-    // ---- social links (a horizontal icon row, placed under the hero CTA) ----
+    // Social links pinned to the top-left of the launcher (aligned to the hero's left gutter).
+    void BuildSocials(Grid content)
+    {
+        var social = SocialRow(new Thickness(14, 12, 0, 0));
+        if (social == null) return;
+        social.HorizontalAlignment = HorizontalAlignment.Left;
+        social.VerticalAlignment = VerticalAlignment.Top;
+        content.Children.Add(social);
+    }
+
+    // ---- social links (a horizontal row of round icon buttons) ----
     StackPanel SocialRow(Thickness margin)
     {
         if (Socials == null || Socials.Count == 0) return null;
@@ -905,10 +1062,10 @@ public class LauncherWindow : Window
     {
         var glyph = SocialGlyph(s.Platform);
         if (glyph == null) return null;   // unknown platform -> skip rather than draw a blank pill
-        var box = new Viewbox { Width = 18, Height = 18, Child = glyph, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var box = new Viewbox { Width = 16, Height = 16, Child = glyph, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var b = new Border
         {
-            Width = 40, Height = 40, CornerRadius = new CornerRadius(20),
+            Width = 34, Height = 34, CornerRadius = new CornerRadius(17),
             Background = Stroke, BorderBrush = GlassSoft, BorderThickness = new Thickness(1),
             Margin = new Thickness(0, 0, 12, 0), Cursor = Cursors.Hand, Child = box, ToolTip = s.Url
         };
@@ -970,12 +1127,12 @@ public class LauncherWindow : Window
         var hero = new StackPanel
         {
             HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(64, 0, 0, 0), Width = 470
+            Margin = new Thickness(44, 0, 0, 0), Width = 400
         };
 
         if (logoBmp != null)
         {
-            var big = new Image { Source = logoBmp, Width = 250, Stretch = Stretch.Uniform,
+            var big = new Image { Source = logoBmp, Width = 200, Stretch = Stretch.Uniform,
                 HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 0),
                 Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 30, ShadowDepth = 10, Opacity = 0.6, Color = Colors.Black } };
             RenderOptions.SetBitmapScalingMode(big, BitmapScalingMode.HighQuality);
@@ -984,39 +1141,39 @@ public class LauncherWindow : Window
 
         hero.Children.Add(new TextBlock
         {
-            Text = GameTitle, Foreground = TextHi, FontSize = 54, FontFamily = Brand, FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(-2, 14, 0, 0), LineHeight = 54, LineStackingStrategy = LineStackingStrategy.BlockLineHeight
+            Text = GameTitle, Foreground = TextHi, FontSize = 44, FontFamily = Brand, FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(-2, 12, 0, 0), LineHeight = 44, LineStackingStrategy = LineStackingStrategy.BlockLineHeight
         });
         hero.Children.Add(new TextBlock
         {
             Text = Track("JANUARY UPDATE 2021", 1),
-            Foreground = Accent, FontSize = 13, FontFamily = Brand, FontWeight = FontWeights.SemiBold, Margin = new Thickness(1, 10, 0, 0)
+            Foreground = Accent, FontSize = 13, FontFamily = Brand, FontWeight = FontWeights.SemiBold, Margin = new Thickness(1, 8, 0, 0)
         });
         hero.Children.Add(new TextBlock
         {
-            Text = Tagline, Foreground = TextDim, FontSize = 16.5, TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(1, 20, 0, 0), MaxWidth = 440, HorizontalAlignment = HorizontalAlignment.Left,
-            LineHeight = 25, LineStackingStrategy = LineStackingStrategy.BlockLineHeight
+            Text = Tagline, Foreground = TextDim, FontSize = 14.5, TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(1, 14, 0, 0), MaxWidth = 370, HorizontalAlignment = HorizontalAlignment.Left,
+            LineHeight = 21, LineStackingStrategy = LineStackingStrategy.BlockLineHeight
         });
 
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 30, 0, 0) };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 20, 0, 0) };
         playBtn = PlayButton();
-        installBtn = LinkButton("", "INSTALL", OnDownloadButton);
+        installBtn = LinkButton("", "INSTALL", OnDownloadButton);
         row.Children.Add(playBtn);
         row.Children.Add(installBtn);
         hero.Children.Add(row);
 
         progTrack = new Border
         {
-            Height = 5, Width = 380, CornerRadius = new CornerRadius(3), Background = B("#33202531"),
-            HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(1, 20, 0, 0),
+            Height = 5, Width = 330, CornerRadius = new CornerRadius(3), Background = B("#33202531"),
+            HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(1, 14, 0, 0),
             Visibility = Visibility.Collapsed, ClipToBounds = true
         };
         progFill = new Border { Height = 5, Width = 0, CornerRadius = new CornerRadius(3), Background = Accent, HorizontalAlignment = HorizontalAlignment.Left };
         progTrack.Child = progFill;
         hero.Children.Add(progTrack);
 
-        statusText = new TextBlock { Text = "", Foreground = TextMute, FontSize = 12.5, Margin = new Thickness(1, 10, 0, 0) };
+        statusText = new TextBlock { Text = "", Foreground = TextMute, FontSize = 12.5, Margin = new Thickness(1, 8, 0, 0) };
         hero.Children.Add(statusText);
 
         content.Children.Add(hero);
@@ -1025,16 +1182,17 @@ public class LauncherWindow : Window
     Border PlayButton()
     {
         var sp = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var ic = Icon("", 12, Ink); ic.Margin = new Thickness(0, 1, 9, 0);
-        var tb = new TextBlock { Text = Track("PLAY", 1), FontSize = 14, FontFamily = Brand, FontWeight = FontWeights.SemiBold,
+        var ic = new System.Windows.Shapes.Polygon { Points = new PointCollection { new Point(0, 0), new Point(0, 11), new Point(10, 5.5) }, Fill = Ink, Width = 10, Height = 11, Stretch = Stretch.Fill, Margin = new Thickness(0, 1, 10, 0), VerticalAlignment = VerticalAlignment.Center, SnapsToDevicePixels = true };   // proper filled play triangle
+        var tb = new TextBlock { Text = Track("PLAY", 1), FontSize = 13, FontFamily = Site, FontWeight = FontWeights.SemiBold,
             Foreground = Ink, VerticalAlignment = VerticalAlignment.Center };
         sp.Children.Add(ic); sp.Children.Add(tb);
         var b = new Border
         {
-            Height = 46, MinWidth = 130, CornerRadius = new CornerRadius(23), Cursor = Cursors.Hand,
-            Background = TextHi, Padding = new Thickness(26, 0, 28, 0), Child = sp
+            Height = 40, MinWidth = 112, CornerRadius = new CornerRadius(20), Cursor = Cursors.Hand,
+            Background = TextHi, Padding = new Thickness(20, 0, 22, 0), Child = sp
         };
-        // flat: no hover shade
+        b.MouseEnter += (s, e) => { if (b.IsEnabled) b.Background = B("#F0F1F4"); };   // subtle hover (site primary)
+        b.MouseLeave += (s, e) => b.Background = TextHi;
         b.MouseLeftButtonUp += (s, e) => { e.Handled = true; if (b.IsEnabled && !busy) Play(LaunchArgs); };
         b.Tag = new object[] { true, tb, ic };
         return b;
@@ -1044,17 +1202,18 @@ public class LauncherWindow : Window
     {
         var sp = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
         var ic = Icon(glyph, 13, Ink); ic.Margin = new Thickness(0, 1, 9, 0);
-        var tb = new TextBlock { Text = Track(text, 1), FontSize = 14, FontFamily = Brand, FontWeight = FontWeights.SemiBold,
+        var tb = new TextBlock { Text = Track(text, 1), FontSize = 13, FontFamily = Site, FontWeight = FontWeights.SemiBold,
             Foreground = Ink, VerticalAlignment = VerticalAlignment.Center };
         sp.Children.Add(ic); sp.Children.Add(tb);
         // Full white pill, matching PLAY. Left margin is set in RefreshState so it aligns to the
         // hero's left edge when it is the leading button (PLAY hidden).
         var b = new Border
         {
-            Height = 46, MinWidth = 130, CornerRadius = new CornerRadius(23), Cursor = Cursors.Hand,
-            Background = TextHi, Padding = new Thickness(24, 0, 28, 0), Child = sp
+            Height = 40, MinWidth = 112, CornerRadius = new CornerRadius(20), Cursor = Cursors.Hand,
+            Background = TextHi, Padding = new Thickness(20, 0, 22, 0), Child = sp
         };
-        // flat: no hover shade
+        b.MouseEnter += (s, e) => { if (b.IsEnabled) b.Background = B("#F0F1F4"); };   // subtle hover (site primary)
+        b.MouseLeave += (s, e) => b.Background = TextHi;
         // No !busy guard here: this button doubles as PAUSE while a download runs.
         b.MouseLeftButtonUp += (s, e) => { e.Handled = true; if (b.IsEnabled) onClick(); };
         b.Tag = new object[] { false, tb, ic };
@@ -1072,9 +1231,7 @@ public class LauncherWindow : Window
     void BuildServerGrid(Grid content)
     {
         serverStatusRefreshers.Clear();
-        var wrap = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 64, 0) };
-        var social = SocialRow(new Thickness(12, 0, 0, 12));   // social icons above the server cards
-        if (social != null) { social.HorizontalAlignment = HorizontalAlignment.Center; wrap.Children.Add(social); }
+        var wrap = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 44, 0) };
         var grid = new System.Windows.Controls.Primitives.UniformGrid { Columns = 1 };   // vertical list
         string[][] pal = {
             new[]{"#3A2E5A","#141020"}, new[]{"#2C4A3A","#121C17"}, new[]{"#2F3D5A","#12161F"},
@@ -1086,129 +1243,116 @@ public class LauncherWindow : Window
 
         var more = new Border
         {
-            Height = 40, CornerRadius = new CornerRadius(20), Background = Brushes.Transparent,
-            BorderBrush = GlassSoft, BorderThickness = new Thickness(1), Padding = new Thickness(20, 0, 16, 0),
+            Height = 40, CornerRadius = new CornerRadius(20), Background = B("#0FFFFFFF"),   // site glass secondary (white/6)
+            BorderThickness = new Thickness(0), Padding = new Thickness(22, 0, 18, 0),
             HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 16, 0, 0), Cursor = Cursors.Hand
         };
         var ms = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        ms.Children.Add(new TextBlock { Text = Track("DISCOVER MORE", 1), Foreground = TextHi, FontFamily = Brand, FontWeight = FontWeights.SemiBold, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center });
-        var ch = Icon("\uE76C", 10, TextHi); ch.Margin = new Thickness(8, 1, 0, 0); ms.Children.Add(ch);
+        ms.Children.Add(new TextBlock { Text = Track("DISCOVER MORE", 1), Foreground = Ink100, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
+        var ch = Icon("\uE76C", 10, Ink100); ch.Margin = new Thickness(8, 1, 0, 0); ms.Children.Add(ch);
         more.Child = ms;
-        // flat: no hover fill
+        more.MouseEnter += (s, e) => more.Background = B("#1FFFFFFF");   // site glass hover (white/12)
+        more.MouseLeave += (s, e) => more.Background = B("#0FFFFFFF");
+        more.MouseLeftButtonUp += (s, e) => { e.Handled = true; OpenUrl("https://rustorigin.com"); };   // open the site
         wrap.Children.Add(more);
 
         content.Children.Add(wrap);
     }
 
-    // A server "pill": cover image background + name + player-count badge (server-browser style).
+    // Server card: cover image with a compact bottom overlay - status dot + name + live player count,
+    // and the online-players bar (violet fill). Clickable to launch/join; hover shows a play glyph.
     Grid ServerTile(ServerEntry srv, string c1, string c2)
     {
-        double W = 340, H = 150;
-        var tile = new Grid { Width = W, Height = H, Margin = new Thickness(7), Cursor = Cursors.Hand, Background = Brushes.Transparent };
-        tile.Clip = new RectangleGeometry(new Rect(0, 0, W, H), 16, 16);
+        const double W = 300, H = 150, PAD = 12;
+        double barW = W - PAD * 2;
+        string eff = srv.Args.Length > 0 ? srv.Args : LaunchArgs;
+        string qHost; int qPort;
+        bool canQuery = TryParseConnect(eff, out qHost, out qPort);
+        bool hasWeb = !string.IsNullOrEmpty(srv.StatusUrl);
+        bool live = canQuery || hasWeb;
+        bool joinable = srv.Args.Length > 0 || canQuery;
 
-        // Per-server cover (the Server= cover field), else the shared cover, else a gradient.
+        var wrap = new Grid { Width = W, Height = H, Margin = new Thickness(0, 0, 0, 12), Cursor = joinable ? Cursors.Hand : Cursors.Arrow };
+        var card = new Border { Background = Ink900, CornerRadius = new CornerRadius(17) };
+        card.SizeChanged += (s, e) => { try { card.Clip = new RectangleGeometry(new Rect(0, 0, card.ActualWidth, card.ActualHeight), 17, 17); } catch { } };
+        wrap.Children.Add(card);
+        var inner = new Grid();
+        card.Child = inner;
+
+        // cover image (or gradient fallback)
         BitmapImage cov = null;
         if (!string.IsNullOrEmpty(srv.Cover))
             cov = LoadBitmap(Path.Combine(Assets.Dir, srv.Cover)) ?? LoadBitmap(Path.Combine(AppDir(), srv.Cover));
         if (cov == null) cov = coverBmp;
-        UIElement coverEl;
         if (cov != null)
         {
             var img = new Image { Source = cov, Stretch = Stretch.UniformToFill };
             RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
-            coverEl = img;
+            inner.Children.Add(img);
         }
-        else coverEl = new Rectangle { Fill = Grad(c1, c2) };
-        // Blurred on hover (animated below) so the "click to join" overlay reads on top.
-        var coverBlur = new System.Windows.Media.Effects.BlurEffect { Radius = 0, KernelType = System.Windows.Media.Effects.KernelType.Gaussian, RenderingBias = System.Windows.Media.Effects.RenderingBias.Performance };
-        coverEl.Effect = coverBlur;
-        tile.Children.Add(coverEl);
+        else inner.Children.Add(new Rectangle { Fill = Grad(c1, c2) });
 
-        var ov = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
-        ov.GradientStops.Add(new GradientStop(Colors.Transparent, 0.22));
-        ov.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString("#F00A0C11"), 1));
-        tile.Children.Add(new Rectangle { Fill = ov, IsHitTestVisible = false });
+        // bottom scrim so the overlay reads on any screenshot
+        var scrim = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
+        scrim.GradientStops.Add(new GradientStop(Colors.Transparent, 0.35));
+        scrim.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString("#CC000000"), 1));
+        inner.Children.Add(new Rectangle { Fill = scrim, IsHitTestVisible = false });
 
-        var texts = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(12, 0, 12, 11) };
-        texts.Children.Add(new TextBlock
+        // hover: dim + centred play glyph
+        if (joinable)
         {
-            Text = srv.Name.ToUpperInvariant(), Foreground = TextHi, FontFamily = Brand, FontWeight = FontWeights.Bold,
-            FontSize = 19, LineHeight = 21, LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
-            TextWrapping = TextWrapping.Wrap, MaxWidth = W - 24,
-            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 6, ShadowDepth = 1, Opacity = 0.85, Color = Colors.Black }
-        });
-        if (srv.Tag.Length > 0)
-            texts.Children.Add(new TextBlock { Text = srv.Tag.ToUpperInvariant(), Foreground = TextDim, FontFamily = Brand, FontWeight = FontWeights.SemiBold, FontSize = 9.5, Margin = new Thickness(0, 3, 0, 0), Opacity = 0.9 });
-        tile.Children.Add(texts);
+            var hover = new Grid { Opacity = 0 };
+            hover.Children.Add(new Rectangle { Fill = B("#40000000") });
+            hover.Children.Add(Icon("\uE768", 30, TextHi));
+            inner.Children.Add(hover);
+            wrap.MouseEnter += (s, e) => hover.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(120))));
+            wrap.MouseLeave += (s, e) => hover.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(120))));
+            wrap.MouseLeftButtonUp += (s, e) => { e.Handled = true; if (!busy) Play(eff); };
+        }
 
-        // Live status badge: status dot + player count. Preferred source is the website stats feed
-        // (the server's StatusUrl, 6th Server= field) since this build doesn't answer raw A2S. If no
-        // StatusUrl is set we fall back to an A2S query of the +connect host:port; otherwise we just
-        // show the static Players text from config.
-        string qHost; int qPort;
-        bool canQuery = TryParseConnect(srv.Args.Length > 0 ? srv.Args : LaunchArgs, out qHost, out qPort);
-        bool hasWeb = !string.IsNullOrEmpty(srv.StatusUrl);
-        if (srv.Players.Length > 0 || canQuery || hasWeb)
+        // ---- bottom info: [dot + name] .... [count], then the players bar ----
+        var info = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(PAD, 0, PAD, PAD), IsHitTestVisible = false };
+        var top = new Grid();
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var nameSp = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        var dot = new Ellipse { Width = 8, Height = 8, Fill = B("#6B7280"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 1, 7, 0) };
+        nameSp.Children.Add(dot);
+        nameSp.Children.Add(new TextBlock { Text = srv.Name.ToUpperInvariant(), Foreground = TextHi, FontFamily = Site, FontWeight = FontWeights.Bold, FontSize = 14, MaxWidth = 175, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center });
+        Grid.SetColumn(nameSp, 0); top.Children.Add(nameSp);
+        var count = new TextBlock { Text = live ? "--" : (srv.Players.Length > 0 ? srv.Players : "SOON"), Foreground = TextHi, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(count, 1); top.Children.Add(count);
+        info.Children.Add(top);
+
+        // online-players bar (track white/15, fill violet)
+        var barFill = new Border { Height = 5, CornerRadius = new CornerRadius(3), Background = Brand500, HorizontalAlignment = HorizontalAlignment.Left, Width = 0 };
+        info.Children.Add(new Border { Height = 5, CornerRadius = new CornerRadius(3), Background = GlassSoft, Margin = new Thickness(0, 8, 0, 0), Child = barFill });
+        inner.Children.Add(info);
+
+        // edge hairline
+        inner.Children.Add(new Border { CornerRadius = new CornerRadius(17), BorderBrush = Stroke, BorderThickness = new Thickness(1), IsHitTestVisible = false });
+
+        // live status wiring: dot colour, count, and bar fill (refreshes via the shared ~60s timer)
+        if (live)
         {
-            var dot = new Ellipse { Width = 8, Height = 8, Fill = B("#9AA0A6"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
-            var count = new TextBlock { Text = srv.Players.Length > 0 ? srv.Players : "• • •", Foreground = TextHi, FontFamily = Brand, FontWeight = FontWeights.SemiBold, FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
-            var row = new StackPanel { Orientation = Orientation.Horizontal };
-            row.Children.Add(dot); row.Children.Add(count);
-            var badge = new Border
+            Action<int, int, int> apply = delegate (int st, int pcur, int pmax)
             {
-                Background = B("#B3000000"), CornerRadius = new CornerRadius(8), Padding = new Thickness(8, 3, 8, 4),
-                HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 10, 10, 0),
-                Child = row
+                if (st == 0) { dot.Fill = StatChecking; count.Text = "\u2022 \u2022 \u2022"; }
+                else if (st == 1)
+                {
+                    dot.Fill = Live; count.Text = pmax > 0 ? (pcur + " / " + pmax) : pcur.ToString();
+                    double ratio = pmax > 0 ? Math.Max(0.0, Math.Min(1.0, (double)pcur / pmax)) : 0;
+                    barFill.BeginAnimation(FrameworkElement.WidthProperty, new DoubleAnimation(barW * ratio, new Duration(TimeSpan.FromMilliseconds(400))));
+                }
+                else { dot.Fill = B("#6B7280"); count.Text = "Offline"; barFill.BeginAnimation(FrameworkElement.WidthProperty, new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(200)))); }
             };
-            tile.Children.Add(badge);
-
-            if (hasWeb)
-            {
-                string url = srv.StatusUrl;
-                Action refresh = delegate { QueryServerStatusWeb(url, dot, count); };
-                serverStatusRefreshers.Add(refresh);
-                refresh();   // initial query on build
-            }
-            else if (canQuery)
-            {
-                Action refresh = delegate { QueryServerStatus(qHost, qPort, dot, count); };
-                serverStatusRefreshers.Add(refresh);
-                refresh();   // initial query on build
-            }
+            Action refresh = hasWeb ? (Action)delegate { QueryServerStatusWeb(srv.StatusUrl, apply); }
+                                    : delegate { QueryServerStatus(qHost, qPort, apply); };
+            serverStatusRefreshers.Add(refresh);
+            refresh();
         }
 
-        // Hover overlay: darken the card and show a centered "CLICK TO JOIN" call to action (fades
-        // in on hover). Non-hit-testable so it never swallows the tile's click.
-        var join = new Grid { IsHitTestVisible = false, Opacity = 0 };
-        join.Children.Add(new Rectangle { Fill = B("#66000000") });
-        var jsp = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var jic = Icon("", 13, TextHi); jic.Margin = new Thickness(0, 1, 9, 0);   // play glyph
-        jsp.Children.Add(jic);
-        jsp.Children.Add(new TextBlock
-        {
-            Text = Track("CLICK TO JOIN", 2), Foreground = TextHi, FontFamily = Brand, FontWeight = FontWeights.SemiBold, FontSize = 13,
-            VerticalAlignment = VerticalAlignment.Center,
-            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 6, ShadowDepth = 1, Opacity = 0.85, Color = Colors.Black }
-        });
-        join.Children.Add(jsp);
-        tile.Children.Add(join);
-
-        var edge = new Border { CornerRadius = new CornerRadius(14), BorderBrush = Stroke, BorderThickness = new Thickness(1), Background = Brushes.Transparent, IsHitTestVisible = false };
-        tile.Children.Add(edge);
-
-        tile.MouseEnter += (s, e) =>
-        {
-            join.BeginAnimation(OpacityProperty, new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(140))));
-            coverBlur.BeginAnimation(System.Windows.Media.Effects.BlurEffect.RadiusProperty, new DoubleAnimation(10, new Duration(TimeSpan.FromMilliseconds(140))));
-        };
-        tile.MouseLeave += (s, e) =>
-        {
-            join.BeginAnimation(OpacityProperty, new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(140))));
-            coverBlur.BeginAnimation(System.Windows.Media.Effects.BlurEffect.RadiusProperty, new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(140))));
-        };
-        tile.MouseLeftButtonUp += (s, e) => { e.Handled = true; if (!busy) Play(srv.Args.Length > 0 ? srv.Args : LaunchArgs); };
-        return tile;
+        return wrap;
     }
 
     // Pull "host:port" out of a "+connect host:port" launch-args string (the A2S query endpoint).
@@ -1222,32 +1366,27 @@ public class LauncherWindow : Window
         return int.TryParse(m.Groups[2].Value, out port) && port > 0 && port <= 65535;
     }
 
-    // Query one server's live player count over A2S on a background thread and update its badge.
-    // dot: amber = checking, green = online (shows X/Y), red = unreachable (shows "Offline").
-    void QueryServerStatus(string host, int port, Ellipse dot, TextBlock count)
+    // Query one server's live player count over A2S on a background thread. onResult runs on the UI
+    // thread with (state, players, max): state 0 = checking, 1 = online, 2 = unreachable.
+    void QueryServerStatus(string host, int port, Action<int, int, int> onResult)
     {
-        dot.Fill = StatChecking;   // amber: checking (called on the UI thread)
+        onResult(0, 0, 0);
         var t = new Thread(delegate ()
         {
             int players, max;
             bool ok = A2S.TryQueryInfo(host, port, 2500, out players, out max);
-            Dispatcher.BeginInvoke((Action)delegate
-            {
-                if (ok) { dot.Fill = StatOnline; count.Text = players + "/" + max; }
-                else    { dot.Fill = StatOffline; count.Text = "Offline"; }
-            });
+            Dispatcher.BeginInvoke((Action)delegate { onResult(ok ? 1 : 2, players, max); });
         }) { IsBackground = true, Name = "a2s" };
         t.Start();
     }
 
-    // Read a server's live player count from the website stats feed instead of A2S (this build does
-    // not answer raw A2S). The feed is the OriginStatsPublisher payload for ONE server: its top-level
-    // "server" block carries "players"/"maxPlayers". A slim {"players":N,"maxPlayers":N} works too.
-    // Runs on a background thread; updates the badge on the UI thread. dot: amber = checking,
-    // green = online (X/Y), red = unreachable ("Offline").
-    void QueryServerStatusWeb(string url, Ellipse dot, TextBlock count)
+    // Read a server's live player count from the website stats feed instead of A2S. The feed is the
+    // OriginStatsPublisher payload for ONE server: its top-level "server" block carries
+    // "players"/"maxPlayers"; a slim {"players":N,"maxPlayers":N} works too. onResult runs on the UI
+    // thread with (state, players, max): 0 = checking, 1 = online, 2 = unreachable.
+    void QueryServerStatusWeb(string url, Action<int, int, int> onResult)
     {
-        dot.Fill = StatChecking;   // amber: checking (called on the UI thread)
+        onResult(0, 0, 0);
         var t = new Thread(delegate ()
         {
             int players = 0, max = 0;
@@ -1259,7 +1398,6 @@ public class LauncherWindow : Window
                     wc.Headers[HttpRequestHeader.CacheControl] = "no-cache";
                     string bust = url + (url.IndexOf('?') >= 0 ? "&" : "?") + "t=" + DateTime.UtcNow.Ticks;
                     string json = wc.DownloadString(bust);
-                    // "players"/"maxPlayers" appear only in the server block, so the first match is it.
                     var mp = System.Text.RegularExpressions.Regex.Match(json, "\"players\"\\s*:\\s*(\\d+)");
                     var mm = System.Text.RegularExpressions.Regex.Match(json, "\"maxPlayers\"\\s*:\\s*(\\d+)");
                     if (mp.Success && int.TryParse(mp.Groups[1].Value, out players))
@@ -1270,15 +1408,10 @@ public class LauncherWindow : Window
                 }
             }
             catch { ok = false; }
-            Dispatcher.BeginInvoke((Action)delegate
-            {
-                if (ok) { dot.Fill = StatOnline; count.Text = max > 0 ? (players + "/" + max) : players.ToString(); }
-                else    { dot.Fill = StatOffline; count.Text = "Offline"; }
-            });
+            Dispatcher.BeginInvoke((Action)delegate { onResult(ok ? 1 : 2, players, max); });
         }) { IsBackground = true, Name = "status-web" };
         t.Start();
     }
-
     // Re-query every card's live status once a minute (started once, after the grid is built).
     void StartServerStatusTimer()
     {
@@ -1394,15 +1527,15 @@ public class LauncherWindow : Window
             if (src == null) return;                                  // no existing Rust config found to import
             string dst = Path.Combine(Path.GetDirectoryName(exe), "cfg");
 
-            var res = MessageBox.Show(this,
+            bool res = Confirm("Import your Rust keybinds?",
                 "Found your existing Rust config:\n\n" + src + "\n\n" +
                 "Copy it into RustOrigin so your keybinds carry over?\n\n" +
                 "Keybinds are imported. Graphics/quality settings are NOT - this build has its own, " +
                 "so set those in-game.",
-                "Import your Rust keybinds?", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                "Import", "Skip");
 
             Prefs.Set("RustConfigImported", true);   // one-time prompt, regardless of the answer
-            if (res != MessageBoxResult.Yes) { Log("config import declined"); return; }
+            if (!res) { Log("config import declined"); return; }
 
             int n = CopyDir(src, dst);
             Log("config import: copied " + n + " file(s) from " + src + " -> " + dst);
@@ -2187,7 +2320,6 @@ public class LauncherWindow : Window
     {
         try
         {
-            if (!Prefs.GetBool("AutoUpdate", true)) return;
             string repo = (UpdateRepo ?? "").Trim();
             if (repo.Length == 0) return;
             // clean up a leftover .old from a previous self-update
@@ -2217,29 +2349,23 @@ public class LauncherWindow : Window
         if (exeUrl == null || sumsUrl == null) { Log("update: release " + tag + " missing RustOriginLauncher.exe or SHA256SUMS.txt asset"); return; }
         Log("update available: v" + current + " -> " + tag);
 
-        bool go = false;
-        Dispatcher.Invoke((Action)(() =>
-        {
-            go = MessageBox.Show(this,
-                "A new version of Rustorigin Launcher is available.\n\nInstalled:  v" + current + "\nLatest:     " + tag + "\n\nDownload and update now?",
-                "Update available", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes;
-        }));
-        if (!go) return;
+        // Mandatory: block the launcher and update now - no opt-out.
+        ShowUpdateGate("Update required", "A required update (v" + current + " \u2192 " + tag + ") is downloading. The launcher will restart automatically.");
 
         string expected = UpdateParsing.HashFromSums(HttpGetString(sumsUrl), "RustOriginLauncher.exe");
-        if (expected == null) { UpdateFail("Could not read the update checksum."); return; }
+        if (expected == null) { GateFail(repo, "Could not read the update checksum."); return; }
 
         string self = SelfPath();
         string newPath = self + ".new";
         try { if (File.Exists(newPath)) File.Delete(newPath); } catch { }
-        if (!HttpDownload(exeUrl, newPath)) { UpdateFail("The update download failed."); return; }
+        if (!HttpDownload(exeUrl, newPath)) { GateFail(repo, "The update download failed."); return; }
 
         string actual = Sha256File(newPath);
         if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
         {
             try { File.Delete(newPath); } catch { }
             Log("update REJECTED (hash mismatch): expected " + expected + " got " + actual);
-            UpdateFail("The downloaded update failed its integrity check and was discarded. Nothing was changed.");
+            GateFail(repo, "The downloaded update failed its integrity check and was discarded.");
             return;
         }
         Log("update verified (" + actual + "); swapping in " + tag);
@@ -2257,14 +2383,41 @@ public class LauncherWindow : Window
         {
             Log("self-replace failed: " + ex.Message);
             try { if (!File.Exists(self) && File.Exists(self + ".old")) File.Move(self + ".old", self); } catch { }   // roll back
-            UpdateFail("Could not apply the update (the install folder may be read-only). Opening the releases page so you can update manually.");
-            try { Process.Start(new ProcessStartInfo("https://github.com/" + repo + "/releases/latest") { UseShellExecute = true }); } catch { }
+            GateFail(repo, "Could not apply the update (the install folder may be read-only).");
         }
     }
 
-    void UpdateFail(string msg)
+    Grid updateGate; TextBlock updateGateMsg;
+
+    // Full-screen blocking gate for a mandatory update: the launcher can't be used until it updates
+    // (or the player quits). Added last, so it sits on top of everything including the caption buttons.
+    void ShowUpdateGate(string heading, string message)
     {
-        Dispatcher.Invoke((Action)(() => MessageBox.Show(this, msg, "Update", MessageBoxButton.OK, MessageBoxImage.Warning)));
+        Dispatcher.Invoke((Action)(() =>
+        {
+            if (updateGate == null)
+            {
+                updateGate = new Grid { Background = B("#F20B0B0C") };
+                updateGate.MouseLeftButtonDown += (s, e) => e.Handled = true;   // swallow clicks + window drag
+                var box = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 440, Margin = new Thickness(24) };
+                box.Children.Add(DialogHeader(heading, true));
+                updateGateMsg = new TextBlock { Text = message, Foreground = Ink200, FontFamily = Site, FontSize = 13, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 12, 0, 0) };
+                box.Children.Add(updateGateMsg);
+                var quit = DialogBtn("Quit", false, delegate { try { if (tray != null) tray.Visible = false; } catch { } Application.Current.Shutdown(); });
+                quit.HorizontalAlignment = HorizontalAlignment.Center; quit.Margin = new Thickness(0, 20, 0, 0);
+                box.Children.Add(quit);
+                updateGate.Children.Add(box);
+                mainGrid.Children.Add(updateGate);
+            }
+            else if (updateGateMsg != null) updateGateMsg.Text = message;
+        }));
+    }
+
+    // Mandatory update failed: open the releases page and keep the gate up (the launcher stays blocked).
+    void GateFail(string repo, string msg)
+    {
+        try { Process.Start(new ProcessStartInfo("https://github.com/" + repo + "/releases/latest") { UseShellExecute = true }); } catch { }
+        ShowUpdateGate("Update required", msg + "  The releases page has opened - update manually, then relaunch.");
     }
 
     // --- small HTTP + parsing helpers for the updater (no external dependency) ---
@@ -2322,8 +2475,7 @@ public class LauncherWindow : Window
     {
         if (busy && dlThread != null && dlThread.IsAlive)
         {
-            if (MessageBox.Show(this, "A download is in progress. Quit now?\n\nProgress is saved - click Resume next time to continue where it left off.",
-                "Quit", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            if (!Confirm("Quit", "A download is in progress. Quit now?\n\nProgress is saved - click Resume next time to continue where it left off.", "Quit", "Keep downloading"))
             { e.Cancel = true; return; }
             CancelDownload();
         }

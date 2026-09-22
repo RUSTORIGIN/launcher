@@ -28,11 +28,12 @@ Line references point at the current source.
    (`#AARRGGBB`), not opacity on solid colors. This is the core idiom — learn it (§2).
 4. **Brand type + tracked capitals.** Montserrat (`Brand`) for almost all text; uppercase
    labels and CTAs get letter-spacing via the `Track()` helper (§3).
-5. **Flat and restrained.** Primary buttons are flat (no hover shade). Hovers are small
-   fill/opacity swaps. `DropShadowEffect` is used sparingly (cards, the toggle knob, hero
-   logo/text). One rust-red accent; white is the primary-action color.
-6. **Build with factory methods.** Controls come from named factories (`AccentPill`,
-   `OutlineBtn`, `CaptionBtn`, `MakeToggle`, `ServerTile`, `Icon`, `SectionLabel`,
+5. **Flat and restrained.** Buttons match the site: white primary pills with a **subtle**
+   hover (`#F0F1F4`), glass secondaries with a faint fill swap. `DropShadowEffect` is used
+   sparingly (cards, the toggle knob, hero logo/text). White is the primary-action color; the
+   launcher's own accent is rust-red, and the settings panel uses the site's violet brand.
+6. **Build with factory methods.** Controls come from named factories (`PrimaryPill`,
+   `UtilityBtn`, `CaptionBtn`, `MakeToggle`, `ServerTile`, `Icon`, `GroupLabel`, `GroupCard`,
    `SettingRow`). Reuse them; don't hand-roll a one-off `Border` that duplicates one.
 
 ---
@@ -98,8 +99,10 @@ The window background is `#0B0D12` (used in `Background`, `mainGrid`; lines 252,
 - **Window default** is `Segoe UI` (line 256) — the base for anything that doesn't set
   `Brand`.
 - **`Site`** (`MakeSite()`): bundled **Poppins** (the rustorigin.com typeface), loaded from
-  `assets/fonts/Poppins-*.ttf`, falling back to installed Poppins then Segoe UI. Scoped to
-  the website-styled **settings panel** only; the rest of the launcher uses `Brand`.
+  `assets/fonts/Poppins-*.ttf`, falling back to installed Poppins then Segoe UI. Used by the
+  website-styled **settings panel** and by the **site-styled buttons** (the white PLAY/INSTALL
+  and "Done" pills, and the "DISCOVER MORE" glass pill), so those read like the site's buttons;
+  the rest of the launcher uses `Brand`.
 - **`Icons`** = `Segoe MDL2 Assets` for glyph icons, via the `Icon(glyph, size, brush)`
   helper (lines 889–896). Caption/social/play glyphs are MDL2 code points.
 
@@ -166,11 +169,15 @@ Standardize on the existing factories. These are the canonical shapes.
 
 ### Pills / buttons
 
-- **`PlayButton()` (964) / `LinkButton()` (982)** — the primary CTAs: **white** pill
-  (`Background = TextHi`), dark glyph+label (`#12141A`), height 46, radius 23, **flat**
-  (no hover shade). `LinkButton` doubles as INSTALL/PAUSE.
-- **`AccentPill` / `UtilityBtn`** — **settings-only** buttons, styled to the website (violet
-  pill / compact rounded-md), covered in *Settings panel* below, not part of the glass system.
+- **`PlayButton()` / `LinkButton()`** — the primary CTAs, styled to match the site's primary
+  button ("PLAY NOW"): **white** pill (`Background = TextHi`), near-black glyph+label (`Ink`),
+  **Poppins** (`Site`), uppercase + `Track(_,1)`, height 46, radius 23, with a **subtle hover**
+  to `#F0F1F4`. `LinkButton` doubles as INSTALL/PAUSE.
+- **`PrimaryPill`** — the settings "Done", same **white** site-primary pill as above (radius 20).
+- **`UtilityBtn`** — **settings-only** compact rounded-md button (the site's copy-button style),
+  covered in *Settings panel* below.
+- **"DISCOVER MORE"** (`BuildServerGrid`) — the site's **secondary glass** pill: `white/6` fill,
+  no border, `Ink100` label, `Site` font, full radius, hover `white/12`.
 - **`CaptionBtn(glyph, onClick, closeBtn)`** — circular 34px glass button (MDL2
   glyph). Others brighten to `#33FFFFFF`; the close button hovers `Accent` (red); glyph
   lifts `TextDim → TextHi`. Marked `WindowChrome.SetIsHitTestVisibleInChrome(b, true)` so
@@ -202,11 +209,11 @@ uses the *website design tokens* block in the palette (mirrored from the site's
   clipped). Each `SettingRow` has a faint `white/[0.03]` hover and a live-green `MakeToggle`.
 - **Actions & footer:** compact rounded-md `UtilityBtn`s (faint fill; glyph+label lift to
   `Brand300` on hover, like the site's copy button), then a `white/5` divider, version text
-  (`Ink400`), and the violet `AccentPill("Done")`.
+  (`Ink400`), and the white `PrimaryPill("Done")` (the site's primary button).
 
-The helpers `GroupLabel`, `GroupCard`, `SettingRow`, `MakeToggle`, `UtilityBtn`, `AccentPill`,
-`AccentRule` are **settings-only**, so this website styling does not leak into the rest of the
-(glass) launcher.
+The helpers `GroupLabel`, `GroupCard`, `SettingRow`, `MakeToggle`, `UtilityBtn`, `AccentRule`
+are **settings-only**, so this website styling does not leak into the rest of the (glass)
+launcher. `PrimaryPill` is shared with the hero CTAs (both are the site's white primary button).
 
 > Font: the panel renders in **Poppins** — the site's typeface — via the bundled `Site`
 > family (`MakeSite()`, loaded from `assets/fonts/Poppins-*.ttf`, embedded by

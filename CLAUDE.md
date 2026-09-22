@@ -45,8 +45,8 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
 - The background is a **cross-fading slideshow** of the night screenshots `1.jpg`-`3.jpg` (switches every ~7s; see
   `BuildBackground` / `NextSlide` / `ShowSlide`), **softly blurred** (a `BlurEffect` on `bgHost`,
   half-res cached) under a light uniform scrim (`BuildGradient`) so the foreground UI reads cleanly -
-  no vignette or side gradients. Glass panels are flat translucent. Toggle the auto-switch via the
-  `BgSlideshow` pref.
+  no vignette or side gradients. Glass panels are flat translucent. The slideshow is **always on**
+  (a core part of the look) - there is no pref or toggle to disable it.
 - **Carousel dot indicators** at the bottom-center (`BuildSlideDots` / `UpdateSlideDots`): one dot
   per screenshot, the active one a wide accent pill; clicking a dot jumps to that slide and resets
   the auto-advance timer. Hidden when fewer than two slides load.
@@ -333,7 +333,7 @@ Plain `Key=Value`, `#`/`;` comments. Loaded embedded-defaults-first, then overri
 | `DiscordAppId` | Discord application id enabling **Rich Presence** (`src/DiscordRpc.cs`) - shows "RUSTORIGIN - In the launcher / In game" on the player's Discord. Blank disables. |
 | `DiscordLargeImage` | Optional Rich Presence art-asset key (uploaded in the Discord app) shown as the large image. |
 | `DiscordButtonLabel` / `DiscordButtonUrl` | Optional clickable button under the presence (Discord can't make the image itself a link). e.g. `Play on RustOrigin` -> `https://rustorigin.com`. |
-| `Server` | Repeatable, up to 6: `Server=Tag\|Name\|launch args\|players\|cover` (everything after Name optional). `cover` is an embedded image file name (e.g. `main.jpg`) used as the card background, else the shared `server-cover.png`, else a gradient. Cards stack vertically. **Live status:** when the launch args contain `+connect HOST:PORT`, the launcher queries that endpoint over Steam A2S (`src/A2S.cs`) and shows a live green/red dot + `players/max` (refreshed ~60s), overriding the static `players` field; without a `+connect` endpoint it shows the static text. A source that defines `Server=` lines replaces the list from the previous source. |
+| `Server` | Repeatable, up to 6: `Server=Tag\|Name\|launch args\|players\|cover` (everything after Name optional). Rendered as a **website-style card** (`ServerTile`, matching rustorigin.com): a cover-image header (`cover` is an embedded image name e.g. `main.jpg`, else `server-cover.png`, else a gradient) with a **status-dot badge** (top-left) + **dark tag pills** (top-right) overlaid, then a body with a live **PLAYERS ONLINE** count + **violet progress bar**, the `Name` + a `RUSTORIGIN \| tags` subtitle, the connect address, and a violet **CONNECT** chip (or **SOON** when the card has no join target). `Tag` may be **comma/slash-separated** (e.g. `Vanilla, Main, Old Recoil`) to show several pills. Cards stack vertically; clicking a joinable card (or its CONNECT chip) launches with its args. **Live status:** when the launch args contain `+connect HOST:PORT`, the launcher queries A2S (`src/A2S.cs`) and fills the count/bar (green ONLINE / grey SOON, refreshed ~60s); a `statusUrl` (6th field) web feed is used instead when set; otherwise the static `players` text shows. A source that defines `Server=` lines replaces the previous source's list. |
 | `Social` | Repeatable: `Social=platform\|url` -> a clickable brand icon in the bar above the server cards (opens the URL in the browser). Built-in brand marks (inline vector paths in `SocialGlyph`): `discord`, `youtube`, `tiktok`; an unknown platform key is skipped. A source that defines `Social=` lines replaces the list from the previous source. |
 
 ## Settings vs config: `launcher.cfg` (host) vs `Prefs` (per-user)
@@ -345,15 +345,16 @@ Two separate mechanisms - don't confuse them:
 - **`Prefs`** = per-user preferences read at runtime, persisted to
   `%LOCALAPPDATA%\RustOrigin\prefs.cfg` (a plain file - **not** the registry). `static class Prefs`
   with `Get` / `GetBool` / `Set`. A **settings panel** (the caption **gear** button, top-right) exposes
-  the toggles below plus the PLAY launch args, "Open log folder", and "Re-import Rust config"; it's a
-  glass overlay built in `BuildSettingsOverlay` (toggled by `ToggleSettings`, closes on the X / Done /
-  backdrop / Esc). Toggles persist immediately; launch args apply on close. Users can still edit
-  `prefs.cfg` directly (defaults below apply otherwise).
+  the toggles below plus "Open log folder", "Re-import Rust config", and a red **"Uninstall client"**
+  action (`UninstallClient` - deletes the installed game files + download cache after a confirm, keeping
+  the launcher). It's a modal built in `BuildSettingsOverlay`, **styled to rustorigin.com** (Poppins
+  `Site` font, `Ink*`/violet `Brand*` tokens, green switches, grouped `GroupCard`s), toggled by
+  `ToggleSettings` (closes on the X / Done / backdrop / Esc). Toggles persist immediately. There is no
+  slideshow toggle - the background slideshow is always on. Users can still edit `prefs.cfg` directly.
 
 | Prefs key | Default | Effect |
 |-----------|---------|--------|
 | `LaunchArgs` | (from cfg) | Overrides `launcher.cfg`'s `LaunchArgs` for the PLAY button (set in `prefs.cfg`). |
-| `BgSlideshow` | `true` | Auto-switch (cross-fade) between the background screenshots. Off keeps a single still image. |
 | `MinimizeInGame` | `false` | Minimize the launcher while the client runs. |
 | `AutoUpdate` | `true` | Check `UpdateRepo`'s GitHub Releases on launch and offer a verified self-update. |
 | `DiscordRpc` | `true` | Publish Discord Rich Presence (needs `DiscordAppId` set in `launcher.cfg`). |
