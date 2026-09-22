@@ -63,10 +63,12 @@ jobs:
 
       # We ship the MSI (not an NSIS .exe) as the installer: unsigned NSIS self-extractors reliably
       # trip the Trojan:Win32/Wacatac.B!ml machine-learning false positive, while the MSI scans clean
-      # and creates the same Start Menu + Desktop shortcuts (per-user, no admin).
-      - name: Stable-named installer copy (permanent website download link)
+      # and creates the same Start Menu + Desktop shortcuts (per-user, no admin). It gets a single,
+      # version-agnostic name so the website download link is permanent across releases (the MSI's
+      # own ProductVersion still carries the version, shown in Add/Remove Programs).
+      - name: Rename installer to the stable, permanent name
         shell: pwsh
-        run: Copy-Item "release\RustoriginLauncher-${{ steps.ver.outputs.version }}.msi" "release\RustoriginLauncher-Setup.msi"
+        run: Move-Item "release\RustoriginLauncher-${{ steps.ver.outputs.version }}.msi" "release\RustoriginLauncher-Setup.msi" -Force
 
       - name: Generate SHA-256 checksums
         shell: pwsh
