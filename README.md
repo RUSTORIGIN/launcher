@@ -44,7 +44,8 @@ Grab the latest [**release**](https://github.com/RUSTORIGIN/launcher/releases/la
 | Asset | Use |
 |-------|-----|
 | **`RustoriginLauncher.exe`** | The single-file launcher: portable, just run it. |
-| `RustoriginLauncher-<version>-x64.exe` | NSIS setup (Start Menu + Desktop shortcuts). |
+| **`RustoriginLauncher-Setup.exe`** | NSIS installer (Start Menu + Desktop shortcuts). Stable name for a website download link. |
+| `RustoriginLauncher-<version>-x64.exe` | The same NSIS installer, version-stamped. |
 | `RustoriginLauncher-<version>.msi` | MSI installer (per-user, no admin). |
 
 Every asset is listed in `SHA256SUMS.txt`. The exe is unsigned, so SmartScreen may warn on first
