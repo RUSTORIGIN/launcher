@@ -57,7 +57,7 @@ Fill in the PR template (summary, what changed, how you tested).
 
 Opening the PR automatically triggers the **Build check** workflow
 ([.github/workflows/build-check.yml](.github/workflows/build-check.yml)); it compiles
-`RustOriginLauncher.exe` and the WinForms project on a Windows runner and reports a green check or red X on
+`RustoriginLauncher.exe` and the WinForms project on a Windows runner and reports a green check or red X on
 the PR. **Merge only when it's green** (GitHub "Merge pull request", or `gh pr merge`).
 
 ### 6. Clean up

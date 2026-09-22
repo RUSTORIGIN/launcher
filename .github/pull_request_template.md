@@ -10,7 +10,7 @@
 
 ## Testing
 
-- [ ] `Build check` CI is green (compiles `RustOriginLauncher.exe` + the WinForms project)
+- [ ] `Build check` CI is green (compiles `RustoriginLauncher.exe` + the WinForms project)
 - [ ] If launcher behavior changed: built with `scripts\make_release.ps1` and ran the exe
 - [ ] If the download/verify path changed: ran the integrity smoke test (blank / correct / wrong `Sha256`)
 

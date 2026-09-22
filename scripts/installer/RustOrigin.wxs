@@ -7,7 +7,7 @@
   Add/Remove Programs entry. Only the ~7 MB single-file launcher is installed; it downloads
   and SHA-256-verifies the game client itself at runtime.
 
-  Build with scripts\build_msi.ps1 (which first builds release\RustOriginLauncher.exe via make_release.ps1).
+  Build with scripts\build_msi.ps1 (which first builds release\RustoriginLauncher.exe via make_release.ps1).
   The MSI version is bound from the exe's file version, so bump it through make_release.ps1 -Version.
 
   The UpgradeCode below is STABLE and must never change - it is how Windows recognizes newer
@@ -49,7 +49,7 @@
     <ComponentGroup Id="AppComponents">
       <!-- The launcher exe (file is the component keypath) -->
       <Component Directory="INSTALLFOLDER" Id="LauncherExe" Guid="*">
-        <File Id="RustOriginExe" Source="release\RustOriginLauncher.exe" KeyPath="yes" />
+        <File Id="RustOriginExe" Source="release\RustoriginLauncher.exe" KeyPath="yes" />
       </Component>
 
       <!-- Shortcuts (per-user; HKCU registry value is the keypath, per MSI best practice) -->

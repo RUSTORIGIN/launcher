@@ -29,9 +29,9 @@ Download from the latest [release](../../releases/latest):
 
 | Asset | Use |
 |-------|-----|
-| `RustOriginLauncher.exe` | The single-file launcher — portable, just run it. |
-| `RustOriginLauncher-<version>-x64.exe` | NSIS setup (Start Menu + Desktop shortcuts). |
-| `RustOriginLauncher-<version>.msi` | MSI installer (per-user, no admin). |
+| `RustoriginLauncher.exe` | The single-file launcher — portable, just run it. |
+| `RustoriginLauncher-<version>-x64.exe` | NSIS setup (Start Menu + Desktop shortcuts). |
+| `RustoriginLauncher-<version>.msi` | MSI installer (per-user, no admin). |
 
 Every asset is listed in `SHA256SUMS.txt`. The exe is unsigned, so SmartScreen may warn on first
 run (*More info → Run anyway*).
@@ -87,7 +87,7 @@ Uses the .NET Framework `csc` that ships with Windows 10/11 — no SDK or NuGet 
 
 ```powershell
 .\scripts\build.bat                        # quick compile check
-.\scripts\make_release.ps1 -Version 1.0.1  # -> release\RustOriginLauncher.exe (single file)
+.\scripts\make_release.ps1 -Version 1.0.1  # -> release\RustoriginLauncher.exe (single file)
 ```
 
 Building the installers is optional and requires WiX v5 and NSIS:

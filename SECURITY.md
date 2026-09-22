@@ -6,7 +6,7 @@ inspected and verified. We take reports about that behavior seriously.
 
 ## Scope
 
-This policy covers the **launcher** in this repository (`WpfLauncher.cs` -> `RustOriginLauncher.exe`, and
+This policy covers the **launcher** in this repository (`WpfLauncher.cs` -> `RustoriginLauncher.exe`, and
 the WinForms `RustLauncher.exe`) and its build/release scripts.
 
 It does **not** cover the Rust client itself, which is distributed separately and is not part of

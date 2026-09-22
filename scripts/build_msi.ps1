@@ -1,9 +1,9 @@
 # Builds the Rustorigin Launcher MSI (per-user installer).
 #
-#   .\scripts\build_msi.ps1                 -> release\RustOriginLauncher-1.0.0.msi
+#   .\scripts\build_msi.ps1                 -> release\RustoriginLauncher-1.0.0.msi
 #   .\scripts\build_msi.ps1 -Version 1.1.0  (also stamps the version into the exe + MSI)
 #
-# Steps: (1) build the fresh single-file release\RustOriginLauncher.exe via make_release.ps1,
+# Steps: (1) build the fresh single-file release\RustoriginLauncher.exe via make_release.ps1,
 #        (2) compile the MSI from scripts\installer\RustOrigin.wxs with the WiX toolset.
 #
 # Requires the WiX v4+ tool once:  dotnet tool install --global wix
@@ -23,7 +23,7 @@ if (-not (Test-Path $wix)) { throw "WiX not found. Install it with:  dotnet tool
 
 # 3) compile the MSI (WixToolset.UI.wixext provides the WixUI_InstallDir wizard).
 #    One-time:  wix extension add -g WixToolset.UI.wixext/5.0.2
-$out = "$repo\release\RustOriginLauncher-$Version.msi"
+$out = "$repo\release\RustoriginLauncher-$Version.msi"
 & $wix build "$PSScriptRoot\installer\RustOrigin.wxs" -ext WixToolset.UI.wixext -arch x64 -o $out
 if ($LASTEXITCODE -ne 0) { throw "MSI build failed" }
 

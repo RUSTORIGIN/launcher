@@ -116,7 +116,7 @@ _Dropped from the original plan:_ **T2** (pulse the online dots) is moot - no av
 
 ```powershell
 # from RustLauncher\
-.\scripts\make_release.ps1 -Version <x.y.z>   # embeds assets, applies icon+manifest -> release\RustOriginLauncher.exe
+.\scripts\make_release.ps1 -Version <x.y.z>   # embeds assets, applies icon+manifest -> release\RustoriginLauncher.exe
 ```
 
 Verify: window renders at 1440x860; hero (logo/wordmark/caption/tagline), PLAY, INSTALL, the
