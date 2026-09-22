@@ -415,6 +415,21 @@ public class LauncherWindow : Window
         catch { }
     }
 
+    // The caption X hides the launcher to the tray (Quit lives in the tray right-click menu).
+    void MinimizeToTray()
+    {
+        try
+        {
+            Hide();
+            if (tray != null && !Prefs.GetBool("TrayHintShown", false))
+            {
+                Prefs.Set("TrayHintShown", true);
+                try { tray.ShowBalloonTip(3000, "Rustorigin Launcher", "Still running in the tray - right-click the icon to quit.", System.Windows.Forms.ToolTipIcon.Info); } catch { }
+            }
+        }
+        catch { }
+    }
+
     void ShowFromTray()
     {
         try
@@ -440,7 +455,7 @@ public class LauncherWindow : Window
         var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 12, 14, 0) };
         row.Children.Add(CaptionBtn("", delegate { ToggleSettings(true); }, false));            // settings (gear) - leftmost
         row.Children.Add(CaptionBtn("", delegate { WindowState = WindowState.Minimized; }, false));   // minimize
-        row.Children.Add(CaptionBtn("", delegate { Close(); }, true));                                 // close
+        row.Children.Add(CaptionBtn("", delegate { MinimizeToTray(); }, true));                                 // close
         host.Children.Add(row);
     }
 
