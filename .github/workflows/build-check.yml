@@ -6,21 +6,7 @@ name: Build check
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'LICENSE'
-      - 'SECURITY.md'
-      - '.gitignore'
-      - '.gitattributes'
   pull_request:
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'LICENSE'
-      - 'SECURITY.md'
-      - '.gitignore'
-      - '.gitattributes'
   workflow_dispatch:
 
 permissions:
