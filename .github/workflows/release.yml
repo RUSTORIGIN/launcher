@@ -69,6 +69,10 @@ jobs:
         shell: pwsh
         run: .\scripts\build_msi.ps1 -Version ${{ steps.ver.outputs.version }}
 
+      - name: Stable-named installer copy (permanent website download link)
+        shell: pwsh
+        run: Copy-Item "release\RustoriginLauncher-${{ steps.ver.outputs.version }}-x64.exe" "release\RustoriginLauncher-Setup.exe"
+
       - name: Generate SHA-256 checksums
         shell: pwsh
         run: |
@@ -85,6 +89,7 @@ jobs:
           subject-path: |
             release/RustoriginLauncher.exe
             release/*-x64.exe
+            release/RustoriginLauncher-Setup.exe
             release/*.msi
 
       - name: Upload workflow artifacts
@@ -94,6 +99,7 @@ jobs:
           path: |
             release/RustoriginLauncher.exe
             release/*-x64.exe
+            release/RustoriginLauncher-Setup.exe
             release/*.msi
             release/SHA256SUMS.txt
 
@@ -106,5 +112,6 @@ jobs:
           files: |
             release/RustoriginLauncher.exe
             release/*-x64.exe
+            release/RustoriginLauncher-Setup.exe
             release/*.msi
             release/SHA256SUMS.txt
