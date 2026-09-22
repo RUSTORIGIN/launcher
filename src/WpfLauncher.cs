@@ -681,8 +681,8 @@ public class LauncherWindow : Window
         var h = centered ? HorizontalAlignment.Center : HorizontalAlignment.Left;
         var a = centered ? TextAlignment.Center : TextAlignment.Left;
         var sp = new StackPanel { HorizontalAlignment = h };
-        sp.Children.Add(new TextBlock { Text = Track("RUSTORIGIN", 3), Foreground = Brand400, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 11, HorizontalAlignment = h, TextAlignment = a });
-        sp.Children.Add(new TextBlock { Text = title, Foreground = Ink100, FontFamily = Site, FontWeight = FontWeights.Bold, FontSize = 21, Margin = new Thickness(0, 6, 0, 0), TextWrapping = TextWrapping.Wrap, HorizontalAlignment = h, TextAlignment = a });
+        sp.Children.Add(new TextBlock { Text = Track("RUSTORIGIN", 3), Foreground = Brand400, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 10, HorizontalAlignment = h, TextAlignment = a });
+        sp.Children.Add(new TextBlock { Text = title, Foreground = Ink100, FontFamily = Site, FontWeight = FontWeights.Bold, FontSize = 18, Margin = new Thickness(0, 5, 0, 0), TextWrapping = TextWrapping.Wrap, HorizontalAlignment = h, TextAlignment = a });
         return sp;
     }
 
@@ -700,15 +700,15 @@ public class LauncherWindow : Window
         try { win.Owner = this; } catch { }
         var card = new Border
         {
-            Background = Ink900, BorderBrush = Ink700, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(17),
-            Padding = new Thickness(26, 22, 26, 24), Margin = new Thickness(24),
-            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 44, ShadowDepth = 0, Opacity = 0.6, Color = Colors.Black }
+            Background = Ink900, CornerRadius = new CornerRadius(17),   // borderless (like the site cards); the shadow lifts it
+            Padding = new Thickness(22, 18, 22, 20), Margin = new Thickness(28),
+            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 40, ShadowDepth = 0, Opacity = 0.7, Color = Colors.Black }
         };
-        var col = new StackPanel { MaxWidth = 380 };
+        var col = new StackPanel { MaxWidth = 300 };
         card.Child = col;
         col.Children.Add(DialogHeader(heading, false));
-        col.Children.Add(new TextBlock { Text = message, Foreground = Ink200, FontFamily = Site, FontSize = 13, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 0), LineHeight = 19, LineStackingStrategy = LineStackingStrategy.BlockLineHeight });
-        var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 22, 0, 0) };
+        col.Children.Add(new TextBlock { Text = message, Foreground = Ink200, FontFamily = Site, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 0), LineHeight = 17, LineStackingStrategy = LineStackingStrategy.BlockLineHeight });
+        var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 18, 0, 0) };
         if (cancelText != null) row.Children.Add(DialogBtn(cancelText, false, delegate { result = false; win.Close(); }));
         row.Children.Add(DialogBtn(okText, true, delegate { result = true; win.Close(); }));
         col.Children.Add(row);
@@ -720,8 +720,8 @@ public class LauncherWindow : Window
 
     Border DialogBtn(string label, bool primary, Action onClick)
     {
-        var tb = new TextBlock { Text = Track(label.ToUpperInvariant(), 1), Foreground = primary ? TextHi : Ink100, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var b = new Border { Height = 38, MinWidth = 92, CornerRadius = new CornerRadius(17), Background = primary ? Brand600 : B("#12FFFFFF"), Padding = new Thickness(18, 0, 18, 0), Margin = new Thickness(10, 0, 0, 0), Cursor = Cursors.Hand, Child = tb };
+        var tb = new TextBlock { Text = Track(label.ToUpperInvariant(), 1), Foreground = primary ? TextHi : Ink100, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var b = new Border { Height = 32, MinWidth = 80, CornerRadius = new CornerRadius(16), Background = primary ? Brand600 : B("#12FFFFFF"), Padding = new Thickness(14, 0, 14, 0), Margin = new Thickness(8, 0, 0, 0), Cursor = Cursors.Hand, Child = tb };
         b.MouseEnter += (s, e) => b.Background = primary ? Brand500 : Stroke;
         b.MouseLeave += (s, e) => b.Background = primary ? Brand600 : B("#12FFFFFF");
         b.MouseLeftButtonUp += (s, e) => { e.Handled = true; onClick(); };
@@ -739,9 +739,9 @@ public class LauncherWindow : Window
         Prefs.Set("RustConfigImported", false);
         string exe = FindGameExe();
         if (exe == null || !InstallComplete(exe))
-            Alert("Nothing to import yet", "Install the client first - then your Rust keybinds can be imported.");
+            Alert("Nothing to import yet", "Install the client first.");
         else if (FindSteamRustCfg() == null)
-            Alert("Nothing to import", "No existing Steam Rust config was found to import.");
+            Alert("Nothing to import", "No existing Steam Rust config found.");
         else
             MaybeImportRustConfig();
     }
@@ -752,13 +752,12 @@ public class LauncherWindow : Window
     void UninstallClient()
     {
         if (busy) { statusText.Foreground = AccentHi; statusText.Text = "Finish or pause the download before uninstalling."; return; }
-        if (GameRunning()) { Alert("Game is running", "Close the game before uninstalling the client."); return; }
+        if (GameRunning()) { Alert("Game is running", "Close the game first."); return; }
         bool anything = IsInstalled() || IsBrokenInstall() || HasPartial();
         try { anything = anything || File.Exists(zipPath); } catch { }
-        if (!anything) { Alert("Nothing to uninstall", "Nothing is installed to uninstall."); return; }
+        if (!anything) { Alert("Nothing to uninstall", "Nothing is installed."); return; }
         if (!Confirm("Uninstall client",
-                "Uninstall the RustOrigin client?\n\nThis permanently deletes the downloaded game files (several GB) in:\n" +
-                InstallDir + "\n\nThe launcher itself is kept - you can reinstall anytime.",
+                "Delete the downloaded game files (several GB)? The launcher is kept.",
                 "Uninstall", "Cancel")) return;
 
         ToggleSettings(false);
@@ -1528,10 +1527,7 @@ public class LauncherWindow : Window
             string dst = Path.Combine(Path.GetDirectoryName(exe), "cfg");
 
             bool res = Confirm("Import your Rust keybinds?",
-                "Found your existing Rust config:\n\n" + src + "\n\n" +
-                "Copy it into RustOrigin so your keybinds carry over?\n\n" +
-                "Keybinds are imported. Graphics/quality settings are NOT - this build has its own, " +
-                "so set those in-game.",
+                "Copy your existing Steam Rust keybinds into RustOrigin? (Keybinds only.)",
                 "Import", "Skip");
 
             Prefs.Set("RustConfigImported", true);   // one-time prompt, regardless of the answer
@@ -2475,7 +2471,7 @@ public class LauncherWindow : Window
     {
         if (busy && dlThread != null && dlThread.IsAlive)
         {
-            if (!Confirm("Quit", "A download is in progress. Quit now?\n\nProgress is saved - click Resume next time to continue where it left off.", "Quit", "Keep downloading"))
+            if (!Confirm("Quit", "A download is running. Quit now? Progress is saved.", "Quit", "Keep downloading"))
             { e.Cancel = true; return; }
             CancelDownload();
         }
