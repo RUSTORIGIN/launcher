@@ -13,13 +13,8 @@ All three live in `src/`, each with its own `Main()` - they are *not* compiled t
 
 | Source | Output | Built by | Notes |
 |--------|--------|----------|-------|
-| `src/WpfLauncher.cs` | `RustOriginLauncher.exe` | `csc` via `scripts/build.bat` / `scripts/make_release.ps1` | **Primary / shipping build.** WPF, single-file, cross-fading screenshot background. Downloads + **SHA-256-verifies** + extracts + launches. |
-| `src/Program.cs` | `RustLauncher.exe` | `src/RustLauncher.csproj` (`dotnet build`) | Minimal WinForms UI. **Find-and-launch only - it does not download or verify.** |
-| `src/Launcher.cs` | (none) | not wired to any build | Older standalone WinForms downloader (`WebClient`, non-resumable, **no verification**). Reference-only; excluded from the csproj. |
-
-The csproj excludes `WpfLauncher.cs` and `Launcher.cs` on purpose (see the `<Compile Remove>`
-items) - an SDK-style project otherwise globs every `.cs` in `src/` and the three `Main()`s
-collide.
+| `src/WpfLauncher.cs` | `RustOriginLauncher.exe` | `csc` via `scripts/build.bat` / `scripts/make_release.ps1` | The single shipping build. WPF, single-file, cross-fading screenshot background. Downloads + **SHA-256-verifies** + extracts + launches. |
+| `src/UpdateParsing.cs`, `src/A2S.cs`, `src/DiscordRpc.cs` | (compiled in) | same `csc` build | Self-update parsing, Steam A2S live status, and Discord Rich Presence helpers. |
 
 Nearly all real work happens in `src/WpfLauncher.cs`. It is one self-contained code-only WPF file
 (~1800 lines): window chrome, glass UI, config parsing, and the resumable, verified
@@ -205,12 +200,6 @@ manifest - everything is baked in, nothing needs to sit beside it):
 .\scripts\make_release.ps1 -Version 1.0.0   # -> release\RustOriginLauncher.exe
 ```
 
-The WinForms `RustLauncher.exe` builds via the SDK-style project (`net48`, verified working):
-
-```powershell
-dotnet build -c Release src\RustLauncher.csproj   # -> src\bin\Release\RustLauncher.exe
-```
-
 There is no `cargo` or clippy here. Two `Add-Type`-based test scripts exist:
 `scripts\test_updater_parsing.ps1` (compiles `src\UpdateParsing.cs`, unit-tests the self-update
 JSON/`SHA256SUMS`/version parsing) and `scripts\test_a2s_parsing.ps1` (compiles `src\A2S.cs`,
@@ -373,11 +362,8 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 │   ├── UpdateParsing.cs     #   pure self-update parsers (tested by scripts/test_updater_parsing.ps1)
 │   ├── A2S.cs               #   Steam A2S_INFO query for live server status (tested by scripts/test_a2s_parsing.ps1)
 │   ├── DiscordRpc.cs        #   dependency-free Discord Rich Presence over the Discord IPC named pipe
-│   ├── Launcher.cs          #   older standalone WinForms downloader (reference-only)
-│   ├── Program.cs           #   minimal WinForms find-and-launch UI -> RustLauncher.exe
-│   ├── RustLauncher.csproj  #   SDK-style project (net48); builds Program.cs only
-│   ├── app.manifest         #   Win32 manifest (csc /win32manifest, csproj ApplicationManifest)
-│   └── app.ico              #   WinForms app icon (csproj ApplicationIcon)
+│   ├── app.manifest         #   Win32 manifest (csc /win32manifest)
+│   └── app.ico              #   app icon
 ├── assets/                  # build-time embedded resources + icon sources
 │   ├── 1.jpg / 2.jpg / 3.jpg           # night background screenshots (embedded + cross-faded)
 │   ├── logo.png / logo-original.png / server-cover.png
