@@ -33,13 +33,45 @@ using System.Windows.Media.Animation;
 
 public class App
 {
+    // Single-instance guard. The mutex is per-login-session (local namespace), so only one launcher
+    // runs at a time per user; the event lets a second launch wake the first one to the foreground
+    // (it may be hidden to the tray) instead of dying silently.
+    const string MutexName = "RUSTORIGIN.Launcher.SingleInstance";
+    const string ShowEventName = "RUSTORIGIN.Launcher.Show";
+    static System.Threading.Mutex instanceMutex;
+
     [STAThread]
     static void Main()
     {
+        bool createdNew;
+        instanceMutex = new System.Threading.Mutex(true, MutexName, out createdNew);
+        if (!createdNew)
+        {
+            // Already running: signal that instance to surface itself, then exit.
+            try { System.Threading.EventWaitHandle.OpenExisting(ShowEventName).Set(); } catch { }
+            return;
+        }
+        var showEvent = new System.Threading.EventWaitHandle(false, System.Threading.EventResetMode.AutoReset, ShowEventName);
+
         Assets.Ensure();                 // unpack embedded screenshots/logo/fonts/config (single-exe distribution)
         LauncherWindow.ConfigureTls();
         var app = new Application();
-        app.Run(new LauncherWindow());
+        var win = new LauncherWindow();
+
+        // Wake this window whenever another launch signals the event.
+        var t = new System.Threading.Thread(delegate ()
+        {
+            while (true)
+            {
+                showEvent.WaitOne();
+                try { win.Dispatcher.BeginInvoke((Action)(() => win.SurfaceFromAnywhere())); } catch { }
+            }
+        });
+        t.IsBackground = true;
+        t.Start();
+
+        app.Run(win);
+        GC.KeepAlive(instanceMutex);     // hold the handle for the whole process lifetime
     }
 }
 
@@ -415,21 +447,6 @@ public class LauncherWindow : Window
         catch { }
     }
 
-    // The caption X hides the launcher to the tray (Quit lives in the tray right-click menu).
-    void MinimizeToTray()
-    {
-        try
-        {
-            Hide();
-            if (tray != null && !Prefs.GetBool("TrayHintShown", false))
-            {
-                Prefs.Set("TrayHintShown", true);
-                try { tray.ShowBalloonTip(3000, "Rustorigin Launcher", "Still running in the tray - right-click the icon to quit.", System.Windows.Forms.ToolTipIcon.Info); } catch { }
-            }
-        }
-        catch { }
-    }
-
     void ShowFromTray()
     {
         try
@@ -441,6 +458,10 @@ public class LauncherWindow : Window
         }
         catch { }
     }
+
+    // Bring the window to the foreground from any state (used by the single-instance guard when a
+    // second launch is attempted - the running instance may be hidden to the tray or minimized).
+    public void SurfaceFromAnywhere() { ShowFromTray(); }
 
     // ---------- rounded frameless chrome + caption buttons ----------
     void ApplyRounding()
@@ -455,7 +476,7 @@ public class LauncherWindow : Window
         var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 12, 14, 0) };
         row.Children.Add(CaptionBtn("", delegate { ToggleSettings(true); }, false));            // settings (gear) - leftmost
         row.Children.Add(CaptionBtn("", delegate { WindowState = WindowState.Minimized; }, false));   // minimize
-        row.Children.Add(CaptionBtn("", delegate { MinimizeToTray(); }, true));                                 // close
+        row.Children.Add(CaptionBtn("", delegate { Close(); }, true));                                 // close (quits the launcher)
         host.Children.Add(row);
     }
 
