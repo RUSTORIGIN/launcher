@@ -529,7 +529,7 @@ public class LauncherWindow : Window
         col.Children.Add(GroupCard(
             SettingRow("Discord Rich Presence", "Show your In the launcher / In game status on Discord.",
                 Prefs.GetBool("DiscordRpc", true), v => { Prefs.Set("DiscordRpc", v); ApplyDiscordPref(v); })));
-        col.Children.Add(new TextBlock { Text = "Updates are mandatory - the launcher checks on every launch and won't start on an outdated version.", Foreground = Ink400, FontFamily = Site, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 8, 2, 0) });
+        col.Children.Add(new TextBlock { Text = "Updates are required - when a newer version is available the launcher prompts you to update before continuing.", Foreground = Ink400, FontFamily = Site, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 8, 2, 0) });
 
         // ---- GAME ----
         col.Children.Add(GroupLabel("GAME"));
@@ -2381,9 +2381,59 @@ public class LauncherWindow : Window
         if (exeUrl == null || sumsUrl == null) { Log("update: release " + tag + " missing RustOriginLauncher.exe or SHA256SUMS.txt asset"); return; }
         Log("update available: v" + current + " -> " + tag);
 
-        // Mandatory: block the launcher and update now - no opt-out.
-        ShowUpdateGate("Update required", "A required update (v" + current + " \u2192 " + tag + ") is downloading. The launcher will restart automatically.");
+        // Update available: show the prompt. It does NOT auto-download - the player presses Update.
+        pendingRepo = repo; pendingExeUrl = exeUrl; pendingSumsUrl = sumsUrl; pendingTag = tag;
+        ShowUpdateGate("Version " + tag + " is available (you have v" + current + "). Press Update to install it - the launcher will verify and restart.");
+    }
 
+    Grid updateGate; TextBlock updateGateMsg; Border updateGateFill, updateGateBar, updateGateUpdateBtn; const double UpdateBarW = 260;
+    string pendingRepo, pendingExeUrl, pendingSumsUrl, pendingTag;
+
+    // Blocking update prompt shown when a newer release is available. It does NOT auto-download - the
+    // player presses UPDATE to install (or QUIT). Sits on top of everything (incl. the caption buttons).
+    void ShowUpdateGate(string message)
+    {
+        Dispatcher.Invoke((Action)(() =>
+        {
+            if (updateGate == null)
+            {
+                updateGate = new Grid { Background = B("#F20B0B0C") };
+                updateGate.MouseLeftButtonDown += (s, e) => e.Handled = true;   // swallow clicks + window drag
+                var box = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 440, Margin = new Thickness(24) };
+                box.Children.Add(DialogHeader("Update required", true));
+                updateGateMsg = new TextBlock { Text = message, Foreground = Ink200, FontFamily = Site, FontSize = 13, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 12, 0, 0) };
+                box.Children.Add(updateGateMsg);
+                updateGateFill = new Border { Height = 6, Width = 0, CornerRadius = new CornerRadius(3), Background = Brand500, HorizontalAlignment = HorizontalAlignment.Left };
+                updateGateBar = new Border { Width = UpdateBarW, Height = 6, CornerRadius = new CornerRadius(3), Background = GlassSoft, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 16, 0, 0), Child = updateGateFill, Visibility = Visibility.Collapsed };
+                box.Children.Add(updateGateBar);
+                var btns = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 20, 0, 0) };
+                updateGateUpdateBtn = DialogBtn("Update", true, delegate { StartPendingUpdate(); });
+                var quit = DialogBtn("Quit", false, delegate { try { if (tray != null) tray.Visible = false; } catch { } Application.Current.Shutdown(); });
+                btns.Children.Add(updateGateUpdateBtn); btns.Children.Add(quit);
+                box.Children.Add(btns);
+                updateGate.Children.Add(box);
+                mainGrid.Children.Add(updateGate);
+            }
+            else { updateGateMsg.Text = message; updateGate.Visibility = Visibility.Visible; }
+        }));
+    }
+
+    // UPDATE pressed: switch the prompt to downloading mode and run the update on a background thread.
+    void StartPendingUpdate()
+    {
+        if (pendingExeUrl == null) return;
+        if (updateGateUpdateBtn != null) updateGateUpdateBtn.Visibility = Visibility.Collapsed;
+        if (updateGateBar != null) updateGateBar.Visibility = Visibility.Visible;
+        if (updateGateFill != null) updateGateFill.Width = 0;
+        if (updateGateMsg != null) updateGateMsg.Text = "Downloading " + pendingTag + "...";
+        var t = new Thread(delegate () { try { PerformUpdate(); } catch (Exception ex) { GateFail(pendingRepo, "Update error: " + ex.Message); } }) { IsBackground = true, Name = "self-update" };
+        t.Start();
+    }
+
+    // Download + SHA-256-verify + swap the new build, then restart. Runs on a background thread.
+    void PerformUpdate()
+    {
+        string repo = pendingRepo, exeUrl = pendingExeUrl, sumsUrl = pendingSumsUrl, tag = pendingTag;
         string expected = UpdateParsing.HashFromSums(HttpGetString(sumsUrl), "RustOriginLauncher.exe");
         if (expected == null) { GateFail(repo, "Could not read the update checksum."); return; }
 
@@ -2419,34 +2469,6 @@ public class LauncherWindow : Window
         }
     }
 
-    Grid updateGate; TextBlock updateGateMsg; Border updateGateFill; const double UpdateBarW = 260;
-
-    // Full-screen blocking gate for a mandatory update: the launcher can't be used until it updates
-    // (or the player quits). Added last, so it sits on top of everything including the caption buttons.
-    void ShowUpdateGate(string heading, string message)
-    {
-        Dispatcher.Invoke((Action)(() =>
-        {
-            if (updateGate == null)
-            {
-                updateGate = new Grid { Background = B("#F20B0B0C") };
-                updateGate.MouseLeftButtonDown += (s, e) => e.Handled = true;   // swallow clicks + window drag
-                var box = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 440, Margin = new Thickness(24) };
-                box.Children.Add(DialogHeader(heading, true));
-                updateGateMsg = new TextBlock { Text = message, Foreground = Ink200, FontFamily = Site, FontSize = 13, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 12, 0, 0) };
-                box.Children.Add(updateGateMsg);
-                updateGateFill = new Border { Height = 6, Width = 0, CornerRadius = new CornerRadius(3), Background = Brand500, HorizontalAlignment = HorizontalAlignment.Left };
-                box.Children.Add(new Border { Width = UpdateBarW, Height = 6, CornerRadius = new CornerRadius(3), Background = GlassSoft, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 16, 0, 0), Child = updateGateFill });
-                var quit = DialogBtn("Quit", false, delegate { try { if (tray != null) tray.Visible = false; } catch { } Application.Current.Shutdown(); });
-                quit.HorizontalAlignment = HorizontalAlignment.Center; quit.Margin = new Thickness(0, 20, 0, 0);
-                box.Children.Add(quit);
-                updateGate.Children.Add(box);
-                mainGrid.Children.Add(updateGate);
-            }
-            else if (updateGateMsg != null) updateGateMsg.Text = message;
-        }));
-    }
-
     // Update the gate's download progress bar + byte count (called from the download thread).
     void SetUpdateProgress(long have, long total)
     {
@@ -2461,11 +2483,16 @@ public class LauncherWindow : Window
         }));
     }
 
-    // Mandatory update failed: open the releases page and keep the gate up (the launcher stays blocked).
+    // Update failed: open the releases page and let the player retry (Update) or Quit - the gate stays up.
     void GateFail(string repo, string msg)
     {
         try { Process.Start(new ProcessStartInfo("https://github.com/" + repo + "/releases/latest") { UseShellExecute = true }); } catch { }
-        ShowUpdateGate("Update required", msg + "  The releases page has opened - update manually, then relaunch.");
+        Dispatcher.BeginInvoke((Action)(() =>
+        {
+            if (updateGateBar != null) updateGateBar.Visibility = Visibility.Collapsed;
+            if (updateGateUpdateBtn != null) updateGateUpdateBtn.Visibility = Visibility.Visible;
+            if (updateGateMsg != null) updateGateMsg.Text = msg + "  The releases page has opened - or press Update to retry.";
+        }));
     }
 
     // --- small HTTP + parsing helpers for the updater (no external dependency) ---
