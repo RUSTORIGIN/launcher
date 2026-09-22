@@ -2,7 +2,7 @@
 
 # Rustorigin Launcher
 
-**A polished, self-contained Windows launcher for a private Rust server** — it downloads, verifies,
+**A polished, self-contained Windows launcher for a private Rust server**. It downloads, verifies,
 and launches the game client, keeps itself up to date, and ships as a single ~4 MB `.exe` with no
 runtime or installer required.
 
@@ -22,19 +22,19 @@ runtime or installer required.
 
 One executable, no runtime, no installer. It fetches your hosted client, **verifies it by SHA-256
 before it ever touches disk**, installs and launches it, shows live server status, and **updates
-itself** — behind a clean, custom WPF interface built entirely in code (no XAML).
+itself**, behind a clean, custom WPF interface built entirely in code (no XAML).
 
-- **Single self-contained exe** — code-only WPF on .NET Framework 4.x (built into Windows 10/11).
+- **Single self-contained exe**: code-only WPF on .NET Framework 4.x (built into Windows 10/11).
   UI, screenshots, logo, fonts, and default config are embedded; nothing else ships.
-- **Verified, resumable downloads** — pulls your `RustClient.zip` over TLS 1.2, resumes dropped
+- **Verified, resumable downloads**: pulls your `RustClient.zip` over TLS 1.2, resumes dropped
   transfers via HTTP Range, and **rejects any download whose SHA-256 doesn't match** before extract.
-- **One-click install & play** — extracts to a per-user folder and launches, with live progress
+- **One-click install & play**: extracts to a per-user folder and launches, with live progress
   and a one-time offer to import your existing Steam Rust keybinds.
-- **Live server cards** — cover-image tiles with a status dot, name, and a live player-count bar
+- **Live server cards**: cover-image tiles with a status dot, name, and a live player-count bar
   (Steam A2S, refreshed ~60 s); click a card to connect.
-- **Self-update** — checks GitHub Releases on launch; when a newer, checksum-verified build exists
+- **Self-update**: checks GitHub Releases on launch; when a newer, checksum-verified build exists
   it prompts to update, then downloads (with a progress bar), verifies, swaps itself in, and restarts.
-- **Native, frameless window** — rounded, draggable anywhere, resize / maximize / Aero Snap, tray
+- **Native, frameless window**: rounded, draggable anywhere, resize / maximize / Aero Snap, tray
   integration (close hides to tray), Discord Rich Presence, and a clean settings panel.
 
 ## Install
@@ -43,12 +43,12 @@ Grab the latest [**release**](https://github.com/RUSTORIGIN/launcher/releases/la
 
 | Asset | Use |
 |-------|-----|
-| **`RustoriginLauncher.exe`** | The single-file launcher — portable, just run it. |
+| **`RustoriginLauncher.exe`** | The single-file launcher: portable, just run it. |
 | `RustoriginLauncher-<version>-x64.exe` | NSIS setup (Start Menu + Desktop shortcuts). |
 | `RustoriginLauncher-<version>.msi` | MSI installer (per-user, no admin). |
 
 Every asset is listed in `SHA256SUMS.txt`. The exe is unsigned, so SmartScreen may warn on first
-run (*More info → Run anyway*). **Requires Windows 10/11** — no .NET download needed.
+run (*More info → Run anyway*). **Requires Windows 10/11**; no .NET download needed.
 
 ## Configuration
 
@@ -59,7 +59,7 @@ server). Key settings:
 | Key | Meaning |
 |-----|---------|
 | `DownloadUrl` | Direct link to `RustClient.zip`. **Required.** |
-| `Sha256` | Expected SHA-256 of `RustClient.zip`. **Required** — installs are blocked without it. |
+| `Sha256` | Expected SHA-256 of `RustClient.zip`. **Required**: installs are blocked without it. |
 | `InstallDir` | Where the client installs (default `C:\RustOrigin`; blank = `.\Rust`). |
 | `LaunchExe` | Client executable the Play button runs (default `RustClient.exe`). |
 | `Title` / `Tagline` / `Player` | Hero title, description line, and the displayed player name. |
@@ -96,7 +96,7 @@ here then detects the new version, prompts to update, verifies the download agai
 
 ## Build from source
 
-Uses the .NET Framework `csc` that ships with Windows 10/11 — no SDK or NuGet.
+Uses the .NET Framework `csc` that ships with Windows 10/11 (no SDK or NuGet).
 
 ```powershell
 .\scripts\build.bat                        # quick compile check
