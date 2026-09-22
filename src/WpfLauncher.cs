@@ -116,7 +116,7 @@ public class LauncherWindow : Window
     string LaunchExe   = "RustClient.exe";
     string LaunchArgs  = "";
     string Version     = "";
-    string UpdateRepo  = "RUSTORIGIN/RustOriginLauncher";   // owner/repo checked for launcher self-updates (GitHub Releases). Empty disables.
+    string UpdateRepo  = "RUSTORIGIN/launcher";   // owner/repo checked for launcher self-updates (GitHub Releases). Empty disables.
     string DiscordAppId = "";        // Discord application id for Rich Presence. Empty disables.
     string DiscordLargeImage = "";   // Rich Presence art-asset key uploaded in the Discord app.
     string DiscordButtonLabel = "";  // Rich Presence button label (e.g. "Play on RustOrigin").
