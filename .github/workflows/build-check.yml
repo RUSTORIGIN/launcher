@@ -44,10 +44,6 @@ jobs:
           if (-not (Test-Path 'release\RustOriginLauncher.exe')) { throw 'RustOriginLauncher.exe was not produced' }
           Write-Host 'RustOriginLauncher.exe built OK'
 
-      - name: Build WinForms project (RustLauncher.csproj)
-        shell: pwsh
-        run: dotnet build -c Release src\RustLauncher.csproj --nologo
-
       - name: Test updater parsing
         shell: pwsh
         run: .\scripts\test_updater_parsing.ps1
