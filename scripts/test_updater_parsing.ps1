@@ -7,7 +7,7 @@ Add-Type -Path (Join-Path $repo 'src\UpdateParsing.cs')
 $script:fail = 0
 function Check($name, $cond) { if ($cond) { Write-Host "  PASS  $name" } else { Write-Host "  FAIL  $name"; $script:fail++ } }
 
-$base = 'https://github.com/RUSTORIGIN/launcher/releases/download/v1.2.0'
+$base = 'https://github.com/RUSTORIGIN/RustOriginLauncher/releases/download/v1.2.0'
 $json = '{"tag_name":"v1.2.0","name":"RustOrigin Launcher 1.2.0","assets":[' +
         '{"name":"RustOriginLauncher.exe","browser_download_url":"' + $base + '/RustOriginLauncher.exe"},' +
         '{"name":"SHA256SUMS.txt","browser_download_url":"' + $base + '/SHA256SUMS.txt"}]}'

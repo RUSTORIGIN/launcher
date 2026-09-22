@@ -320,7 +320,7 @@ Plain `Key=Value`, `#`/`;` comments. Loaded embedded-defaults-first, then overri
 | `Title` | Big hero title (default `RUSTORIGIN`). |
 | `Tagline` | Description line under the title. |
 | `Player` | Parsed into `PlayerName` but currently **not displayed** (the user pill was removed). Kept for compatibility / future use. |
-| `UpdateRepo` | `owner/repo` checked for launcher self-updates via GitHub Releases (public repos only). Blank disables. Default `RUSTORIGIN/launcher`. |
+| `UpdateRepo` | `owner/repo` checked for launcher self-updates via GitHub Releases (public repos only). Blank disables. Default `RUSTORIGIN/RustOriginLauncher`. |
 | `DiscordAppId` | Discord application id enabling **Rich Presence** (`src/DiscordRpc.cs`) - shows "RUSTORIGIN - In the launcher / In game" on the player's Discord. Blank disables. |
 | `DiscordLargeImage` | Optional Rich Presence art-asset key (uploaded in the Discord app) shown as the large image. |
 | `DiscordButtonLabel` / `DiscordButtonUrl` | Optional clickable button under the presence (Discord can't make the image itself a link). e.g. `Play on RustOrigin` -> `https://rustorigin.com`. |
@@ -406,7 +406,7 @@ settings screen to wire it into - users set it in `prefs.cfg`.
 ## Version control
 
 This is a git repository (branch `main`), pushed to a **private** GitHub repo
-(`RUSTORIGIN/launcher`). `.gitignore` and `.gitattributes` are in place; line endings
+(`RUSTORIGIN/RustOriginLauncher`). `.gitignore` and `.gitattributes` are in place; line endings
 are normalized to LF (CRLF for `.bat`/`.ps1`).
 
 `.gitignore` keeps build output and the multi-GB client out of git:

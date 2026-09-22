@@ -20,7 +20,7 @@
   </ItemGroup>
 
   <!-- This project builds the WinForms RustLauncher.exe from Program.cs only.
-       WpfLauncher.cs (the primary RustOrigin.exe, built with csc via make_release.ps1) and
+       WpfLauncher.cs (the primary RustOriginLauncher.exe, built with csc via make_release.ps1) and
        Launcher.cs (an older standalone WinForms downloader) each declare their own Main()
        and must not be compiled in; SDK-style projects otherwise glob every .cs in the folder. -->
   <ItemGroup>

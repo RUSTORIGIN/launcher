@@ -21,7 +21,7 @@ Settings -> Branches -> Add branch ruleset.)
 **GitHub CLI:**
 
 ```bash
-gh api -X POST repos/RUSTORIGIN/launcher/rulesets --input .github/rulesets/protect-main.json
+gh api -X POST repos/RUSTORIGIN/RustOriginLauncher/rulesets --input .github/rulesets/protect-main.json
 ```
 
 ## Important caveats
