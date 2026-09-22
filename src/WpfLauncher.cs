@@ -1662,6 +1662,8 @@ public class LauncherWindow : Window
     }
 
     Process gameProc;   // the client this launcher started (if any)
+    bool hiddenForGame;                          // true while hidden to the tray for a running game
+    WindowState preGameState = WindowState.Normal;  // window state to restore to when the game exits
 
     // True only when OUR client is running: the one we launched this session, or a process whose exe
     // is the installed client under InstallDir. A same-named process elsewhere on the PC (e.g. another
@@ -1688,7 +1690,7 @@ public class LauncherWindow : Window
     {
         var t = new System.Windows.Threading.DispatcherTimer();
         t.Interval = TimeSpan.FromSeconds(2);
-        t.Tick += delegate { try { RefreshState(); } catch { } };
+        t.Tick += delegate { try { RefreshState(); if (hiddenForGame && !GameRunning()) RestoreFromGame(); } catch { } };
         t.Start();
     }
 
@@ -2163,13 +2165,31 @@ public class LauncherWindow : Window
         }
     }
 
+    // Hide the launcher to the tray while the game runs, remembering the window state to restore to.
+    void HideForGame()
+    {
+        try
+        {
+            preGameState = (WindowState == WindowState.Maximized) ? WindowState.Maximized : WindowState.Normal;
+            hiddenForGame = true;
+            Hide();   // disappears from the taskbar; the tray icon stays, and it's restored when the game exits
+        }
+        catch { }
+    }
+
     void RestoreFromGame()
     {
         try
         {
-            gameProc = null;   // our client has exited
+            gameProc = null;                 // the process we launched has exited
+            if (GameRunning()) return;       // a same-named client is still up (bootstrapper launch) - stay hidden; the game timer retries
             SetDiscord("In the launcher");
-            try { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; Activate(); } } catch { }
+            if (hiddenForGame)
+            {
+                hiddenForGame = false;
+                try { Show(); WindowState = preGameState; Activate(); Topmost = true; Topmost = false; } catch { }
+            }
+            else { try { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; Activate(); } } catch { } }
             RefreshState();
             statusText.Foreground = TextMute; statusText.Text = "Ready to play.";
         }
@@ -2207,7 +2227,7 @@ public class LauncherWindow : Window
             var psi = new ProcessStartInfo(exe) { WorkingDirectory = Path.GetDirectoryName(exe) };
             if (!string.IsNullOrEmpty(args)) psi.Arguments = args;
             var proc = Process.Start(psi);
-            if (proc != null) { gameProc = proc; WatchGame(proc); SetDiscord("In game"); if (Prefs.GetBool("MinimizeInGame", false)) { try { WindowState = WindowState.Minimized; } catch { } } }
+            if (proc != null) { gameProc = proc; WatchGame(proc); SetDiscord("In game"); if (Prefs.GetBool("MinimizeInGame", false)) HideForGame(); }
             statusText.Foreground = TextMute; statusText.Text = "Launching...";
         }
         catch (Exception ex) { statusText.Foreground = AccentHi; statusText.Text = "Launch error: " + ex.Message; }
