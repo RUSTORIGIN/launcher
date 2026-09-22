@@ -1302,6 +1302,7 @@ public class LauncherWindow : Window
         {
             var img = new Image { Source = cov, Stretch = Stretch.UniformToFill };
             RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
+            img.Effect = new System.Windows.Media.Effects.BlurEffect { Radius = 3, KernelType = System.Windows.Media.Effects.KernelType.Gaussian, RenderingBias = System.Windows.Media.Effects.RenderingBias.Performance };   // subtle blur so the overlays read
             inner.Children.Add(img);
         }
         else inner.Children.Add(new Rectangle { Fill = Grad(c1, c2) });
