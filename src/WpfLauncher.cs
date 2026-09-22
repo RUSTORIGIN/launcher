@@ -524,7 +524,7 @@ public class LauncherWindow : Window
 
         // ---- utility actions (compact rounded-md buttons, like the site's copy button) ----
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 16, 0, 0) };
-        actions.Children.Add(UtilityBtn("\uE838", "Open log folder", delegate { try { Process.Start("explorer.exe", cacheDir); } catch { } }));
+        actions.Children.Add(UtilityBtn("\uE838", "Open data folder", delegate { try { Process.Start("explorer.exe", cacheDir); } catch { } }));
         actions.Children.Add(UtilityBtn("\uE72C", "Re-import Rust config", delegate { ReimportRustConfig(); }));
         col.Children.Add(actions);
 
