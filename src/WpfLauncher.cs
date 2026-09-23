@@ -22,7 +22,7 @@ using System.Windows.Media.Animation;
 [assembly: AssemblyProduct("Rustorigin Launcher")]
 [assembly: AssemblyDescription("Rustorigin Launcher - downloads, installs and launches the client")]
 [assembly: AssemblyCompany("Rustorigin")]
-[assembly: AssemblyCopyright("Rustorigin 2026")]
+[assembly: AssemblyCopyright("Copyright (c) 2026 kaveOO")]
 [assembly: AssemblyVersion("1.0.0.0")]
 [assembly: AssemblyFileVersion("1.0.0.0")]
 
