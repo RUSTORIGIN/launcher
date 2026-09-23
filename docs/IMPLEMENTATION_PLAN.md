@@ -58,7 +58,7 @@ plus the `Avatar`/`Offline` helpers) have been **removed** (section 4 T-cleanup,
 | Hero action 1: **PLAY** white pill | `PlayButton()` | ✅ rendered (-> `IN-GAME` while the client runs) |
 | Hero action 2: **INSTALL / RESUME** + progress/status | `LinkButton()` -> `StartInstall()`, `progTrack`/`statusText` | ✅ rendered (see section 4 T1) |
 | Right column: 6 server cards + DISCOVER MORE | `BuildServerGrid()` / `ServerTile()` | ✅ rendered; each card launches with its args |
-| **Settings panel** | caption gear -> `BuildSettingsOverlay()` / `ToggleSettings()` | ✅ glass overlay: 4 Pref toggles + launch args + "Open log folder" / "Re-import Rust config" (prefs still editable in `prefs.cfg`) |
+| **Settings panel** | caption gear -> `BuildSettingsOverlay()` / `ToggleSettings()` | ✅ glass overlay: 4 Pref toggles + launch args + "Open data folder" + "Uninstall client" (prefs still editable in `prefs.cfg`) |
 | Hero "Most Played" tag | - | ❌ not rendered (removed) |
 | Top-left brand mark | (was `BuildBrandMark()`) | ❌ removed |
 | Left rail (icon buttons) | - | ❌ never implemented (no builder) |
