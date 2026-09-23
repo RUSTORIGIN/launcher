@@ -79,8 +79,9 @@ Section "Install"
   SetOutPath "$INSTDIR"
   File "${REPO}\release\${EXENAME}"
 
-  CreateShortCut "$SMPROGRAMS\${APPNAME}.lnk" "$INSTDIR\${EXENAME}"
-  CreateShortCut "$DESKTOP\${APPNAME}.lnk"    "$INSTDIR\${EXENAME}"
+  ; explicit icon (not the implicit ",0"), so a reinstall to the same path never keeps a stale blank icon
+  CreateShortCut "$SMPROGRAMS\${APPNAME}.lnk" "$INSTDIR\${EXENAME}" "" "$INSTDIR\${EXENAME}" 0
+  CreateShortCut "$DESKTOP\${APPNAME}.lnk"    "$INSTDIR\${EXENAME}" "" "$INSTDIR\${EXENAME}" 0
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
@@ -95,6 +96,8 @@ Section "Install"
   WriteRegDWORD HKLM "${ARPKEY}" "NoModify" 1
   WriteRegDWORD HKLM "${ARPKEY}" "NoRepair" 1
   WriteRegDWORD HKLM "${ARPKEY}" "EstimatedSize" 7600
+
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'   ; SHCNE_ASSOCCHANGED: Explorer refreshes icons
 SectionEnd
 
 ; ---- uninstaller helpers ----
@@ -226,4 +229,6 @@ Section "Uninstall"
   DeleteRegKey HKLM "${ARPKEY}"
   DeleteRegKey HKLM "Software\Rustorigin\Launcher"
   DeleteRegKey /ifempty HKLM "Software\Rustorigin"   ; drop the parent too if nothing else lives there
+
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'   ; refresh Explorer (removed shortcuts/icons)
 SectionEnd
