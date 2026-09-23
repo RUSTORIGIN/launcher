@@ -59,7 +59,7 @@ server). Key settings:
 |-----|---------|
 | `DownloadUrl` | Direct link to `RustClient.zip`. **Required.** |
 | `Sha256` | Expected SHA-256 of `RustClient.zip`. **Required**: installs are blocked without it. |
-| `InstallDir` | Where the client installs (default `C:\RustOrigin`; blank = `.\Rust`). |
+| `InstallDir` | Where the client installs (default `C:\Rustorigin`; blank = `.\Rust`). |
 | `LaunchExe` | Client executable the Play button runs (default `RustClient.exe`). |
 | `Title` / `Tagline` / `Player` | Hero title, description line, and the displayed player name. |
 | `UpdateRepo` | `owner/repo` checked for self-updates (public repo; blank disables). |
