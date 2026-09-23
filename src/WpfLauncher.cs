@@ -23,8 +23,8 @@ using System.Windows.Media.Animation;
 [assembly: AssemblyDescription("Rustorigin Launcher - downloads, installs and launches the client")]
 [assembly: AssemblyCompany("Rustorigin")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 kaveOO")]
-[assembly: AssemblyVersion("1.0.1.0")]
-[assembly: AssemblyFileVersion("1.0.1.0")]
+[assembly: AssemblyVersion("1.0.2.0")]
+[assembly: AssemblyFileVersion("1.0.2.0")]
 
 // RUSTORIGIN launcher - WPF port of the Superdesign canvas composition:
 // rounded dark card, full-bleed cross-fading screenshot slideshow, floating glass UI
@@ -147,6 +147,7 @@ public class LauncherWindow : Window
     string InstallDir  = "";
     string LaunchExe   = "RustClient.exe";
     string LaunchArgs  = "";
+    int    DownloadConnections = 6;   // parallel HTTP Range connections for the client download (1 = single stream)
     string Version     = "";
     string UpdateRepo  = "RUSTORIGIN/launcher";   // owner/repo checked for launcher self-updates (GitHub Releases). Empty disables.
     string DiscordAppId = "";        // Discord application id for Rich Presence. Empty disables.
@@ -168,7 +169,7 @@ public class LauncherWindow : Window
     volatile bool cancelRequested;
     HttpWebRequest activeReq;
     Thread    dlThread;
-    string    cacheDir, zipPath, partPath, metaPath;
+    string    cacheDir, zipPath, partPath, metaPath, chunksPath;
     const string UA = "RUSTORIGIN-Launcher/1.0";
 
     // ---- ui refs ----
@@ -280,7 +281,7 @@ public class LauncherWindow : Window
         LoadConfig();
         if (Servers.Count == 0)
         {
-            Servers.Add(new ServerEntry("Training", "Training Grounds", "-console +connect 185.190.143.67:28015", "", "train.jpg"));
+            Servers.Add(new ServerEntry("Training", "Training Grounds", "-console +connect 51.195.60.227:28015", "", "train.jpg"));
             Servers.Add(new ServerEntry("Vanilla",  "Rustorigin Main",  "", "", "main.jpg"));
         }
         logoBmp = LoadBitmap(Path.Combine(Assets.Dir, "logo.png")) ?? LoadBitmap(Path.Combine(AppDir(), "logo.png"));
@@ -290,6 +291,7 @@ public class LauncherWindow : Window
         zipPath  = Path.Combine(cacheDir, "RustClient.zip");
         partPath = zipPath + ".part";
         metaPath = zipPath + ".part.meta";
+        chunksPath = zipPath + ".part.chunks";   // which 32 MB ranges of the .part are complete (parallel download)
         try { string sfile = Path.Combine(cacheDir, "installdir.txt"); if (File.Exists(sfile)) { string sv = File.ReadAllText(sfile).Trim(); if (sv.Length > 0) InstallDir = sv; } } catch { }
 
         // ---- window chrome (native Windows title bar + standard window features) ----
@@ -794,13 +796,29 @@ public class LauncherWindow : Window
             string err = null;
             try
             {
-                string self = null;
-                try { self = Path.GetFullPath(Process.GetCurrentProcess().MainModule.FileName); } catch { }
-                DeleteDirContents(InstallDir, self);
+                // The launcher can live in the same folder as the client (the installer defaults both to
+                // C:\Rustorigin), so never delete the launcher's own files: the running exe, the installed
+                // copy the shortcuts point at, and the installer's Uninstall.exe (Windows "Apps" needs it).
+                var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                try
+                {
+                    string self = Path.GetFullPath(Process.GetCurrentProcess().MainModule.FileName);
+                    keep.Add(self);
+                    keep.Add(Path.Combine(Path.GetDirectoryName(self), "Uninstall.exe"));
+                }
+                catch { }
+                try
+                {
+                    keep.Add(Path.GetFullPath(Path.Combine(InstallDir, "RustoriginLauncher.exe")));
+                    keep.Add(Path.GetFullPath(Path.Combine(InstallDir, "Uninstall.exe")));
+                }
+                catch { }
+                DeleteDirContents(InstallDir, keep);
                 try { if (Directory.Exists(InstallDir) && Directory.GetFileSystemEntries(InstallDir).Length == 0) Directory.Delete(InstallDir, false); } catch { }
                 try { File.Delete(zipPath); } catch { }
                 try { File.Delete(partPath); } catch { }
                 try { File.Delete(metaPath); } catch { }
+                try { File.Delete(chunksPath); } catch { }
                 Log("uninstalled client from " + InstallDir);
             }
             catch (Exception ex) { err = ex.Message; Log("uninstall failed: " + ex.Message); }
@@ -816,16 +834,16 @@ public class LauncherWindow : Window
         t.IsBackground = true; t.Start();
     }
 
-    // Recursively delete everything under dir, skipping one file (the running launcher exe, so an
-    // in-place install can be uninstalled without failing on the locked exe). Best-effort per entry.
-    static void DeleteDirContents(string dir, string skip)
+    // Recursively delete everything under dir, skipping the given full file paths (the launcher's own
+    // files, so the client can be removed from a shared folder without touching the launcher). Best-effort per entry.
+    static void DeleteDirContents(string dir, ICollection<string> keep)
     {
         if (!Directory.Exists(dir)) return;
         foreach (string f in Directory.GetFiles(dir))
         {
             try
             {
-                if (skip != null && string.Equals(Path.GetFullPath(f), skip, StringComparison.OrdinalIgnoreCase)) continue;
+                if (keep != null && keep.Contains(Path.GetFullPath(f))) continue;
                 try { File.SetAttributes(f, FileAttributes.Normal); } catch { }
                 File.Delete(f);
             }
@@ -835,7 +853,7 @@ public class LauncherWindow : Window
         {
             try
             {
-                DeleteDirContents(d, skip);
+                DeleteDirContents(d, keep);
                 if (Directory.GetFileSystemEntries(d).Length == 0) Directory.Delete(d, false);
             }
             catch { }
@@ -1540,6 +1558,7 @@ public class LauncherWindow : Window
                     case "installdir":  if (v.Length > 0) InstallDir = v; break;
                     case "launchexe":   LaunchExe = v; break;
                     case "launchargs":  LaunchArgs = v; break;
+                    case "downloadconnections": { int dc; if (int.TryParse(v, out dc)) DownloadConnections = Math.Max(1, Math.Min(16, dc)); break; }
                     case "version":     Version = v; break;
                     case "title":       if (v.Length > 0) GameTitle = v; break;
                     case "tagline":     if (v.Length > 0) Tagline = v; break;
@@ -1741,9 +1760,24 @@ public class LauncherWindow : Window
     // The game exe is present but the install is structurally incomplete (needs a reinstall/repair).
     bool IsBrokenInstall() { string exe = FindGameExe(); return exe != null && !InstallComplete(exe); }
 
-    bool HasPartial()
+    bool HasPartial() { return PartialBytes() > 0; }
+
+    // Bytes already downloaded into the saved .part: from its chunk map when the parallel downloader
+    // wrote it (the file is preallocated to full size, so its length says nothing), else the file
+    // length (a single-stream partial is one contiguous block from the start).
+    long PartialBytes()
     {
-        try { return File.Exists(partPath) && new FileInfo(partPath).Length > 0; } catch { return false; }
+        try
+        {
+            if (!File.Exists(partPath)) return 0;
+            if (!File.Exists(chunksPath)) return new FileInfo(partPath).Length;
+            long total;
+            string[] h = File.ReadAllLines(chunksPath)[0].Split(' ');
+            if (h.Length != 3 || !long.TryParse(h[2], out total)) return 0;
+            bool[] done = ReadChunkMap(total);
+            return done == null ? 0 : DoneBytes(done, total);
+        }
+        catch { return 0; }
     }
 
     Process gameProc;   // the client this launcher started (if any)
@@ -1839,7 +1873,7 @@ public class LauncherWindow : Window
     {
         try { ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | (SecurityProtocolType)12288; }  // Tls12 | Tls13
         catch { try { ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072; } catch { } }            // Tls12 only
-        ServicePointManager.DefaultConnectionLimit = 8;
+        ServicePointManager.DefaultConnectionLimit = 16;   // room for the parallel download (DownloadConnections max) + other requests
         ServicePointManager.Expect100Continue = false;
     }
 
@@ -1959,16 +1993,64 @@ public class LauncherWindow : Window
             Log("HEAD: total=" + total + " etag=" + etag);
 
             // 2) reuse a saved .part only if it belongs to this exact remote file
-            long have = File.Exists(partPath) ? new FileInfo(partPath).Length : 0;
+            long fileLen = File.Exists(partPath) ? new FileInfo(partPath).Length : 0;
             string want  = DownloadUrl + "|" + etag + "|" + total;
             string saved = File.Exists(metaPath) ? File.ReadAllText(metaPath) : "";
-            if (have > 0 && (saved != want || (total > 0 && have > total)))
-            { Log("discarding stale .part (" + have + " bytes): meta mismatch"); try { File.Delete(partPath); } catch { } have = 0; }
+            if (File.Exists(partPath) && (saved != want || (total > 0 && fileLen > total)))
+            {
+                Log("discarding stale .part (" + fileLen + " bytes): meta mismatch");
+                try { File.Delete(partPath); } catch { }
+                try { File.Delete(chunksPath); } catch { }
+                fileLen = 0;
+            }
             File.WriteAllText(metaPath, want);
+
+            // 3a) parallel: several HTTP Range connections at once (needs a known size)
+            bool parallel = total > 0 && DownloadConnections > 1;
+            if (parallel)
+            {
+                // a parallel partial is always preallocated to full size; otherwise its map can't be trusted
+                bool[] done = fileLen == total ? ReadChunkMap(total) : null;
+                if (done == null)
+                {
+                    done = new bool[ChunkCount(total)];
+                    // a partial from the single-stream downloader is one contiguous block from the start
+                    if (fileLen > 0 && !File.Exists(chunksPath))
+                        for (int i = 0; i < done.Length; i++) done[i] = (long)i * ChunkSize + ChunkLen(i, total) <= fileLen;
+                    try { File.Delete(chunksPath); } catch { }   // unreadable/foreign map: start that part clean
+                }
+                long have = DoneBytes(done, total);
+                Log("start (parallel x" + DownloadConnections + "): have=" + have + (have > 0 ? " (resuming)" : ""));
+                try { DownloadParallel(total, done, have > 0); Log("download complete: " + total + " bytes"); }
+                catch (OperationCanceledException) { cancelled = true; Log("cancelled by user"); }
+                catch (RangeNotSupportedException)
+                {
+                    // the server stopped honoring Range: fall back to one stream from the start
+                    Log("server ignored Range; falling back to a single stream");
+                    try { File.Delete(partPath); } catch { }
+                    try { File.Delete(chunksPath); } catch { }
+                    parallel = false;
+                }
+            }
+
+            // 3b) single stream: unknown size, DownloadConnections=1, or Range not honored
+            if (!parallel && !cancelled)
+            {
+            // a parallel .part is preallocated; keep only its complete prefix so Range-append resume is valid
+            if (File.Exists(chunksPath))
+            {
+                bool[] pdone = total > 0 ? ReadChunkMap(total) : null;
+                long prefix = 0;
+                if (pdone != null) for (int i = 0; i < pdone.Length && pdone[i]; i++) prefix += ChunkLen(i, total);
+                try { using (var pfs = new FileStream(partPath, FileMode.Open, FileAccess.Write)) pfs.SetLength(prefix); } catch { }
+                try { File.Delete(chunksPath); } catch { }
+                Log("kept " + prefix + " contiguous bytes of the parallel partial for single-stream resume");
+            }
+            long have = File.Exists(partPath) ? new FileInfo(partPath).Length : 0;
             bool resumed = have > 0;
             Log("start: have=" + have + (resumed ? " (resuming)" : ""));
 
-            // 3) download, auto-resuming on any network error
+            // download, auto-resuming on any network error
             if (!(total > 0 && have == total))
             {
                 int attempt = 0;
@@ -1989,6 +2071,7 @@ public class LauncherWindow : Window
                     }
                 }
             }
+            }   // end single stream
 
             // 4) verify integrity, then finalize + extract
             if (!cancelled)
@@ -2015,6 +2098,7 @@ public class LauncherWindow : Window
                         Log("INTEGRITY FAIL (mismatch): expected=" + ExpectedSha256 + " actual=" + actualHash + " - discarding download");
                         try { File.Delete(partPath); } catch { }
                         try { File.Delete(metaPath); } catch { }
+                        try { File.Delete(chunksPath); } catch { }
                     }
                     else
                     {
@@ -2029,6 +2113,7 @@ public class LauncherWindow : Window
                     if (File.Exists(zipPath)) File.Delete(zipPath);
                     File.Move(partPath, zipPath);
                     try { File.Delete(metaPath); } catch { }
+                    try { File.Delete(chunksPath); } catch { }
                     Log("finalized+verified zip (" + new FileInfo(zipPath).Length + " bytes), extracting to " + InstallDir);
                     SetDlLabelAsync("EXTRACTING");
                     try { Directory.CreateDirectory(InstallDir); File.Delete(InstallMarkerPath()); } catch { }  // clear any old marker: not "installed" until extract finishes
@@ -2053,6 +2138,186 @@ public class LauncherWindow : Window
             RefreshState();   // the .part is kept on cancel/error so Resume can continue
             if (!cancelled && !verifyFailed && error == null) MaybeImportRustConfig();   // one-time: offer to import existing Rust keybinds
         }));
+    }
+
+    // ---------- parallel download ----------
+    // The client is fetched as 32 MB HTTP Range requests over several connections at once, each writing
+    // its own region of a preallocated .part. A single TCP connection is capped by latency and by the
+    // per-connection throttling some ISP routes apply; several in parallel add up. Completed chunks are
+    // recorded in .part.chunks, so a pause, restart or dropped connection resumes where it stopped
+    // (an unfinished chunk is simply fetched again). The whole file is still SHA-256 verified afterwards.
+    const long ChunkSize = 32L << 20;
+
+    sealed class RangeNotSupportedException : Exception
+    {
+        public RangeNotSupportedException() : base("server ignored the Range header") { }
+    }
+
+    static int  ChunkCount(long total)      { return (int)((total + ChunkSize - 1) / ChunkSize); }
+    static long ChunkLen(int i, long total) { return Math.Min(ChunkSize, total - (long)i * ChunkSize); }
+    static long DoneBytes(bool[] done, long total)
+    {
+        long b = 0;
+        for (int i = 0; i < done.Length; i++) if (done[i]) b += ChunkLen(i, total);
+        return b;
+    }
+
+    // The saved chunk map for a partial of `total` bytes, or null if missing, unreadable or for another file.
+    bool[] ReadChunkMap(long total)
+    {
+        try
+        {
+            if (!File.Exists(chunksPath)) return null;
+            string[] l = File.ReadAllLines(chunksPath);
+            if (l.Length < 2) return null;
+            string[] h = l[0].Split(' ');
+            if (h.Length != 3 || h[0] != "chunks-v1" || h[1] != ChunkSize.ToString() || h[2] != total.ToString()) return null;
+            string bits = l[1].Trim();
+            if (bits.Length != ChunkCount(total)) return null;
+            var done = new bool[bits.Length];
+            for (int i = 0; i < bits.Length; i++) done[i] = bits[i] == '1';
+            return done;
+        }
+        catch { return null; }
+    }
+
+    void WriteChunkMap(bool[] done, long total)
+    {
+        var sb = new System.Text.StringBuilder(done.Length);
+        foreach (bool d in done) sb.Append(d ? '1' : '0');
+        File.WriteAllText(chunksPath, "chunks-v1 " + ChunkSize + " " + total + "\n" + sb + "\n");
+    }
+
+    static bool ContentRangeStartsAt(HttpWebResponse r, long start)
+    {
+        string cr = r.Headers["Content-Range"] ?? "";   // "bytes <from>-<to>/<total>"
+        int sp = cr.IndexOf(' '), dash = cr.IndexOf('-');
+        long a;
+        return sp >= 0 && dash > sp && long.TryParse(cr.Substring(sp + 1, dash - sp - 1), out a) && a == start;
+    }
+
+    // Downloads every chunk not yet marked done. Returns when all are done; throws
+    // OperationCanceledException on pause, RangeNotSupportedException if the server answers a Range
+    // request with the whole file, or a plain Exception after 3 minutes without receiving any data.
+    void DownloadParallel(long total, bool[] done, bool resumed)
+    {
+        var queue = new Queue<int>();
+        for (int i = 0; i < done.Length; i++) if (!done[i]) queue.Enqueue(i);
+        if (queue.Count == 0) return;
+
+        using (var pfs = new FileStream(partPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite))
+            if (pfs.Length != total) pfs.SetLength(total);   // preallocate: each chunk writes at its own offset
+        WriteChunkMap(done, total);
+
+        object gate = new object();
+        int workers = Math.Min(DownloadConnections, queue.Count);
+        long doneBytes = DoneBytes(done, total);
+        long[] inFlight = new long[workers];                 // bytes of the chunk each worker is fetching
+        var active = new List<HttpWebRequest>();
+        int failures = 0;                                    // failed chunk attempts since the last success
+        Exception lastError = null;
+        bool stop = false, rangeIgnored = false;
+
+        var threads = new List<Thread>();
+        for (int w = 0; w < workers; w++)
+        {
+            int id = w;
+            threads.Add(new Thread(() =>
+            {
+                var buf = new byte[1 << 20];
+                while (true)
+                {
+                    int ci;
+                    lock (gate) { if (cancelRequested || stop || queue.Count == 0) return; ci = queue.Dequeue(); }
+                    long start = (long)ci * ChunkSize, len = ChunkLen(ci, total), got = 0;
+                    HttpWebRequest req = null;
+                    try
+                    {
+                        req = (HttpWebRequest)WebRequest.Create(DownloadUrl);
+                        req.Method = "GET"; req.Timeout = 30000; req.ReadWriteTimeout = 60000;
+                        req.UserAgent = UA; req.AllowAutoRedirect = true;
+                        req.AddRange(start, start + len - 1);
+                        lock (gate) active.Add(req);
+                        if (cancelRequested) throw new OperationCanceledException();
+                        using (var resp = (HttpWebResponse)req.GetResponse())
+                        {
+                            if (resp.StatusCode != HttpStatusCode.PartialContent || !ContentRangeStartsAt(resp, start))
+                                throw new RangeNotSupportedException();
+                            using (var s = resp.GetResponseStream())
+                            using (var fs = new FileStream(partPath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite, 1 << 16))
+                            {
+                                fs.Seek(start, SeekOrigin.Begin);
+                                int n;
+                                while (got < len && (n = s.Read(buf, 0, (int)Math.Min(buf.Length, len - got))) > 0)
+                                {
+                                    if (cancelRequested) throw new OperationCanceledException();
+                                    fs.Write(buf, 0, n); got += n;
+                                    Interlocked.Exchange(ref inFlight[id], got);
+                                }
+                            }
+                        }
+                        if (got != len) throw new IOException("connection closed mid-chunk (" + got + "/" + len + " bytes)");
+                        lock (gate)
+                        {
+                            done[ci] = true; doneBytes += len; failures = 0;
+                            Interlocked.Exchange(ref inFlight[id], 0);
+                            try { WriteChunkMap(done, total); } catch (Exception wx) { Log("chunk map write failed: " + wx.Message); }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Interlocked.Exchange(ref inFlight[id], 0);
+                        lock (gate)
+                        {
+                            if (cancelRequested) return;
+                            if (ex is RangeNotSupportedException) { rangeIgnored = true; stop = true; return; }
+                            queue.Enqueue(ci);                   // fetch this chunk again later
+                            failures++; lastError = ex;
+                            if (failures <= 3 || failures % 10 == 0)
+                                Log("chunk " + ci + " failed (#" + failures + "): " + ex.GetType().Name + ": " + ex.Message);
+                        }
+                        for (int i = 0; i < 30 && !cancelRequested && !stop; i++) Thread.Sleep(100);   // back off 3 s
+                    }
+                    finally { if (req != null) lock (gate) active.Remove(req); }
+                }
+            }) { IsBackground = true, Name = "download-" + id });
+        }
+        foreach (var t in threads) t.Start();
+
+        // this thread: progress, pause and stall detection
+        var sw = Stopwatch.StartNew();
+        long sessionStart = doneBytes, lastBytes = -1, lastChangeMs = 0;
+        while (true)
+        {
+            bool alive = false;
+            foreach (var t in threads) if (t.IsAlive) { alive = true; break; }
+            long now; int fails;
+            lock (gate) { now = doneBytes; fails = failures; }
+            for (int i = 0; i < inFlight.Length; i++) now += Interlocked.Read(ref inFlight[i]);
+            if (now != lastBytes) { lastBytes = now; lastChangeMs = sw.ElapsedMilliseconds; }
+            long idleMs = sw.ElapsedMilliseconds - lastChangeMs;
+
+            if (cancelRequested || idleMs > 180000)          // paused, or no data at all for 3 minutes
+                lock (gate) { stop = true; foreach (var r in active) { try { r.Abort(); } catch { } } }
+            if (!alive) break;
+            if (!cancelRequested)
+            {
+                if (fails > 0 && idleMs > 5000) SetDlLabelAsync("RECONNECTING");
+                else
+                {
+                    double secs = sw.Elapsed.TotalSeconds;
+                    ReportProgress(now, total, secs > 0.5 ? ((now - sessionStart) / 1048576.0) / secs : 0, resumed);
+                }
+            }
+            Thread.Sleep(250);
+        }
+        foreach (var t in threads) t.Join();
+
+        if (cancelRequested) throw new OperationCanceledException();
+        if (rangeIgnored) throw new RangeNotSupportedException();
+        foreach (bool d in done)
+            if (!d) throw new Exception("Download stalled (no data for 3 minutes)" + (lastError != null ? ": " + lastError.Message : ""));
+        ReportProgress(total, total, 0, resumed);
     }
 
     // One GET (with a Range header when resuming). Returns normally only when the file is complete.
@@ -2416,6 +2681,11 @@ public class LauncherWindow : Window
     {
         try
         {
+            // The installer already put this shortcut on the all-users Desktop: a second copy on the
+            // user's Desktop would show two identical icons. Only the portable exe needs its own.
+            string common = Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory);
+            if (!string.IsNullOrEmpty(common) && File.Exists(Path.Combine(common, name + ".lnk"))) return;
+
             Type shellType = Type.GetTypeFromProgID("WScript.Shell");
             if (shellType == null) return;
             object shell = Activator.CreateInstance(shellType);
