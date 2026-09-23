@@ -195,8 +195,6 @@ public class LauncherWindow : Window
     static readonly Brush TextHi   = B("#FFFFFF");
     static readonly Brush TextDim  = B("#C9CCD6");
     static readonly Brush TextMute = B("#8A8E99");
-    static readonly Brush Glass    = B("#8C0E1016");   // rgba(14,16,22,.55)
-    static readonly Brush GlassHi  = B("#A61E222C");
     static readonly Brush Stroke   = B("#1FFFFFFF");   // rgba(255,255,255,.12) - hairline + resting glass-button fill
     static readonly Brush StrokeHi = B("#59FFFFFF");   // rgba(255,255,255,.35) outlined pills / inactive dots
     static readonly Brush GlassSoft  = B("#26FFFFFF");   // rgba(255,255,255,.15) - glass-button edge / toggle-off track
@@ -205,11 +203,9 @@ public class LauncherWindow : Window
     static readonly Brush WindowBg   = B("#0B0B0C");     // app window / mainGrid background
     static readonly Brush StatChecking = B("#E0B341");   // status dot: querying (amber)
     // ---- website design tokens (rustorigin.com globals.css): flat solid gunmetal, no glass, violet brand.
-    // Used by the settings panel so it matches the site's UI (surfaces are opaque; ink-700 is the one hairline).
+    // Used by the settings panel so it matches the site's UI (surfaces are opaque).
     static readonly Brush Ink900   = B("#141416");   // panel surface
     static readonly Brush Ink850   = B("#17181A");   // raised / hover surface
-    static readonly Brush Ink800   = B("#1B1C1E");   // input / neutral chip
-    static readonly Brush Ink700   = B("#2C2D31");   // the one border / hairline colour
     static readonly Brush Ink400   = B("#6B6D74");   // faint labels / descriptions
     static readonly Brush Ink200   = B("#A7A9B0");   // body copy
     static readonly Brush Ink100   = B("#ECECEE");   // headings
