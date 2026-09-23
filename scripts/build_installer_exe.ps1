@@ -28,4 +28,4 @@ if ($LASTEXITCODE -ne 0) { throw "NSIS build failed" }
 
 $exe = Get-Item $out
 Write-Host ("built setup: {0}  ({1:N2} MB)" -f $exe.FullName, ($exe.Length / 1MB))
-Write-Host "per-user install to %LOCALAPPDATA%\Programs (no admin) with folder-choose wizard, shortcuts, and uninstaller"
+Write-Host "per-machine install to C:\Rustorigin (admin/UAC) with folder-choose wizard, shortcuts, and uninstaller"

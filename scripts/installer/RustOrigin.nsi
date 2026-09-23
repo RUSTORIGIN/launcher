@@ -2,8 +2,8 @@
 ; in the same style as electron-builder's NSIS output (e.g. AppName-x.y.z-x64.exe).
 ;
 ; Wizard: Welcome -> License -> Choose install folder -> Install (progress) -> Finish (run).
-; Per-user install to %LOCALAPPDATA%\Programs (NO admin / no UAC), Start Menu + Desktop shortcuts,
-; an uninstaller, and a per-user Add/Remove Programs entry.
+; Per-machine install to C:\Rustorigin (requires admin/UAC), Start Menu + Desktop shortcuts,
+; an uninstaller, and an Add/Remove Programs entry.
 ;
 ; Built by scripts\build_installer_exe.ps1, which passes:
 ;   /DVERSION=x.y.z  /DVERSION4=x.y.z.0  /DREPO=<repo root>  /DOUTFILE=<output .exe path>
@@ -33,9 +33,9 @@ Name "${APPNAME}"
 !else
   OutFile "RustoriginLauncher-${VERSION}-x64.exe"
 !endif
-InstallDir "$LOCALAPPDATA\Programs\${APPNAME}"
-InstallDirRegKey HKCU "Software\Rustorigin\Launcher" "InstallDir"
-RequestExecutionLevel user           ; per-user LocalAppData install -> no elevation (no UAC)
+InstallDir "C:\Rustorigin"
+InstallDirRegKey HKLM "Software\Rustorigin\Launcher" "InstallDir"
+RequestExecutionLevel admin          ; install under C:\ -> elevation (UAC)
 SetCompressor /SOLID lzma
 
 ; ---- installer exe file properties (Properties -> Details) ----
@@ -69,7 +69,7 @@ VIAddVersionKey "Comments"        "Installs the Rustorigin game launcher."
 !insertmacro MUI_LANGUAGE "English"
 
 Section "Install"
-  SetShellVarContext current          ; per-user: LocalAppData, current-user Start Menu/Desktop, HKCU
+  SetShellVarContext all              ; per-machine: all-users Start Menu/Desktop, HKLM
   SetRegView 64
   SetOutPath "$INSTDIR"
   File "${REPO}\release\${EXENAME}"
@@ -79,27 +79,27 @@ Section "Install"
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
-  WriteRegStr   HKCU "Software\Rustorigin\Launcher" "InstallDir" "$INSTDIR"
-  WriteRegStr   HKCU "${ARPKEY}" "DisplayName"      "${APPNAME}"
-  WriteRegStr   HKCU "${ARPKEY}" "DisplayVersion"   "${VERSION}"
-  WriteRegStr   HKCU "${ARPKEY}" "Publisher"        "${PUBLISHER}"
-  WriteRegStr   HKCU "${ARPKEY}" "DisplayIcon"      "$INSTDIR\${EXENAME}"
-  WriteRegStr   HKCU "${ARPKEY}" "InstallLocation"  "$INSTDIR"
-  WriteRegStr   HKCU "${ARPKEY}" "UninstallString"  '"$INSTDIR\Uninstall.exe"'
-  WriteRegStr   HKCU "${ARPKEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
-  WriteRegDWORD HKCU "${ARPKEY}" "NoModify" 1
-  WriteRegDWORD HKCU "${ARPKEY}" "NoRepair" 1
-  WriteRegDWORD HKCU "${ARPKEY}" "EstimatedSize" 7600
+  WriteRegStr   HKLM "Software\Rustorigin\Launcher" "InstallDir" "$INSTDIR"
+  WriteRegStr   HKLM "${ARPKEY}" "DisplayName"      "${APPNAME}"
+  WriteRegStr   HKLM "${ARPKEY}" "DisplayVersion"   "${VERSION}"
+  WriteRegStr   HKLM "${ARPKEY}" "Publisher"        "${PUBLISHER}"
+  WriteRegStr   HKLM "${ARPKEY}" "DisplayIcon"      "$INSTDIR\${EXENAME}"
+  WriteRegStr   HKLM "${ARPKEY}" "InstallLocation"  "$INSTDIR"
+  WriteRegStr   HKLM "${ARPKEY}" "UninstallString"  '"$INSTDIR\Uninstall.exe"'
+  WriteRegStr   HKLM "${ARPKEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
+  WriteRegDWORD HKLM "${ARPKEY}" "NoModify" 1
+  WriteRegDWORD HKLM "${ARPKEY}" "NoRepair" 1
+  WriteRegDWORD HKLM "${ARPKEY}" "EstimatedSize" 7600
 SectionEnd
 
 Section "Uninstall"
-  SetShellVarContext current
+  SetShellVarContext all
   SetRegView 64
   Delete "$INSTDIR\${EXENAME}"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir  "$INSTDIR"
   Delete "$SMPROGRAMS\${APPNAME}.lnk"
   Delete "$DESKTOP\${APPNAME}.lnk"
-  DeleteRegKey HKCU "${ARPKEY}"
-  DeleteRegKey HKCU "Software\Rustorigin\Launcher"
+  DeleteRegKey HKLM "${ARPKEY}"
+  DeleteRegKey HKLM "Software\Rustorigin\Launcher"
 SectionEnd
