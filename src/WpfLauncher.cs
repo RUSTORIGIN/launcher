@@ -21,8 +21,8 @@ using System.Windows.Media.Animation;
 [assembly: AssemblyTitle("Rustorigin Launcher")]
 [assembly: AssemblyProduct("Rustorigin Launcher")]
 [assembly: AssemblyDescription("Rustorigin Launcher - downloads, installs and launches the client")]
-[assembly: AssemblyCompany("RustOrigin")]
-[assembly: AssemblyCopyright("RustOrigin 2026")]
+[assembly: AssemblyCompany("Rustorigin")]
+[assembly: AssemblyCopyright("Rustorigin 2026")]
 [assembly: AssemblyVersion("1.0.0.0")]
 [assembly: AssemblyFileVersion("1.0.0.0")]
 
@@ -84,7 +84,7 @@ static class Assets
     public static string Dir = "";
     static readonly string[] Files = {
         "1.jpg", "2.jpg", "3.jpg", "main.jpg", "train.jpg",
-        "logo.png", "server-cover.png", "launcher.cfg",
+        "logo.png", "launcher.cfg",
         "fonts/Montserrat-Regular.ttf", "fonts/Montserrat-Medium.ttf",
         "fonts/Montserrat-SemiBold.ttf", "fonts/Montserrat-Bold.ttf", "fonts/OFL.txt",
         "fonts/Poppins-Regular.ttf", "fonts/Poppins-Medium.ttf",
@@ -151,7 +151,7 @@ public class LauncherWindow : Window
     string UpdateRepo  = "RUSTORIGIN/launcher";   // owner/repo checked for launcher self-updates (GitHub Releases). Empty disables.
     string DiscordAppId = "";        // Discord application id for Rich Presence. Empty disables.
     string DiscordLargeImage = "";   // Rich Presence art-asset key uploaded in the Discord app.
-    string DiscordButtonLabel = "";  // Rich Presence button label (e.g. "Play on RustOrigin").
+    string DiscordButtonLabel = "";  // Rich Presence button label (e.g. "Play on Rustorigin").
     string DiscordButtonUrl = "";    // Rich Presence button link (e.g. https://rustorigin.com).
     DiscordRpc discord;
     long sessionStartUnix;
@@ -172,7 +172,9 @@ public class LauncherWindow : Window
     const string UA = "RUSTORIGIN-Launcher/1.0";
 
     // ---- ui refs ----
-    Border       installFill;        // progress fill drawn INSIDE the install/pause button
+    Border           installFill;        // progress fill drawn INSIDE the install/pause button
+    FrameworkElement installContent;     // the install button's icon+label content (measured for smooth width)
+    string           dlLabel = "";       // live download status shown as the button's label while busy
     TextBlock    statusText;
     Border       playBtn, installBtn;
     Grid         mainGrid;
@@ -183,7 +185,6 @@ public class LauncherWindow : Window
     System.Windows.Threading.DispatcherTimer slideTimer;   // auto-advance timer (reset on manual pick)
     List<Border> slideDots;                                // carousel indicator dots at the bottom
     BitmapImage  logoBmp;
-    BitmapImage  coverBmp;
     Grid homeView;
     const double CornerR = 32;
     Border edgeBorder;
@@ -191,8 +192,6 @@ public class LauncherWindow : Window
 
     // ---- palette ----
     static Brush B(string hex) { return new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex)); }
-    static readonly Brush Accent   = B("#D14431");
-    static readonly Brush AccentHi = B("#E9583F");
     static readonly Brush TextHi   = B("#FFFFFF");
     static readonly Brush TextDim  = B("#C9CCD6");
     static readonly Brush TextMute = B("#8A8E99");
@@ -200,14 +199,11 @@ public class LauncherWindow : Window
     static readonly Brush GlassHi  = B("#A61E222C");
     static readonly Brush Stroke   = B("#1FFFFFFF");   // rgba(255,255,255,.12) - hairline + resting glass-button fill
     static readonly Brush StrokeHi = B("#59FFFFFF");   // rgba(255,255,255,.35) outlined pills / inactive dots
-    static readonly Brush Online   = B("#3BD16F");
     static readonly Brush GlassSoft  = B("#26FFFFFF");   // rgba(255,255,255,.15) - glass-button edge / toggle-off track
     static readonly Brush GlassHover = B("#33FFFFFF");   // rgba(255,255,255,.20) - glass-button hover fill
     static readonly Brush Ink        = B("#12141A");     // near-black glyph/text on the white PLAY/INSTALL pills
-    static readonly Brush WindowBg   = B("#0B0D12");     // app window / mainGrid background
+    static readonly Brush WindowBg   = B("#0B0B0C");     // app window / mainGrid background
     static readonly Brush StatChecking = B("#E0B341");   // status dot: querying (amber)
-    static readonly Brush StatOnline   = B("#3FB950");   // status dot: online (green)
-    static readonly Brush StatOffline  = B("#F85149");   // status dot: unreachable (red)
     // ---- website design tokens (rustorigin.com globals.css): flat solid gunmetal, no glass, violet brand.
     // Used by the settings panel so it matches the site's UI (surfaces are opaque; ink-700 is the one hairline).
     static readonly Brush Ink900   = B("#141416");   // panel surface
@@ -289,10 +285,9 @@ public class LauncherWindow : Window
         if (Servers.Count == 0)
         {
             Servers.Add(new ServerEntry("Training", "Training Grounds", "-console +connect 185.190.143.67:28015", "", "train.jpg"));
-            Servers.Add(new ServerEntry("Vanilla",  "RustOrigin Main",  "", "", "main.jpg"));
+            Servers.Add(new ServerEntry("Vanilla",  "Rustorigin Main",  "", "", "main.jpg"));
         }
         logoBmp = LoadBitmap(Path.Combine(Assets.Dir, "logo.png")) ?? LoadBitmap(Path.Combine(AppDir(), "logo.png"));
-        coverBmp = LoadBitmap(Path.Combine(Assets.Dir, "server-cover.png")) ?? LoadBitmap(Path.Combine(AppDir(), "server-cover.png"));
 
         // Download cache (survives launcher restarts so a partial download can resume).
         cacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Rustorigin");
@@ -436,7 +431,7 @@ public class LauncherWindow : Window
             tray.DoubleClick += delegate { ShowFromTray(); };
             tray.MouseClick += (s, e) => { if (e.Button == System.Windows.Forms.MouseButtons.Left) ShowFromTray(); };
             var menu = new System.Windows.Forms.ContextMenuStrip();
-            var open = new System.Windows.Forms.ToolStripMenuItem("Open RustOrigin");
+            var open = new System.Windows.Forms.ToolStripMenuItem("Open Rustorigin");
             open.Click += delegate { ShowFromTray(); };
             var quit = new System.Windows.Forms.ToolStripMenuItem("Quit");
             quit.Click += delegate { try { tray.Visible = false; } catch { } Close(); };
@@ -480,7 +475,7 @@ public class LauncherWindow : Window
         host.Children.Add(row);
     }
 
-    // Circular glass caption button, matching the social icon buttons. Close hovers red (Accent),
+    // Circular glass caption button, matching the social icon buttons. Close hovers red (Danger),
     // the others brighten the glass; the glyph lifts to white on hover.
     Border CaptionBtn(string glyph, Action onClick, bool closeBtn)
     {
@@ -492,7 +487,7 @@ public class LauncherWindow : Window
             Cursor = Cursors.Hand, Child = tb, Margin = new Thickness(10, 0, 0, 0)
         };
         System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(b, true);   // clickable inside the caption drag area
-        b.MouseEnter += (s, e) => { b.Background = closeBtn ? Accent : GlassHover; tb.Foreground = TextHi; };
+        b.MouseEnter += (s, e) => { b.Background = closeBtn ? Danger : GlassHover; tb.Foreground = TextHi; };
         b.MouseLeave += (s, e) => { b.Background = Stroke; tb.Foreground = TextDim; };
         b.MouseLeftButtonUp += (s, e) => { e.Handled = true; onClick(); };
         return b;
@@ -772,7 +767,7 @@ public class LauncherWindow : Window
     void ReimportRustConfig()
     {
         ToggleSettings(false);
-        Prefs.Set("RustConfigImported", false);
+        Prefs.Set("RustConfigImportedFor", "");   // force the per-install offer to run again
         string exe = FindGameExe();
         if (exe == null || !InstallComplete(exe))
             Alert("Nothing to import yet", "Install the client first.");
@@ -787,7 +782,7 @@ public class LauncherWindow : Window
     // InstallDir is skipped if it's the running one - so the user can reinstall from the same window.
     void UninstallClient()
     {
-        if (busy) { statusText.Foreground = AccentHi; statusText.Text = "Finish or pause the download before uninstalling."; return; }
+        if (busy) { statusText.Foreground = Danger; statusText.Text = "Finish or pause the download before uninstalling."; return; }
         if (GameRunning()) { Alert("Game is running", "Close the game first."); return; }
         bool anything = IsInstalled() || IsBrokenInstall() || HasPartial();
         try { anything = anything || File.Exists(zipPath); } catch { }
@@ -797,8 +792,7 @@ public class LauncherWindow : Window
                 "Uninstall", "Cancel")) return;
 
         ToggleSettings(false);
-        busy = true; RefreshState();
-        statusText.Foreground = TextMute; statusText.Text = "Uninstalling...";
+        busy = true; SetDlLabel("REMOVING"); statusText.Text = ""; RefreshState();
         var t = new Thread(delegate ()
         {
             string err = null;
@@ -818,8 +812,8 @@ public class LauncherWindow : Window
             Dispatcher.BeginInvoke((Action)(() =>
             {
                 busy = false;
-                if (e2 != null) { statusText.Foreground = AccentHi; statusText.Text = "Uninstall error: " + e2; }
-                else { statusText.Foreground = TextMute; statusText.Text = "Client uninstalled - click Install to download it again."; }
+                if (e2 != null) { statusText.Foreground = Danger; statusText.Text = "Uninstall error: " + e2; }
+                else { statusText.Foreground = TextMute; statusText.Text = ""; }
                 RefreshState();
             }));
         });
@@ -1182,7 +1176,7 @@ public class LauncherWindow : Window
         hero.Children.Add(new TextBlock
         {
             Text = Track("JANUARY UPDATE 2021", 1),
-            Foreground = Accent, FontSize = 13, FontFamily = Brand, FontWeight = FontWeights.SemiBold, Margin = new Thickness(1, 8, 0, 0)
+            Foreground = Brand400, FontSize = 13, FontFamily = Brand, FontWeight = FontWeights.SemiBold, Margin = new Thickness(1, 8, 0, 0)   // violet brand eyebrow, matching the site
         });
         hero.Children.Add(new TextBlock
         {
@@ -1233,9 +1227,11 @@ public class LauncherWindow : Window
             Foreground = Ink, VerticalAlignment = VerticalAlignment.Center };
         sp.Children.Add(ic); sp.Children.Add(tb);
 
-        // Download progress is drawn INSIDE this button: a left-anchored fill grows behind the label
-        // while a download runs; the grid is clipped to the pill so the fill keeps the rounded ends.
-        installFill = new Border { HorizontalAlignment = HorizontalAlignment.Left, Width = 0, Background = B("#59D14431") };
+        // Download progress + status live INSIDE this button: a left-anchored fill grows behind the
+        // label while a download runs, and the label itself shows the live status. The grid is clipped
+        // to the pill so the fill keeps the rounded ends.
+        installFill = new Border { HorizontalAlignment = HorizontalAlignment.Left, Width = 0, Background = B("#598B5CF6") };   // translucent violet brand fill
+        installContent = sp;
         var g = new Grid();
         g.Children.Add(installFill);
         g.Children.Add(sp);
@@ -1246,7 +1242,8 @@ public class LauncherWindow : Window
         var b = new Border
         {
             Height = 40, MinWidth = 112, CornerRadius = new CornerRadius(20), Cursor = Cursors.Hand,
-            Background = TextHi, Child = g
+            Background = TextHi, Child = g,
+            RenderTransformOrigin = new Point(0.5, 0.5), RenderTransform = new ScaleTransform(1, 1)   // for the pause/resume press pop
         };
         b.MouseEnter += (s, e) => { if (b.IsEnabled) b.Background = B("#F0F1F4"); };   // subtle hover (site primary)
         b.MouseLeave += (s, e) => b.Background = TextHi;
@@ -1262,6 +1259,46 @@ public class LauncherWindow : Window
         if (installFill == null || installBtn == null) return;
         if (frac < 0) frac = 0; else if (frac > 1) frac = 1;
         installFill.Width = installBtn.ActualWidth * frac;
+    }
+
+    // Set the live download status shown as the button's own label while busy. Stored in dlLabel so the
+    // periodic RefreshState re-applies it instead of reverting the button to a generic caption.
+    void SetDlLabel(string s)
+    {
+        dlLabel = s ?? "";
+        if (installBtn != null) ((TextBlock)((object[])installBtn.Tag)[1]).Text = Track(dlLabel, 1);
+        AnimateInstallWidth();
+    }
+
+    // Smoothly animate the install/pause button's width to fit its current label (it changes as the
+    // caption cycles INSTALL -> CONNECTING -> DOWNLOADING xx% -> VERIFYING -> ...), instead of snapping.
+    void AnimateInstallWidth()
+    {
+        if (installBtn == null || installContent == null || installBtn.Visibility != Visibility.Visible) return;
+        installContent.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        double to = Math.Max(installBtn.MinWidth, Math.Ceiling(installContent.DesiredSize.Width));
+        double from = installBtn.ActualWidth;
+        if (from <= 0) { installBtn.Width = to; return; }        // first layout: no animation
+        if (Math.Abs(from - to) < 0.5) return;                   // label width unchanged (e.g. 42% -> 43%)
+        installBtn.BeginAnimation(FrameworkElement.WidthProperty,
+            new DoubleAnimation(from, to, new Duration(TimeSpan.FromMilliseconds(220))) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+    }
+
+    static string Pct(double frac) { if (frac < 0) frac = 0; else if (frac > 1) frac = 1; return ((int)Math.Round(frac * 100)) + "%"; }
+
+    // Same as SetDlLabel but safe to call from the download worker thread.
+    void SetDlLabelAsync(string s) { Dispatcher.BeginInvoke((Action)(() => SetDlLabel(s))); }
+
+    // A quick press-and-release "pop" on a pill button (used for the pause/resume tap feedback).
+    static void PulseButton(Border b)
+    {
+        var st = b == null ? null : b.RenderTransform as ScaleTransform;
+        if (st == null) return;
+        var pop = new DoubleAnimationUsingKeyFrames();
+        pop.KeyFrames.Add(new EasingDoubleKeyFrame(0.93, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(80)),  new CubicEase { EasingMode = EasingMode.EaseOut }));
+        pop.KeyFrames.Add(new EasingDoubleKeyFrame(1.0,  KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(210)), new CubicEase { EasingMode = EasingMode.EaseOut }));
+        st.BeginAnimation(ScaleTransform.ScaleXProperty, pop);
+        st.BeginAnimation(ScaleTransform.ScaleYProperty, pop);
     }
 
     void SetButtonEnabled(Border b, bool enabled)
@@ -1327,7 +1364,6 @@ public class LauncherWindow : Window
         BitmapImage cov = null;
         if (!string.IsNullOrEmpty(srv.Cover))
             cov = LoadBitmap(Path.Combine(Assets.Dir, srv.Cover)) ?? LoadBitmap(Path.Combine(AppDir(), srv.Cover));
-        if (cov == null) cov = coverBmp;
         if (cov != null)
         {
             var img = new Image { Source = cov, Stretch = Stretch.UniformToFill };
@@ -1555,28 +1591,35 @@ public class LauncherWindow : Window
         return null;
     }
 
-    // ---------- first-run: import the player's existing Rust keybinds/config ----------
-    // The first time the client is installed we look for an existing Steam Rust `cfg` folder and offer
-    // to copy it into this install's `cfg` folder so the player's keybinds carry over. Graphics/quality
-    // convars from a modern Rust build won't necessarily apply to this January-2021 client (it has its
-    // own), so the prompt says keybinds only. One-time: gated by the `RustConfigImported` pref, which is
-    // set once we've asked (whatever the answer) so we never nag again.
+    // ---------- per-install: import the player's existing Rust keybinds/config ----------
+    // After the client is installed we look for an existing Steam Rust `cfg` folder and offer to copy it
+    // into this install's `cfg` folder so the player's keybinds carry over. Graphics/quality convars from
+    // a modern Rust build won't necessarily apply to this January-2021 client (it has its own), so the
+    // prompt says keybinds only. Offered once PER INSTALL: gated by `RustConfigImportedFor`, which stores
+    // the current install-marker id after we've asked (whatever the answer). A reinstall writes a new
+    // marker, so the offer runs again; relaunches of the same install never nag.
     void MaybeImportRustConfig()
     {
         try
         {
-            if (Prefs.GetBool("RustConfigImported", false)) return;   // already asked once
             string exe = FindGameExe();
             if (exe == null || !InstallComplete(exe)) return;         // need a real install as the destination
+            // Offer once PER INSTALL: keyed to the install-marker id (a fresh timestamp written on every
+            // successful extract), so a reinstall re-offers the import, while relaunches of the same
+            // install never nag.
+            string installId = "";
+            try { installId = File.ReadAllText(InstallMarkerPath()).Trim(); } catch { }
+            if (installId.Length == 0) installId = exe;
+            if (Prefs.Get("RustConfigImportedFor", "") == installId) return;   // already offered for this install
             string src = FindSteamRustCfg();
             if (src == null) return;                                  // no existing Rust config found to import
             string dst = Path.Combine(Path.GetDirectoryName(exe), "cfg");
 
             bool res = Confirm("Import your Rust keybinds?",
-                "Copy your existing Steam Rust keybinds into RustOrigin? (Keybinds only.)",
+                "Copy your existing Steam Rust keybinds into Rustorigin? (Keybinds only.)",
                 "Import", "Skip");
 
-            Prefs.Set("RustConfigImported", true);   // one-time prompt, regardless of the answer
+            Prefs.Set("RustConfigImportedFor", installId);   // offered for this install, regardless of the answer
             if (!res) { Log("config import declined"); return; }
 
             int n = CopyDir(src, dst);
@@ -1770,8 +1813,8 @@ public class LauncherWindow : Window
         {
             installBtn.Visibility = Visibility.Visible;
             SetButtonEnabled(installBtn, true);                 // clickable to pause
-            ((TextBlock)imeta[1]).Text = Track("PAUSE", 1);
-            ((TextBlock)imeta[2]).Text = "\uE769";              // pause glyph
+            ((TextBlock)imeta[1]).Text = Track(dlLabel.Length > 0 ? dlLabel : "WORKING", 1);   // live status inside the button
+            ((TextBlock)imeta[2]).Text = "";                    // hide the glyph; the fill + status tell the story
         }
         else if (installed && !partial)
         {
@@ -1784,12 +1827,11 @@ public class LauncherWindow : Window
             ((TextBlock)imeta[1]).Text = Track(partial ? "RESUME" : (broken ? "REPAIR" : "INSTALL"), 1);
             ((TextBlock)imeta[2]).Text = partial ? "\uE768" : "\uE896";
         }
+        AnimateInstallWidth();   // smoothly grow/shrink the pill to fit its new caption
 
         if (!busy)
         {
-            if (partial) { statusText.Foreground = TextMute; statusText.Text = "Partial download saved (" + Human(new FileInfo(partPath).Length) + ") - click Resume to continue."; }
-            else if (game) { statusText.Foreground = TextMute; statusText.Text = "In game."; }
-            else if (broken) { statusText.Foreground = AccentHi; statusText.Text = "Install looks incomplete or corrupted - click Repair to reinstall."; }
+            if (broken) { statusText.Foreground = Danger; statusText.Text = "Install looks incomplete or corrupted - click Repair to reinstall."; }
             else { statusText.Foreground = TextMute; statusText.Text = ""; }
         }
     }
@@ -1809,17 +1851,18 @@ public class LauncherWindow : Window
     {
         if (busy) return;
         if (string.IsNullOrEmpty(DownloadUrl) || DownloadUrl.Contains("REPLACE-ME"))
-        { statusText.Foreground = AccentHi; statusText.Text = "Set DownloadUrl in launcher.cfg first."; return; }
+        { statusText.Foreground = Danger; statusText.Text = "Set DownloadUrl in launcher.cfg first."; return; }
         // Verification is mandatory: refuse to download/install anything we can't check.
         if (NormalizedExpectedHash().Length == 0)
-        { statusText.Foreground = AccentHi; statusText.Text = "Set Sha256 in launcher.cfg first - downloads must be verified before install."; return; }
+        { statusText.Foreground = Danger; statusText.Text = "Set Sha256 in launcher.cfg first - downloads must be verified before install."; return; }
         try { Directory.CreateDirectory(InstallDir); Directory.CreateDirectory(cacheDir); }
-        catch (Exception ex) { statusText.Foreground = AccentHi; statusText.Text = "Folder error: " + ex.Message; return; }
+        catch (Exception ex) { statusText.Foreground = Danger; statusText.Text = "Folder error: " + ex.Message; return; }
 
-        busy = true; cancelRequested = false; RefreshState();
-        statusText.Foreground = TextMute;
+        busy = true; cancelRequested = false;
+        statusText.Foreground = TextMute; statusText.Text = "";
         SetInstallProgress(0);
-        statusText.Text = "Connecting...";
+        SetDlLabel("CONNECTING");
+        RefreshState();
 
         Log("StartInstall: url=" + DownloadUrl + "  installDir=" + InstallDir);
         dlThread = new Thread(DownloadWorker) { IsBackground = true, Name = "download" };
@@ -1829,7 +1872,8 @@ public class LauncherWindow : Window
     // The hero download button: PAUSE while a download runs, otherwise INSTALL/RESUME.
     void OnDownloadButton()
     {
-        if (busy) { CancelDownload(); SetStatus("Pausing..."); }
+        PulseButton(installBtn);   // small tactile pop on pause/resume
+        if (busy) { CancelDownload(); SetDlLabel("PAUSING"); statusText.Text = ""; }
         else StartInstall();
     }
 
@@ -1865,8 +1909,7 @@ public class LauncherWindow : Window
         Dispatcher.BeginInvoke((Action)(() =>
         {
             if (total > 0) SetInstallProgress((double)have / total);
-            statusText.Text = (resumed ? "Resuming  " : "Downloading  ") + Human(have) + " / " + (total > 0 ? Human(total) : "?") +
-                              (mbps > 0 ? "    " + mbps.ToString("0.0") + " MB/s" : "");
+            SetDlLabel((resumed ? "INSTALLING" : "DOWNLOADING") + (total > 0 ? "  " + Pct((double)have / total) : ""));
         }));
     }
 
@@ -1886,7 +1929,7 @@ public class LauncherWindow : Window
             if (!cancelRequested && File.Exists(zipPath))
             {
                 Log("cached zip present (" + new FileInfo(zipPath).Length + " bytes); reusing without re-download");
-                SetStatus("Extracting... this can take several minutes.");
+                SetDlLabelAsync("EXTRACTING");
                 try
                 {
                     Directory.CreateDirectory(InstallDir);
@@ -1945,7 +1988,7 @@ public class LauncherWindow : Window
                         have = File.Exists(partPath) ? new FileInfo(partPath).Length : 0;
                         resumed = have > 0;
                         Log("attempt " + attempt + " failed: " + ex.GetType().Name + ": " + ex.Message + "  -> have=" + have + ", retry in 5s");
-                        SetStatus("Connection lost - resuming in 5s (attempt " + attempt + "/30), " + Human(have) + " saved");
+                        SetDlLabelAsync("RECONNECTING");
                         for (int i = 0; i < 50 && !cancelRequested; i++) Thread.Sleep(100);
                     }
                 }
@@ -1991,7 +2034,7 @@ public class LauncherWindow : Window
                     File.Move(partPath, zipPath);
                     try { File.Delete(metaPath); } catch { }
                     Log("finalized+verified zip (" + new FileInfo(zipPath).Length + " bytes), extracting to " + InstallDir);
-                    SetStatus("Extracting... this can take several minutes.");
+                    SetDlLabelAsync("EXTRACTING");
                     try { Directory.CreateDirectory(InstallDir); File.Delete(InstallMarkerPath()); } catch { }  // clear any old marker: not "installed" until extract finishes
                     ExtractZip(zipPath, InstallDir);
                     Log("extract done");
@@ -2007,10 +2050,10 @@ public class LauncherWindow : Window
         Dispatcher.BeginInvoke((Action)(() =>
         {
             busy = false; activeReq = null;
-            if (cancelled) statusText.Text = "Paused - progress saved. Click Resume to continue.";
-            else if (verifyFailed) { statusText.Foreground = AccentHi; statusText.Text = verifyMsg ?? "Integrity check failed - the download was rejected. Nothing was installed."; }
-            else if (error != null) { statusText.Foreground = AccentHi; statusText.Text = "Download failed: " + error; }
-            else { statusText.Text = "Install complete - ready to play!"; }   // RefreshState clears the in-button fill
+            if (cancelled) statusText.Text = "";
+            else if (verifyFailed) { statusText.Foreground = Danger; statusText.Text = verifyMsg ?? "Integrity check failed - the download was rejected. Nothing was installed."; }
+            else if (error != null) { statusText.Foreground = Danger; statusText.Text = "Download failed: " + error; }
+            else { statusText.Text = ""; }   // clean: status lived in the button; nothing below
             RefreshState();   // the .part is kept on cancel/error so Resume can continue
             if (!cancelled && !verifyFailed && error == null) MaybeImportRustConfig();   // one-time: offer to import existing Rust keybinds
         }));
@@ -2074,7 +2117,6 @@ public class LauncherWindow : Window
         Directory.CreateDirectory(dest);
         using (var archive = ZipFile.OpenRead(zip))
         {
-            int total = archive.Entries.Count, done = 0;
             string fullDest = Path.GetFullPath(dest);
 
             // Refuse to start extracting if the target drive can't hold the uncompressed client
@@ -2090,28 +2132,45 @@ public class LauncherWindow : Window
             }
             catch (IOException) { throw; }
             catch { }   // if the drive can't be queried, don't block the install
+            long written = 0;                                   // uncompressed bytes written so far
+            var sw = Stopwatch.StartNew(); long lastUi = -1000;
             foreach (var entry in archive.Entries)
             {
+                if (cancelRequested) throw new OperationCanceledException();
                 string target = Path.GetFullPath(Path.Combine(dest, entry.FullName));
                 if (!target.StartsWith(fullDest, StringComparison.OrdinalIgnoreCase)) continue;
                 if (entry.FullName.EndsWith("/") || entry.FullName.EndsWith("\\") || entry.Name.Length == 0)
+                {
                     Directory.CreateDirectory(target);
-                else
-                {
-                    Directory.CreateDirectory(Path.GetDirectoryName(target));
-                    entry.ExtractToFile(target, true);
+                    continue;
                 }
-                done++;
-                if ((done & 63) == 0 || done == total)
+                Directory.CreateDirectory(Path.GetDirectoryName(target));
+                // Stream each entry in chunks and report by uncompressed BYTES, so the bar keeps
+                // advancing even through one large file. (File-count progress parks on big files and
+                // looks frozen, e.g. stuck at 85% while a multi-GB bundle unpacks.)
+                using (var src = entry.Open())
+                using (var dst = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
                 {
-                    int d = done, t = total;
-                    Dispatcher.BeginInvoke((Action)(() =>
+                    var buf = new byte[1 << 20]; int n;
+                    while ((n = src.Read(buf, 0, buf.Length)) > 0)
                     {
-                        statusText.Text = "Extracting  " + d + " / " + t + " files...";
-                        if (t > 0) SetInstallProgress((double)d / t);
-                    }));
+                        if (cancelRequested) throw new OperationCanceledException();
+                        dst.Write(buf, 0, n); written += n;
+                        if (sw.ElapsedMilliseconds - lastUi >= 150)
+                        {
+                            lastUi = sw.ElapsedMilliseconds;
+                            long w = written, tot = needed;
+                            Dispatcher.BeginInvoke((Action)(() =>
+                            {
+                                if (tot > 0) { SetInstallProgress((double)w / tot); SetDlLabel("EXTRACTING  " + Pct((double)w / tot)); }
+                                else SetDlLabel("EXTRACTING");
+                            }));
+                        }
+                    }
                 }
+                try { File.SetLastWriteTime(target, entry.LastWriteTime.LocalDateTime); } catch { }
             }
+            Dispatcher.BeginInvoke((Action)(() => { SetInstallProgress(1.0); SetDlLabel("EXTRACTING  100%"); }));
         }
     }
 
@@ -2152,8 +2211,9 @@ public class LauncherWindow : Window
         Dispatcher.BeginInvoke((Action)(() =>
         {
             statusText.Foreground = TextMute;
-            statusText.Text = "Verifying download...";
+            statusText.Text = "";
             SetInstallProgress(0);
+            SetDlLabel("VERIFYING");
         }));
 
         using (var sha = System.Security.Cryptography.SHA256.Create())
@@ -2172,8 +2232,8 @@ public class LauncherWindow : Window
                     long d = done, t = total;
                     Dispatcher.BeginInvoke((Action)(() =>
                     {
-                        statusText.Text = "Verifying  " + Human(d) + (t > 0 ? " / " + Human(t) : "");
                         if (t > 0) SetInstallProgress((double)d / t);
+                        SetDlLabel("VERIFYING" + (t > 0 ? "  " + Pct((double)d / t) : ""));
                     }));
                 }
             }
@@ -2250,19 +2310,19 @@ public class LauncherWindow : Window
         string exe = FindGameExe();
         if (exe == null)
         {
-            statusText.Foreground = AccentHi; statusText.Text = "Client not installed - click Install first.";
+            statusText.Foreground = Danger; statusText.Text = "Client not installed - click Install first.";
             RefreshState(); return;
         }
         // Don't launch a structurally-incomplete install (a server-card click also lands here).
         if (!GameRunning() && !InstallComplete(exe))
         {
-            statusText.Foreground = AccentHi; statusText.Text = "Install looks incomplete or corrupted - click Repair to reinstall.";
+            statusText.Foreground = Danger; statusText.Text = "Install looks incomplete or corrupted - click Repair to reinstall.";
             RefreshState(); return;
         }
         // single instance: never launch a second copy of OUR client - focus the running one instead
         if (GameRunning())
         {
-            statusText.Foreground = TextMute; statusText.Text = "RustOrigin is already running.";
+            statusText.Foreground = TextMute; statusText.Text = "Rustorigin is already running.";
             try
             {
                 foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(LaunchExe)))
@@ -2279,7 +2339,7 @@ public class LauncherWindow : Window
             if (proc != null) { gameProc = proc; WatchGame(proc); SetDiscord("In game"); if (Prefs.GetBool("MinimizeInGame", false)) HideForGame(); }
             statusText.Foreground = TextMute; statusText.Text = "Launching...";
         }
-        catch (Exception ex) { statusText.Foreground = AccentHi; statusText.Text = "Launch error: " + ex.Message; }
+        catch (Exception ex) { statusText.Foreground = Danger; statusText.Text = "Launch error: " + ex.Message; }
     }
 
     // ---------- settings panel ----------
