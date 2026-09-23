@@ -56,8 +56,9 @@ VIAddVersionKey "Comments"        "Installs the Rustorigin game launcher."
 !define MUI_ICON   "${REPO}\assets\release_icon.ico"
 !define MUI_UNICON "${REPO}\assets\release_icon.ico"
 !define MUI_ABORTWARNING
-!define MUI_FINISHPAGE_RUN "$INSTDIR\${EXENAME}"
+!define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_TEXT "Launch ${APPNAME}"
+!define MUI_FINISHPAGE_RUN_FUNCTION LaunchAsUser   ; not elevated (see below)
 
 ; ---- installer pages ----
 !insertmacro MUI_PAGE_WELCOME
@@ -72,6 +73,13 @@ VIAddVersionKey "Comments"        "Installs the Rustorigin game launcher."
 !insertmacro MUI_UNPAGE_INSTFILES
 
 !insertmacro MUI_LANGUAGE "English"
+
+; The installer runs elevated, so launching the app directly would run it (and the game it starts) as
+; administrator: Discord Rich Presence can't reach a non-elevated Discord, and other apps can't
+; interact with it. Explorer runs as the signed-in user, so launching through it drops elevation.
+Function LaunchAsUser
+  Exec '"$WINDIR\explorer.exe" "$INSTDIR\${EXENAME}"'
+FunctionEnd
 
 Section "Install"
   SetShellVarContext all              ; per-machine: all-users Start Menu/Desktop, HKLM
