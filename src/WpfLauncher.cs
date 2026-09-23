@@ -1738,8 +1738,9 @@ public class LauncherWindow : Window
         bool game      = GameRunning();
         bool broken    = !installed && !game && IsBrokenInstall();   // exe present but files missing
 
-        // Progress bar is only for an active download/install; hide it once idle (finished, paused or errored).
-        if (progTrack != null) progTrack.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        // Hide the download progress bar whenever idle (finished, paused or errored). It is only ever
+        // shown explicitly by StartInstall, so this never reveals it during other busy work (uninstall).
+        if (progTrack != null && !busy) progTrack.Visibility = Visibility.Collapsed;
 
         // PLAY: shown only when the client is installed (or our game is running) - hidden otherwise.
         // While the game runs it becomes IN-GAME (clicking it focuses the running game).
