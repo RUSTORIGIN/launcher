@@ -2,8 +2,8 @@
 ; in the same style as electron-builder's NSIS output (e.g. AppName-x.y.z-x64.exe).
 ;
 ; Wizard: Welcome -> License -> Choose install folder -> Install (progress) -> Finish (run).
-; Per-machine install to Program Files (requires admin/UAC), Start Menu + Desktop shortcuts,
-; an uninstaller, and an Add/Remove Programs entry.
+; Per-user install to %LOCALAPPDATA%\Programs (NO admin / no UAC), Start Menu + Desktop shortcuts,
+; an uninstaller, and a per-user Add/Remove Programs entry.
 ;
 ; Built by scripts\build_installer_exe.ps1, which passes:
 ;   /DVERSION=x.y.z  /DVERSION4=x.y.z.0  /DREPO=<repo root>  /DOUTFILE=<output .exe path>
@@ -23,7 +23,7 @@ Unicode true
 !endif
 
 !define APPNAME     "Rustorigin Launcher"
-!define PUBLISHER   "RustOrigin"
+!define PUBLISHER   "Rustorigin"
 !define EXENAME     "RustoriginLauncher.exe"
 !define ARPKEY      "Software\Microsoft\Windows\CurrentVersion\Uninstall\RustoriginLauncher"
 
@@ -33,9 +33,9 @@ Name "${APPNAME}"
 !else
   OutFile "RustoriginLauncher-${VERSION}-x64.exe"
 !endif
-InstallDir "$PROGRAMFILES64\${APPNAME}"
-InstallDirRegKey HKLM "Software\RustOrigin\Launcher" "InstallDir"
-RequestExecutionLevel admin          ; Program Files install -> elevation (UAC)
+InstallDir "$LOCALAPPDATA\Programs\${APPNAME}"
+InstallDirRegKey HKCU "Software\Rustorigin\Launcher" "InstallDir"
+RequestExecutionLevel user           ; per-user LocalAppData install -> no elevation (no UAC)
 SetCompressor /SOLID lzma
 
 ; ---- installer exe file properties (Properties -> Details) ----
@@ -46,7 +46,7 @@ VIAddVersionKey "CompanyName"     "${PUBLISHER}"
 VIAddVersionKey "LegalCopyright"  "Copyright (c) 2026 kaveOO"
 VIAddVersionKey "FileVersion"     "${VERSION4}"
 VIAddVersionKey "ProductVersion"  "${VERSION4}"
-VIAddVersionKey "Comments"        "Installs the RustOrigin game launcher."
+VIAddVersionKey "Comments"        "Installs the Rustorigin game launcher."
 
 ; ---- Modern UI look ----
 !define MUI_ICON   "${REPO}\assets\release_icon.ico"
@@ -69,6 +69,7 @@ VIAddVersionKey "Comments"        "Installs the RustOrigin game launcher."
 !insertmacro MUI_LANGUAGE "English"
 
 Section "Install"
+  SetShellVarContext current          ; per-user: LocalAppData, current-user Start Menu/Desktop, HKCU
   SetRegView 64
   SetOutPath "$INSTDIR"
   File "${REPO}\release\${EXENAME}"
@@ -78,26 +79,27 @@ Section "Install"
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
-  WriteRegStr   HKLM "Software\RustOrigin\Launcher" "InstallDir" "$INSTDIR"
-  WriteRegStr   HKLM "${ARPKEY}" "DisplayName"      "${APPNAME}"
-  WriteRegStr   HKLM "${ARPKEY}" "DisplayVersion"   "${VERSION}"
-  WriteRegStr   HKLM "${ARPKEY}" "Publisher"        "${PUBLISHER}"
-  WriteRegStr   HKLM "${ARPKEY}" "DisplayIcon"      "$INSTDIR\${EXENAME}"
-  WriteRegStr   HKLM "${ARPKEY}" "InstallLocation"  "$INSTDIR"
-  WriteRegStr   HKLM "${ARPKEY}" "UninstallString"  '"$INSTDIR\Uninstall.exe"'
-  WriteRegStr   HKLM "${ARPKEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
-  WriteRegDWORD HKLM "${ARPKEY}" "NoModify" 1
-  WriteRegDWORD HKLM "${ARPKEY}" "NoRepair" 1
-  WriteRegDWORD HKLM "${ARPKEY}" "EstimatedSize" 7600
+  WriteRegStr   HKCU "Software\Rustorigin\Launcher" "InstallDir" "$INSTDIR"
+  WriteRegStr   HKCU "${ARPKEY}" "DisplayName"      "${APPNAME}"
+  WriteRegStr   HKCU "${ARPKEY}" "DisplayVersion"   "${VERSION}"
+  WriteRegStr   HKCU "${ARPKEY}" "Publisher"        "${PUBLISHER}"
+  WriteRegStr   HKCU "${ARPKEY}" "DisplayIcon"      "$INSTDIR\${EXENAME}"
+  WriteRegStr   HKCU "${ARPKEY}" "InstallLocation"  "$INSTDIR"
+  WriteRegStr   HKCU "${ARPKEY}" "UninstallString"  '"$INSTDIR\Uninstall.exe"'
+  WriteRegStr   HKCU "${ARPKEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
+  WriteRegDWORD HKCU "${ARPKEY}" "NoModify" 1
+  WriteRegDWORD HKCU "${ARPKEY}" "NoRepair" 1
+  WriteRegDWORD HKCU "${ARPKEY}" "EstimatedSize" 7600
 SectionEnd
 
 Section "Uninstall"
+  SetShellVarContext current
   SetRegView 64
   Delete "$INSTDIR\${EXENAME}"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir  "$INSTDIR"
   Delete "$SMPROGRAMS\${APPNAME}.lnk"
   Delete "$DESKTOP\${APPNAME}.lnk"
-  DeleteRegKey HKLM "${ARPKEY}"
-  DeleteRegKey HKLM "Software\RustOrigin\Launcher"
+  DeleteRegKey HKCU "${ARPKEY}"
+  DeleteRegKey HKCU "Software\Rustorigin\Launcher"
 SectionEnd
