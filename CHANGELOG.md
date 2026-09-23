@@ -9,6 +9,12 @@ All notable changes to the RustOrigin launcher are documented here. Format loose
 - **Training Grounds** moved to the new dedicated server: the card now connects to
   `51.195.60.227:28015` (was `185.190.143.67:28015`), and its live player count queries the new host.
 
+### Fixed
+- **"Uninstall client" no longer deletes the launcher's own files.** The installer and the client both
+  default to `C:\Rustorigin`, so removing the client also deleted the installer's `Uninstall.exe`
+  (Windows then reported "cannot find C:\Rustorigin\Uninstall.exe"). It now keeps the running
+  launcher, the installed `RustoriginLauncher.exe` the shortcuts use, and `Uninstall.exe`.
+
 ## [1.0.1] - 2026-09-23
 
 ### Changed

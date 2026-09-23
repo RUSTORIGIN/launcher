@@ -794,9 +794,24 @@ public class LauncherWindow : Window
             string err = null;
             try
             {
-                string self = null;
-                try { self = Path.GetFullPath(Process.GetCurrentProcess().MainModule.FileName); } catch { }
-                DeleteDirContents(InstallDir, self);
+                // The launcher can live in the same folder as the client (the installer defaults both to
+                // C:\Rustorigin), so never delete the launcher's own files: the running exe, the installed
+                // copy the shortcuts point at, and the installer's Uninstall.exe (Windows "Apps" needs it).
+                var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                try
+                {
+                    string self = Path.GetFullPath(Process.GetCurrentProcess().MainModule.FileName);
+                    keep.Add(self);
+                    keep.Add(Path.Combine(Path.GetDirectoryName(self), "Uninstall.exe"));
+                }
+                catch { }
+                try
+                {
+                    keep.Add(Path.GetFullPath(Path.Combine(InstallDir, "RustoriginLauncher.exe")));
+                    keep.Add(Path.GetFullPath(Path.Combine(InstallDir, "Uninstall.exe")));
+                }
+                catch { }
+                DeleteDirContents(InstallDir, keep);
                 try { if (Directory.Exists(InstallDir) && Directory.GetFileSystemEntries(InstallDir).Length == 0) Directory.Delete(InstallDir, false); } catch { }
                 try { File.Delete(zipPath); } catch { }
                 try { File.Delete(partPath); } catch { }
@@ -816,16 +831,16 @@ public class LauncherWindow : Window
         t.IsBackground = true; t.Start();
     }
 
-    // Recursively delete everything under dir, skipping one file (the running launcher exe, so an
-    // in-place install can be uninstalled without failing on the locked exe). Best-effort per entry.
-    static void DeleteDirContents(string dir, string skip)
+    // Recursively delete everything under dir, skipping the given full file paths (the launcher's own
+    // files, so the client can be removed from a shared folder without touching the launcher). Best-effort per entry.
+    static void DeleteDirContents(string dir, ICollection<string> keep)
     {
         if (!Directory.Exists(dir)) return;
         foreach (string f in Directory.GetFiles(dir))
         {
             try
             {
-                if (skip != null && string.Equals(Path.GetFullPath(f), skip, StringComparison.OrdinalIgnoreCase)) continue;
+                if (keep != null && keep.Contains(Path.GetFullPath(f))) continue;
                 try { File.SetAttributes(f, FileAttributes.Normal); } catch { }
                 File.Delete(f);
             }
@@ -835,7 +850,7 @@ public class LauncherWindow : Window
         {
             try
             {
-                DeleteDirContents(d, skip);
+                DeleteDirContents(d, keep);
                 if (Directory.GetFileSystemEntries(d).Length == 0) Directory.Delete(d, false);
             }
             catch { }
