@@ -14,6 +14,12 @@ All notable changes to the RustOrigin launcher are documented here. Format loose
   default to `C:\Rustorigin`, so removing the client also deleted the installer's `Uninstall.exe`
   (Windows then reported "cannot find C:\Rustorigin\Uninstall.exe"). It now keeps the running
   launcher, the installed `RustoriginLauncher.exe` the shortcuts use, and `Uninstall.exe`.
+- **The Windows uninstaller now removes everything:** the launcher, the game client (`C:\Rustorigin`,
+  even when the launcher was installed elsewhere), all shortcuts (including the Desktop one the
+  launcher creates), and the settings/logs/download-cache folder `%LOCALAPPDATA%\Rustorigin`, plus
+  the registry keys. It closes the launcher first, refuses to run while the game is open, and never
+  wipes a drive root or system/profile folder if one was chosen as the install location (it then
+  removes only its own files).
 
 ## [1.0.1] - 2026-09-23
 
