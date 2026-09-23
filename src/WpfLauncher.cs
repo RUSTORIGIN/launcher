@@ -23,8 +23,8 @@ using System.Windows.Media.Animation;
 [assembly: AssemblyDescription("Rustorigin Launcher - downloads, installs and launches the client")]
 [assembly: AssemblyCompany("Rustorigin")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 kaveOO")]
-[assembly: AssemblyVersion("1.0.2.0")]
-[assembly: AssemblyFileVersion("1.0.2.0")]
+[assembly: AssemblyVersion("1.0.3.0")]
+[assembly: AssemblyFileVersion("1.0.3.0")]
 
 // RUSTORIGIN launcher - WPF port of the Superdesign canvas composition:
 // rounded dark card, full-bleed cross-fading screenshot slideshow, floating glass UI

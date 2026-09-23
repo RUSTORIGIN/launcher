@@ -3,7 +3,7 @@
 All notable changes to the RustOrigin launcher are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are Git tags (`vX.Y.Z`).
 
-## [Unreleased]
+## [1.0.3] - 2026-09-23
 
 ### Removed
 - **Importing existing Steam Rust keybinds.** The launcher no longer offers to copy the player's
