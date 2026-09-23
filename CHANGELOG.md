@@ -5,6 +5,14 @@ All notable changes to the RustOrigin launcher are documented here. Format loose
 
 ## [1.0.2] - 2026-09-23
 
+### Added
+- **Parallel downloads.** The client now downloads over 6 connections at once (32 MB HTTP Range
+  chunks written into a preallocated file), which is much faster for players whose ISP throttles each
+  connection (about 2x on a normal line in testing). Pause/resume and restarts keep every finished
+  chunk (tracked in `RustClient.zip.part.chunks`); partials from older versions still resume. The
+  full SHA-256 check is unchanged. Falls back to a single connection automatically if a server ignores
+  Range. Configurable with `DownloadConnections=` (1-16) in `launcher.cfg`.
+
 ### Changed
 - **Training Grounds** moved to the new dedicated server: the card now connects to
   `51.195.60.227:28015` (was `185.190.143.67:28015`), and its live player count queries the new host.
