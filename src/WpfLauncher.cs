@@ -2681,6 +2681,11 @@ public class LauncherWindow : Window
     {
         try
         {
+            // The installer already put this shortcut on the all-users Desktop: a second copy on the
+            // user's Desktop would show two identical icons. Only the portable exe needs its own.
+            string common = Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory);
+            if (!string.IsNullOrEmpty(common) && File.Exists(Path.Combine(common, name + ".lnk"))) return;
+
             Type shellType = Type.GetTypeFromProgID("WScript.Shell");
             if (shellType == null) return;
             object shell = Activator.CreateInstance(shellType);
