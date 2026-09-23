@@ -3,6 +3,13 @@
 All notable changes to the RustOrigin launcher are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are Git tags (`vX.Y.Z`).
 
+## [Unreleased]
+
+### Removed
+- **Importing existing Steam Rust keybinds.** The launcher no longer offers to copy the player's
+  Steam Rust `cfg` folder after an install or at startup, and the "Re-import Rust config" button is
+  gone from the settings panel.
+
 ## [1.0.2] - 2026-09-23
 
 ### Added

@@ -380,11 +380,6 @@ public class LauncherWindow : Window
         RefreshState();
         StartUpdateCheck();
         StartDiscord();
-
-        // First-run: if the client is already installed and we haven't asked yet, offer to import the
-        // player's existing Steam Rust keybinds. Deferred to ApplicationIdle so the window is up before
-        // the modal prompt. (A fresh install triggers the same one-time prompt from DownloadWorker.)
-        Dispatcher.BeginInvoke((Action)MaybeImportRustConfig, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
     }
 
     // ---------- Discord Rich Presence ----------
@@ -554,7 +549,6 @@ public class LauncherWindow : Window
         // ---- utility actions (compact rounded-md buttons, like the site's copy button) ----
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 16, 0, 0) };
         actions.Children.Add(UtilityBtn("\uE838", "Open data folder", delegate { try { Process.Start("explorer.exe", cacheDir); } catch { } }));
-        actions.Children.Add(UtilityBtn("\uE72C", "Re-import Rust config", delegate { ReimportRustConfig(); }));
         col.Children.Add(actions);
 
         // ---- uninstall (danger) ----
@@ -759,21 +753,6 @@ public class LauncherWindow : Window
 
     void Alert(string heading, string message) { ModalDialog(heading, message, "OK", null); }
     bool Confirm(string heading, string message, string okText, string cancelText) { return ModalDialog(heading, message, okText, cancelText); }
-
-    // "Re-import Rust config" action: clear the one-time marker and run the import now (with feedback
-    // when there's nothing to do, since the normal path stays silent).
-    void ReimportRustConfig()
-    {
-        ToggleSettings(false);
-        Prefs.Set("RustConfigImportedFor", "");   // force the per-install offer to run again
-        string exe = FindGameExe();
-        if (exe == null || !InstallComplete(exe))
-            Alert("Nothing to import yet", "Install the client first.");
-        else if (FindSteamRustCfg() == null)
-            Alert("Nothing to import", "No existing Steam Rust config found.");
-        else
-            MaybeImportRustConfig();
-    }
 
     // "Uninstall client" action: delete the installed game files (frees the multi-GB client) and the
     // download cache, after a confirm. The launcher itself is kept - even its self-copied exe under
@@ -1606,125 +1585,6 @@ public class LauncherWindow : Window
         return null;
     }
 
-    // ---------- per-install: import the player's existing Rust keybinds/config ----------
-    // After the client is installed we look for an existing Steam Rust `cfg` folder and offer to copy it
-    // into this install's `cfg` folder so the player's keybinds carry over. Graphics/quality convars from
-    // a modern Rust build won't necessarily apply to this January-2021 client (it has its own), so the
-    // prompt says keybinds only. Offered once PER INSTALL: gated by `RustConfigImportedFor`, which stores
-    // the current install-marker id after we've asked (whatever the answer). A reinstall writes a new
-    // marker, so the offer runs again; relaunches of the same install never nag.
-    void MaybeImportRustConfig()
-    {
-        try
-        {
-            string exe = FindGameExe();
-            if (exe == null || !InstallComplete(exe)) return;         // need a real install as the destination
-            // Offer once PER INSTALL: keyed to the install-marker id (a fresh timestamp written on every
-            // successful extract), so a reinstall re-offers the import, while relaunches of the same
-            // install never nag.
-            string installId = "";
-            try { installId = File.ReadAllText(InstallMarkerPath()).Trim(); } catch { }
-            if (installId.Length == 0) installId = exe;
-            if (Prefs.Get("RustConfigImportedFor", "") == installId) return;   // already offered for this install
-            string src = FindSteamRustCfg();
-            if (src == null) return;                                  // no existing Rust config found to import
-            string dst = Path.Combine(Path.GetDirectoryName(exe), "cfg");
-
-            bool res = Confirm("Import your Rust keybinds?",
-                "Copy your existing Steam Rust keybinds into Rustorigin? (Keybinds only.)",
-                "Import", "Skip");
-
-            Prefs.Set("RustConfigImportedFor", installId);   // offered for this install, regardless of the answer
-            if (!res) { Log("config import declined"); return; }
-
-            int n = CopyDir(src, dst);
-            Log("config import: copied " + n + " file(s) from " + src + " -> " + dst);
-            SetStatus(n > 0 ? "Imported your Rust keybinds (" + n + " file(s)) - ready to play!"
-                            : "No config files found to import - ready to play!");
-        }
-        catch (Exception ex) { Log("config import failed: " + ex.Message); }
-    }
-
-    // The player's existing Steam Rust `cfg` folder, or null. Checks the default install locations, the
-    // Steam install path from the registry, then every Steam library folder listed in libraryfolders.vdf
-    // (games can live on other drives). Returns the first `...\steamapps\common\Rust\cfg` that has files.
-    string FindSteamRustCfg()
-    {
-        var roots = new List<string>();
-        try { string p = Environment.GetEnvironmentVariable("ProgramFiles(x86)"); if (!string.IsNullOrEmpty(p)) roots.Add(Path.Combine(p, "Steam")); } catch { }
-        try { string p = Environment.GetEnvironmentVariable("ProgramFiles");      if (!string.IsNullOrEmpty(p)) roots.Add(Path.Combine(p, "Steam")); } catch { }
-        foreach (string key in new[] { @"HKEY_CURRENT_USER\Software\Valve\Steam",
-                                       @"HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Valve\Steam",
-                                       @"HKEY_LOCAL_MACHINE\SOFTWARE\Valve\Steam" })
-        {
-            try
-            {
-                object v = Microsoft.Win32.Registry.GetValue(key, "SteamPath", null)
-                        ?? Microsoft.Win32.Registry.GetValue(key, "InstallPath", null);
-                string s = v as string; if (!string.IsNullOrEmpty(s)) roots.Add(s.Replace('/', '\\'));
-            }
-            catch { }
-        }
-
-        // extra library folders: parse "path" entries out of libraryfolders.vdf (both its known locations)
-        var libs = new List<string>();
-        foreach (string steam in roots)
-        {
-            foreach (string vdf in new[] { Path.Combine(steam, "steamapps", "libraryfolders.vdf"),
-                                           Path.Combine(steam, "config", "libraryfolders.vdf") })
-            {
-                try
-                {
-                    if (!File.Exists(vdf)) continue;
-                    foreach (string line in File.ReadAllLines(vdf))
-                    {
-                        int i = line.IndexOf("\"path\"", StringComparison.OrdinalIgnoreCase);
-                        if (i < 0) continue;
-                        int a = line.IndexOf('"', i + 6); if (a < 0) continue;
-                        int b = line.IndexOf('"', a + 1); if (b < 0) continue;
-                        string p = line.Substring(a + 1, b - a - 1).Replace("\\\\", "\\");
-                        if (p.Length > 0) libs.Add(p);
-                    }
-                }
-                catch { }
-            }
-        }
-
-        foreach (string c in Enumerable_Concat(roots, libs))
-        {
-            try
-            {
-                string cfg = Path.Combine(c, "steamapps", "common", "Rust", "cfg");
-                if (Directory.Exists(cfg) && DirHasEntries(cfg)) return cfg;
-            }
-            catch { }
-        }
-        return null;
-    }
-
-    // Small helper so we don't pull in System.Linq just for one concat.
-    static IEnumerable<string> Enumerable_Concat(List<string> a, List<string> b)
-    {
-        foreach (string s in a) yield return s;
-        foreach (string s in b) yield return s;
-    }
-
-    // Recursively copy every file from src into dst (creating dst), overwriting. Returns files copied.
-    static int CopyDir(string src, string dst)
-    {
-        int n = 0;
-        Directory.CreateDirectory(dst);
-        foreach (string f in Directory.GetFiles(src))
-        {
-            try { File.Copy(f, Path.Combine(dst, Path.GetFileName(f)), true); n++; } catch { }
-        }
-        foreach (string d in Directory.GetDirectories(src))
-        {
-            try { n += CopyDir(d, Path.Combine(dst, Path.GetFileName(d))); } catch { }
-        }
-        return n;
-    }
-
     string InstallMarkerPath() { return Path.Combine(InstallDir, ".rustorigin-installed"); }
 
     // Structural completeness: the game exe AND a real Unity data folder next to it. A finished
@@ -1911,11 +1771,6 @@ public class LauncherWindow : Window
     {
         cancelRequested = true;
         try { var r = activeReq; if (r != null) r.Abort(); } catch { }
-    }
-
-    void SetStatus(string text)
-    {
-        Dispatcher.BeginInvoke((Action)(() => { statusText.Text = text; }));
     }
 
     // Timestamped diagnostics in <cache>\launcher.log (players can send this when a download misbehaves).
@@ -2136,7 +1991,6 @@ public class LauncherWindow : Window
             else if (error != null) { statusText.Foreground = Danger; statusText.Text = "Download failed: " + error; }
             else { statusText.Text = ""; }   // clean: status lived in the button; nothing below
             RefreshState();   // the .part is kept on cancel/error so Resume can continue
-            if (!cancelled && !verifyFailed && error == null) MaybeImportRustConfig();   // one-time: offer to import existing Rust keybinds
         }));
     }
 
