@@ -172,7 +172,7 @@ public class LauncherWindow : Window
     const string UA = "RUSTORIGIN-Launcher/1.0";
 
     // ---- ui refs ----
-    Border       progTrack, progFill;
+    Border       installFill;        // progress fill drawn INSIDE the install/pause button
     TextBlock    statusText;
     Border       playBtn, installBtn;
     Grid         mainGrid;
@@ -1198,17 +1198,7 @@ public class LauncherWindow : Window
         row.Children.Add(installBtn);
         hero.Children.Add(row);
 
-        progTrack = new Border
-        {
-            Height = 5, Width = 330, CornerRadius = new CornerRadius(3), Background = B("#33202531"),
-            HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(1, 14, 0, 0),
-            Visibility = Visibility.Collapsed, ClipToBounds = true
-        };
-        progFill = new Border { Height = 5, Width = 0, CornerRadius = new CornerRadius(3), Background = Accent, HorizontalAlignment = HorizontalAlignment.Left };
-        progTrack.Child = progFill;
-        hero.Children.Add(progTrack);
-
-        statusText = new TextBlock { Text = "", Foreground = TextMute, FontSize = 12.5, Margin = new Thickness(1, 8, 0, 0) };
+        statusText = new TextBlock { Text = "", Foreground = TextMute, FontSize = 12.5, Margin = new Thickness(1, 14, 0, 0) };
         hero.Children.Add(statusText);
 
         content.Children.Add(hero);
@@ -1235,17 +1225,28 @@ public class LauncherWindow : Window
 
     Border LinkButton(string glyph, string text, Action onClick)
     {
-        var sp = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
+        // Content (icon + label) carries the horizontal breathing room the Border padding used to give,
+        // so the progress fill can span the full pill edge-to-edge behind it.
+        var sp = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(20, 0, 22, 0) };
         var ic = Icon(glyph, 13, Ink); ic.Margin = new Thickness(0, 1, 9, 0);
         var tb = new TextBlock { Text = Track(text, 1), FontSize = 13, FontFamily = Site, FontWeight = FontWeights.SemiBold,
             Foreground = Ink, VerticalAlignment = VerticalAlignment.Center };
         sp.Children.Add(ic); sp.Children.Add(tb);
+
+        // Download progress is drawn INSIDE this button: a left-anchored fill grows behind the label
+        // while a download runs; the grid is clipped to the pill so the fill keeps the rounded ends.
+        installFill = new Border { HorizontalAlignment = HorizontalAlignment.Left, Width = 0, Background = B("#59D14431") };
+        var g = new Grid();
+        g.Children.Add(installFill);
+        g.Children.Add(sp);
+        g.SizeChanged += (s, e) => { try { g.Clip = new RectangleGeometry(new Rect(0, 0, g.ActualWidth, g.ActualHeight), 20, 20); } catch { } };
+
         // Full white pill, matching PLAY. Left margin is set in RefreshState so it aligns to the
         // hero's left edge when it is the leading button (PLAY hidden).
         var b = new Border
         {
             Height = 40, MinWidth = 112, CornerRadius = new CornerRadius(20), Cursor = Cursors.Hand,
-            Background = TextHi, Padding = new Thickness(20, 0, 22, 0), Child = sp
+            Background = TextHi, Child = g
         };
         b.MouseEnter += (s, e) => { if (b.IsEnabled) b.Background = B("#F0F1F4"); };   // subtle hover (site primary)
         b.MouseLeave += (s, e) => b.Background = TextHi;
@@ -1253,6 +1254,14 @@ public class LauncherWindow : Window
         b.MouseLeftButtonUp += (s, e) => { e.Handled = true; if (b.IsEnabled) onClick(); };
         b.Tag = new object[] { false, tb, ic };
         return b;
+    }
+
+    // Set the in-button download progress (0..1): grows the fill behind the install/pause label.
+    void SetInstallProgress(double frac)
+    {
+        if (installFill == null || installBtn == null) return;
+        if (frac < 0) frac = 0; else if (frac > 1) frac = 1;
+        installFill.Width = installBtn.ActualWidth * frac;
     }
 
     void SetButtonEnabled(Border b, bool enabled)
@@ -1738,8 +1747,8 @@ public class LauncherWindow : Window
         bool game      = GameRunning();
         bool broken    = !installed && !game && IsBrokenInstall();   // exe present but files missing
 
-        // Progress bar is only for an active download/install; hide it once idle (finished, paused or errored).
-        if (progTrack != null) progTrack.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        // The in-button progress fill is only for an active download; clear it once idle.
+        if (!busy) SetInstallProgress(0);   // clear the in-button fill when idle (finished, paused, errored)
 
         // PLAY: shown only when the client is installed (or our game is running) - hidden otherwise.
         // While the game runs it becomes IN-GAME (clicking it focuses the running game).
@@ -1809,7 +1818,7 @@ public class LauncherWindow : Window
 
         busy = true; cancelRequested = false; RefreshState();
         statusText.Foreground = TextMute;
-        progTrack.Visibility = Visibility.Visible; progFill.Width = 0;
+        SetInstallProgress(0);
         statusText.Text = "Connecting...";
 
         Log("StartInstall: url=" + DownloadUrl + "  installDir=" + InstallDir);
@@ -1855,7 +1864,7 @@ public class LauncherWindow : Window
     {
         Dispatcher.BeginInvoke((Action)(() =>
         {
-            if (total > 0) progFill.Width = progTrack.ActualWidth * Math.Min(1.0, (double)have / total);
+            if (total > 0) SetInstallProgress((double)have / total);
             statusText.Text = (resumed ? "Resuming  " : "Downloading  ") + Human(have) + " / " + (total > 0 ? Human(total) : "?") +
                               (mbps > 0 ? "    " + mbps.ToString("0.0") + " MB/s" : "");
         }));
@@ -2001,7 +2010,7 @@ public class LauncherWindow : Window
             if (cancelled) statusText.Text = "Paused - progress saved. Click Resume to continue.";
             else if (verifyFailed) { statusText.Foreground = AccentHi; statusText.Text = verifyMsg ?? "Integrity check failed - the download was rejected. Nothing was installed."; }
             else if (error != null) { statusText.Foreground = AccentHi; statusText.Text = "Download failed: " + error; }
-            else { progFill.Width = progTrack.ActualWidth; statusText.Text = "Install complete - ready to play!"; }
+            else { statusText.Text = "Install complete - ready to play!"; }   // RefreshState clears the in-button fill
             RefreshState();   // the .part is kept on cancel/error so Resume can continue
             if (!cancelled && !verifyFailed && error == null) MaybeImportRustConfig();   // one-time: offer to import existing Rust keybinds
         }));
@@ -2099,7 +2108,7 @@ public class LauncherWindow : Window
                     Dispatcher.BeginInvoke((Action)(() =>
                     {
                         statusText.Text = "Extracting  " + d + " / " + t + " files...";
-                        if (t > 0) progFill.Width = progTrack.ActualWidth * ((double)d / t);
+                        if (t > 0) SetInstallProgress((double)d / t);
                     }));
                 }
             }
@@ -2144,7 +2153,7 @@ public class LauncherWindow : Window
         {
             statusText.Foreground = TextMute;
             statusText.Text = "Verifying download...";
-            progFill.Width = 0;
+            SetInstallProgress(0);
         }));
 
         using (var sha = System.Security.Cryptography.SHA256.Create())
@@ -2164,7 +2173,7 @@ public class LauncherWindow : Window
                     Dispatcher.BeginInvoke((Action)(() =>
                     {
                         statusText.Text = "Verifying  " + Human(d) + (t > 0 ? " / " + Human(t) : "");
-                        if (t > 0) progFill.Width = progTrack.ActualWidth * Math.Min(1.0, (double)d / t);
+                        if (t > 0) SetInstallProgress((double)d / t);
                     }));
                 }
             }
