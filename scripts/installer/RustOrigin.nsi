@@ -102,4 +102,5 @@ Section "Uninstall"
   Delete "$DESKTOP\${APPNAME}.lnk"
   DeleteRegKey HKLM "${ARPKEY}"
   DeleteRegKey HKLM "Software\Rustorigin\Launcher"
+  DeleteRegKey /ifempty HKLM "Software\Rustorigin"   ; drop the parent too if nothing else lives there
 SectionEnd
