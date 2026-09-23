@@ -53,22 +53,32 @@ jobs:
           $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
           wix extension add -g WixToolset.UI.wixext/5.0.2
 
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis -y --no-progress
+
       - name: Build launcher (RustoriginLauncher.exe)
         shell: pwsh
         run: .\scripts\make_release.ps1 -Version ${{ steps.ver.outputs.version }}
 
+      # Primary installer: a branded NSIS setup .exe (own icon, folder-choose page, run-on-finish).
+      - name: Build NSIS setup .exe
+        shell: pwsh
+        run: .\scripts\build_installer_exe.ps1 -Version ${{ steps.ver.outputs.version }}
+
+      # Fallback installer: the MSI. Kept for antivirus-cautious environments; also creates
+      # Start Menu + Desktop shortcuts (per-user, no admin).
       - name: Build MSI
         shell: pwsh
         run: .\scripts\build_msi.ps1 -Version ${{ steps.ver.outputs.version }}
 
-      # We ship the MSI (not an NSIS .exe) as the installer: unsigned NSIS self-extractors reliably
-      # trip the Trojan:Win32/Wacatac.B!ml machine-learning false positive, while the MSI scans clean
-      # and creates the same Start Menu + Desktop shortcuts (per-user, no admin). It gets a single,
-      # version-agnostic name so the website download link is permanent across releases (the MSI's
-      # own ProductVersion still carries the version, shown in Add/Remove Programs).
-      - name: Rename installer to the stable, permanent name
+      # Give both installers a single, version-agnostic name so the website download links are
+      # permanent across releases (each installer still carries the version in its own metadata).
+      - name: Rename installers to their stable, permanent names
         shell: pwsh
-        run: Move-Item "release\RustoriginLauncher-${{ steps.ver.outputs.version }}.msi" "release\RustoriginLauncher-Setup.msi" -Force
+        run: |
+          Move-Item "release\RustoriginLauncher-${{ steps.ver.outputs.version }}-x64.exe" "release\RustoriginLauncher-Setup.exe" -Force
+          Move-Item "release\RustoriginLauncher-${{ steps.ver.outputs.version }}.msi"     "release\RustoriginLauncher-Setup.msi" -Force
 
       - name: Generate SHA-256 checksums
         shell: pwsh
@@ -85,6 +95,7 @@ jobs:
         with:
           subject-path: |
             release/RustoriginLauncher.exe
+            release/RustoriginLauncher-Setup.exe
             release/*.msi
 
       - name: Upload workflow artifacts
@@ -93,6 +104,7 @@ jobs:
           name: rustorigin-launcher-${{ steps.ver.outputs.version }}
           path: |
             release/RustoriginLauncher.exe
+            release/RustoriginLauncher-Setup.exe
             release/*.msi
             release/SHA256SUMS.txt
 
@@ -104,5 +116,6 @@ jobs:
           generate_release_notes: true
           files: |
             release/RustoriginLauncher.exe
+            release/RustoriginLauncher-Setup.exe
             release/*.msi
             release/SHA256SUMS.txt
