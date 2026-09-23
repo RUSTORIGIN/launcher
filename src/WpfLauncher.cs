@@ -76,7 +76,7 @@ public class App
 }
 
 // Everything the launcher needs ships INSIDE the exe as manifest resources and is unpacked once
-// per version to %LOCALAPPDATA%\RUSTORIGIN\assets\<version>\ (loaded from real files for the
+// per version to %LOCALAPPDATA%\Rustorigin\assets\<version>\ (loaded from real files for the
 // background screenshots and private fonts). An optional launcher.cfg next to the exe overrides
 // the embedded defaults.
 static class Assets
@@ -96,7 +96,7 @@ static class Assets
         {
             var asm = typeof(Assets).Assembly;
             string ver = asm.GetName().Version.ToString();
-            Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RustOrigin", "assets", ver);
+            Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Rustorigin", "assets", ver);
             foreach (string fname in Files)
             {
                 string target = Path.Combine(Dir, fname.Replace('/', '\\'));
@@ -295,7 +295,7 @@ public class LauncherWindow : Window
         coverBmp = LoadBitmap(Path.Combine(Assets.Dir, "server-cover.png")) ?? LoadBitmap(Path.Combine(AppDir(), "server-cover.png"));
 
         // Download cache (survives launcher restarts so a partial download can resume).
-        cacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RustOrigin");
+        cacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Rustorigin");
         zipPath  = Path.Combine(cacheDir, "RustClient.zip");
         partPath = zipPath + ".part";
         metaPath = zipPath + ".part.meta";
@@ -2279,7 +2279,7 @@ public class LauncherWindow : Window
     static class Prefs
     {
         static Dictionary<string, string> map;
-        static string PrefsPath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RustOrigin", "prefs.cfg"); } }
+        static string PrefsPath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Rustorigin", "prefs.cfg"); } }
         static void Load()
         {
             map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
