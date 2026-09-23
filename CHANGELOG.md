@@ -3,6 +3,12 @@
 All notable changes to the RustOrigin launcher are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are Git tags (`vX.Y.Z`).
 
+## [1.0.2] - 2026-09-23
+
+### Changed
+- **Training Grounds** moved to the new dedicated server: the card now connects to
+  `51.195.60.227:28015` (was `185.190.143.67:28015`), and its live player count queries the new host.
+
 ## [1.0.1] - 2026-09-23
 
 ### Changed
