@@ -34,8 +34,9 @@ itself**, behind a clean, custom WPF interface built entirely in code (no XAML).
   (Steam A2S, refreshed ~60 s); click a card to connect.
 - **Self-update**: checks GitHub Releases on launch; when a newer, checksum-verified build exists
   it prompts to update, then downloads (with a progress bar), verifies, swaps itself in, and restarts.
-- **Native, frameless window**: rounded, draggable anywhere, resize / maximize / Aero Snap, tray
-  integration (close hides to tray), Discord Rich Presence, and a clean settings panel.
+- **Native, frameless window**: rounded, draggable anywhere, resize / maximize / Aero Snap, single
+  instance, system-tray integration (minimizes to tray while in game), Discord Rich Presence, and a
+  clean settings panel.
 
 ## Install
 
@@ -86,7 +87,7 @@ For server owners distributing the game:
 Push a version tag and CI does everything:
 
 ```bash
-git tag v1.0.0 && git push origin v1.0.0
+git tag v1.0.1 && git push origin v1.0.1
 ```
 
 The **Release** workflow builds the launcher, NSIS setup, and MSI; generates `SHA256SUMS.txt`;
@@ -100,21 +101,21 @@ Uses the .NET Framework `csc` that ships with Windows 10/11 (no SDK or NuGet).
 
 ```powershell
 .\scripts\build.bat                        # quick compile check
-.\scripts\make_release.ps1 -Version 1.0.0  # -> release\RustoriginLauncher.exe (single file)
+.\scripts\make_release.ps1 -Version 1.0.1  # -> release\RustoriginLauncher.exe (single file)
 ```
 
 Installers are optional and need WiX v5 + NSIS:
 
 ```powershell
-.\scripts\build_installer_exe.ps1 -Version 1.0.0   # NSIS setup .exe
-.\scripts\build_msi.ps1 -Version 1.0.0             # MSI
+.\scripts\build_installer_exe.ps1 -Version 1.0.1   # NSIS setup .exe
+.\scripts\build_msi.ps1 -Version 1.0.1             # MSI
 ```
 
 ## How it works
 
 - **One file, no dependencies.** `WpfLauncher.cs` is a single code-only WPF window (no XAML),
   compiled directly with `csc`. Media, fonts, and `launcher.cfg` are embedded and unpacked at first
-  run to `%LOCALAPPDATA%\RustOrigin\`.
+  run to `%LOCALAPPDATA%\Rustorigin\`.
 - **Safety first.** Downloads are size/ETag-resumable and SHA-256-verified before extraction;
   self-updates are verified against the release checksums before the exe is swapped.
 - **No servers of our own.** Live player counts come straight from Steam A2S; updates come straight

@@ -3,9 +3,17 @@
 All notable changes to the RustOrigin launcher are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are Git tags (`vX.Y.Z`).
 
-## [Unreleased]
+## [1.0.1] - 2026-09-23
 
-Initial launcher (not yet tagged/published). Highlights:
+### Changed
+- Client download is now served from **`cdn.rustorigin.com`** (a Cloudflare R2 custom domain)
+  instead of the throttled `pub-*.r2.dev` dev endpoint, so concurrent multi-GB downloads scale on
+  the CDN with free egress (still resumable via HTTP Range). The client file and its SHA-256 are
+  unchanged.
+
+## [1.0.0] - 2026-09-22
+
+Initial public release. Highlights:
 
 ### Added
 - Single-file WPF launcher (`RustoriginLauncher.exe`, ~3 MB) - downloads, verifies, extracts and launches
