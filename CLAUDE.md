@@ -160,7 +160,7 @@ dir, so no admin rights needed):
 | `RustClient.zip.part` + `.part.meta` | Resumable-download buffer and its identity (URL+ETag+size) for validating a resume. |
 | `RustClient.zip` | The verified download, briefly, between finalize and extract (deleted after). |
 | `launcher.log` | Timestamped diagnostics of every download/verify step - ask players for this when an install misbehaves. |
-| `installdir.txt` | The chosen install directory, remembered across runs. |
+| `installdir.txt` | The install folder the player picked on first INSTALL (`ChooseInstallDir`), remembered across runs; cleared by Uninstall client so a reinstall asks again. |
 | `prefs.cfg` | Per-user settings (see below). |
 
 Install also creates a **desktop shortcut** (`<name>.lnk` via `WScript.Shell` COM) and
@@ -302,7 +302,7 @@ Plain `Key=Value`, `#`/`;` comments. Loaded embedded-defaults-first, then overri
 |-----|---------|
 | `DownloadUrl` | Direct link to `RustClient.zip`. Required. |
 | `Sha256` | Expected hex SHA-256 of `RustClient.zip`. **Required** - a mismatched download is rejected, and a blank value blocks Install entirely. Aliases: `ClientSha256`, `ExpectedSha256`. |
-| `InstallDir` | Install path. Blank = `.\Rust` next to the launcher. Shipped as `C:\RustOrigin`. |
+| `InstallDir` | Default/suggested install path. Blank = `.\Rust` next to the launcher. Shipped as `C:\RustOrigin`. On a fresh INSTALL the player picks the folder (`ChooseInstallDir`, pre-selecting `<launcher drive>:\Rustorigin` when the launcher is on another drive); the game always goes in a `Rustorigin` subfolder of the pick, because Uninstall deletes the whole install folder. When that folder is on another drive than `%LOCALAPPDATA%`, the download buffer goes to `<InstallDir>\_download` (`SetDownloadPaths`; not on FAT32, and a partial already in `%LOCALAPPDATA%` still resumes there). |
 | `LaunchExe` | Exe the Play button runs (searched recursively inside `InstallDir`). Default `RustClient.exe`. |
 | `LaunchArgs` | Optional args for the main PLAY button, e.g. `-console +connect 127.0.0.1:28015`. |
 | `Version` | Optional label shown in the launcher. |

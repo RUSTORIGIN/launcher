@@ -3,6 +3,23 @@
 All notable changes to the RustOrigin launcher are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are Git tags (`vX.Y.Z`).
 
+## [1.0.4] - 2026-09-29
+
+### Added
+- **Choose the install folder.** The first INSTALL opens a folder picker (pre-selecting the
+  launcher's own drive, e.g. `F:\Rustorigin`) instead of always installing to `C:\Rustorigin`. The
+  game goes into a `Rustorigin` subfolder of the pick, and the choice is remembered until
+  "Uninstall client".
+
+### Changed
+- When the game is installed on another drive, the ~10 GB download buffer goes on that drive too
+  (`<install>\_download`), so C: no longer needs the free space.
+
+### Fixed
+- **"Failed to load il2cpp".** If `GameAssembly.dll` or `global-metadata.dat` goes missing after
+  install (usually antivirus quarantine), the launcher now shows REPAIR with an antivirus hint
+  instead of PLAY, and logs the missing file.
+
 ## [1.0.3] - 2026-09-23
 
 ### Removed

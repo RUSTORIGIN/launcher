@@ -23,8 +23,8 @@ using System.Windows.Media.Animation;
 [assembly: AssemblyDescription("Rustorigin Launcher - downloads, installs and launches the client")]
 [assembly: AssemblyCompany("Rustorigin")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 kaveOO")]
-[assembly: AssemblyVersion("1.0.3.0")]
-[assembly: AssemblyFileVersion("1.0.3.0")]
+[assembly: AssemblyVersion("1.0.4.0")]
+[assembly: AssemblyFileVersion("1.0.4.0")]
 
 // RUSTORIGIN launcher - WPF port of the Superdesign canvas composition:
 // rounded dark card, full-bleed cross-fading screenshot slideshow, floating glass UI
@@ -288,11 +288,8 @@ public class LauncherWindow : Window
 
         // Download cache (survives launcher restarts so a partial download can resume).
         cacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Rustorigin");
-        zipPath  = Path.Combine(cacheDir, "RustClient.zip");
-        partPath = zipPath + ".part";
-        metaPath = zipPath + ".part.meta";
-        chunksPath = zipPath + ".part.chunks";   // which 32 MB ranges of the .part are complete (parallel download)
-        try { string sfile = Path.Combine(cacheDir, "installdir.txt"); if (File.Exists(sfile)) { string sv = File.ReadAllText(sfile).Trim(); if (sv.Length > 0) InstallDir = sv; } } catch { }
+        try { string sfile = InstallDirFile(); if (File.Exists(sfile)) { string sv = File.ReadAllText(sfile).Trim(); if (sv.Length > 0) { InstallDir = sv; installDirChosen = true; } } } catch { }
+        SetDownloadPaths();
 
         // ---- window chrome (native Windows title bar + standard window features) ----
         Title = "Rustorigin Launcher";
@@ -806,7 +803,13 @@ public class LauncherWindow : Window
             {
                 busy = false;
                 if (e2 != null) { statusText.Foreground = Danger; statusText.Text = "Uninstall error: " + e2; }
-                else { statusText.Foreground = TextMute; statusText.Text = ""; }
+                else
+                {
+                    statusText.Foreground = TextMute; statusText.Text = "";
+                    // Forget the folder so a reinstall asks again (it pre-selects the last one).
+                    try { File.Delete(InstallDirFile()); } catch { }
+                    installDirChosen = false;
+                }
                 RefreshState();
             }));
         });
@@ -1567,6 +1570,84 @@ public class LauncherWindow : Window
         catch { }
     }
 
+    bool installDirChosen;   // the player picked (or we remembered) an install folder in installdir.txt
+
+    string InstallDirFile() { return Path.Combine(cacheDir, "installdir.txt"); }
+
+    // Where the ~10 GB download buffer lives. Normally %LOCALAPPDATA%\Rustorigin, but when the
+    // game goes to another drive (e.g. F:) the buffer goes there too, inside the install folder, so a
+    // player who picked F: because C: is full doesn't need 10 GB free on C:. A partial/zip already in
+    // the old location is kept there so an in-progress download still resumes. FAT32 can't hold a
+    // >4 GB file, so it keeps the default.
+    void SetDownloadPaths()
+    {
+        string dir = cacheDir;
+        try
+        {
+            string legacyZip = Path.Combine(cacheDir, "RustClient.zip");
+            bool legacyData = File.Exists(legacyZip) || File.Exists(legacyZip + ".part");
+            string installRoot = Path.GetPathRoot(Path.GetFullPath(InstallDir));
+            bool otherDrive = !string.Equals(installRoot, Path.GetPathRoot(cacheDir), StringComparison.OrdinalIgnoreCase);
+            if (!legacyData && otherDrive && !string.Equals(new DriveInfo(installRoot).DriveFormat, "FAT32", StringComparison.OrdinalIgnoreCase))
+                dir = Path.Combine(InstallDir, "_download");
+        }
+        catch { dir = cacheDir; }
+        zipPath  = Path.Combine(dir, "RustClient.zip");
+        partPath = zipPath + ".part";
+        metaPath = zipPath + ".part.meta";
+        chunksPath = zipPath + ".part.chunks";   // which 32 MB ranges of the .part are complete (parallel download)
+    }
+
+    // Drop the per-install "_download" folder once its zip is extracted (never the shared cacheDir).
+    void RemoveEmptyDownloadDir()
+    {
+        try
+        {
+            string d = Path.GetDirectoryName(zipPath);
+            if (!string.Equals(d, cacheDir, StringComparison.OrdinalIgnoreCase) && Directory.Exists(d) && !DirHasEntries(d))
+                Directory.Delete(d, false);
+        }
+        catch { }
+    }
+
+    // First INSTALL: let the player choose the folder instead of silently using InstallDir from
+    // launcher.cfg. Pre-selects the launcher's own drive when it isn't the config default's drive
+    // (launcher on F: -> F:\Rustorigin). The game always goes into a dedicated "Rustorigin" subfolder,
+    // because "Uninstall client" deletes the whole install folder - picking F:\Games must never make
+    // that wipe F:\Games. Returns false if the player cancelled.
+    bool ChooseInstallDir()
+    {
+        string suggested = InstallDir;
+        try
+        {
+            string appRoot = Path.GetPathRoot(AppDir());
+            if (!string.Equals(appRoot, Path.GetPathRoot(Path.GetFullPath(InstallDir)), StringComparison.OrdinalIgnoreCase)
+                && new DriveInfo(appRoot).DriveType == DriveType.Fixed)
+                suggested = Path.Combine(appRoot, "Rustorigin");
+        }
+        catch { }
+
+        using (var dlg = new System.Windows.Forms.FolderBrowserDialog())
+        {
+            dlg.Description = "Choose where to install Rustorigin (needs about 25 GB free).\nA \"Rustorigin\" folder is created inside the folder you pick.";
+            dlg.ShowNewFolderButton = true;
+            string start = suggested;
+            while (start != null && !Directory.Exists(start)) start = Path.GetDirectoryName(start);
+            if (start != null) dlg.SelectedPath = start;
+            if (dlg.ShowDialog() != System.Windows.Forms.DialogResult.OK || string.IsNullOrEmpty(dlg.SelectedPath)) return false;
+
+            string chosen = dlg.SelectedPath.TrimEnd('\\');
+            if (!string.Equals(Path.GetFileName(chosen), "Rustorigin", StringComparison.OrdinalIgnoreCase))
+                chosen = Path.Combine(chosen.Length == 2 ? chosen + "\\" : chosen, "Rustorigin");
+            InstallDir = chosen;
+        }
+        installDirChosen = true;
+        try { Directory.CreateDirectory(cacheDir); File.WriteAllText(InstallDirFile(), InstallDir); } catch { }
+        SetDownloadPaths();
+        Log("install folder chosen: " + InstallDir);
+        return true;
+    }
+
     string FindGameExe()
     {
         try
@@ -1594,9 +1675,24 @@ public class LauncherWindow : Window
     // missing/empty, or UnityPlayer.dll gone) does NOT count as installed, so the launcher offers a
     // repair instead of launching a broken game. A valid pre-existing install (no marker) still
     // passes on the structural check. This is a cheap sanity check, not cryptographic verification.
+    // The il2cpp runtime files are checked even when the marker exists: antivirus commonly
+    // quarantines GameAssembly.dll *after* a good extract, which makes Unity fail with
+    // "Failed to load il2cpp". Treating that as a broken install surfaces REPAIR instead of PLAY.
     bool InstallComplete(string exe)
     {
         if (exe == null) return false;
+        try
+        {
+            string dir  = Path.GetDirectoryName(exe);
+            string data = Path.Combine(dir, Path.GetFileNameWithoutExtension(exe) + "_Data");
+            string missing = MissingIl2cppFile(dir, data);
+            if (missing != null)
+            {
+                if (missing != lastMissingLogged) { Log("install check: missing " + missing + " (antivirus quarantine?)"); lastMissingLogged = missing; }
+                return false;
+            }
+        }
+        catch { return false; }
         try { if (File.Exists(InstallMarkerPath())) return true; } catch { }
         try
         {
@@ -1607,6 +1703,26 @@ public class LauncherWindow : Window
             return dataOk && unityOk;
         }
         catch { return false; }
+    }
+
+    string lastMissingLogged;
+
+    string BrokenInstallMessage()
+    {
+        if (lastMissingLogged == "GameAssembly.dll")
+            return "GameAssembly.dll is missing - your antivirus likely quarantined it. Restore/allow it, or add an exclusion for " + InstallDir + ", then click Repair.";
+        return "Install looks incomplete or corrupted - click Repair to reinstall.";
+    }
+
+    // Returns the first missing il2cpp runtime file, or null. Only enforced for il2cpp builds
+    // (detected by the il2cpp_data folder), so a Mono client is unaffected.
+    static string MissingIl2cppFile(string dir, string data)
+    {
+        string il2cppData = Path.Combine(data, "il2cpp_data");
+        if (!Directory.Exists(il2cppData)) return null;
+        if (!File.Exists(Path.Combine(dir, "GameAssembly.dll"))) return "GameAssembly.dll";
+        if (!File.Exists(Path.Combine(il2cppData, "Metadata", "global-metadata.dat"))) return "global-metadata.dat";
+        return null;
     }
 
     static bool DirHasEntries(string dir)
@@ -1721,7 +1837,7 @@ public class LauncherWindow : Window
 
         if (!busy)
         {
-            if (broken) { statusText.Foreground = Danger; statusText.Text = "Install looks incomplete or corrupted - click Repair to reinstall."; }
+            if (broken) { statusText.Foreground = Danger; statusText.Text = BrokenInstallMessage(); }
             else { statusText.Foreground = TextMute; statusText.Text = ""; }
         }
     }
@@ -1745,7 +1861,14 @@ public class LauncherWindow : Window
         // Verification is mandatory: refuse to download/install anything we can't check.
         if (NormalizedExpectedHash().Length == 0)
         { statusText.Foreground = Danger; statusText.Text = "Set Sha256 in launcher.cfg first - downloads must be verified before install."; return; }
-        try { Directory.CreateDirectory(InstallDir); Directory.CreateDirectory(cacheDir); }
+        // Fresh install only - a resume/repair keeps the folder it already uses.
+        bool cachedZip = false; try { cachedZip = File.Exists(zipPath); } catch { }
+        if (!installDirChosen && !HasPartial() && !cachedZip && FindGameExe() == null)
+        {
+            if (!ChooseInstallDir()) return;
+            if (IsInstalled()) { RefreshState(); return; }   // picked a folder that already holds the game
+        }
+        try { Directory.CreateDirectory(InstallDir); Directory.CreateDirectory(cacheDir); Directory.CreateDirectory(Path.GetDirectoryName(zipPath)); }
         catch (Exception ex) { statusText.Foreground = Danger; statusText.Text = "Folder error: " + ex.Message; return; }
 
         busy = true; cancelRequested = false;
@@ -1823,6 +1946,7 @@ public class LauncherWindow : Window
                     Log("extract done (from cached zip)");
                     try { File.WriteAllText(InstallMarkerPath(), DateTime.Now.ToString("o")); } catch { }
                     try { File.Delete(zipPath); } catch { }
+                    RemoveEmptyDownloadDir();
                     InstallLauncherAndShortcut();
                     usedCache = true;
                 }
@@ -1976,6 +2100,7 @@ public class LauncherWindow : Window
                     Log("extract done");
                     try { File.WriteAllText(InstallMarkerPath(), DateTime.Now.ToString("o")); } catch { }        // mark the install complete only after a full extract
                     try { File.Delete(zipPath); } catch { }
+                    RemoveEmptyDownloadDir();
                     InstallLauncherAndShortcut();
                 }
             }
@@ -2431,7 +2556,7 @@ public class LauncherWindow : Window
         // Don't launch a structurally-incomplete install (a server-card click also lands here).
         if (!GameRunning() && !InstallComplete(exe))
         {
-            statusText.Foreground = Danger; statusText.Text = "Install looks incomplete or corrupted - click Repair to reinstall.";
+            statusText.Foreground = Danger; statusText.Text = BrokenInstallMessage();
             RefreshState(); return;
         }
         // single instance: never launch a second copy of OUR client - focus the running one instead
