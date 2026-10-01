@@ -37,3 +37,7 @@ jobs:
       - name: Test A2S server-status parsing
         shell: pwsh
         run: .\scripts\test_a2s_parsing.ps1
+
+      - name: Test client delta update (build a pack, apply it, verify)
+        shell: pwsh
+        run: .\scripts\test_client_patch.ps1

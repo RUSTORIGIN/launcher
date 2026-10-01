@@ -3,6 +3,47 @@
 All notable changes to the RustOrigin launcher are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are Git tags (`vX.Y.Z`).
 
+## [1.1.0] - 2026-10-01
+
+### Added
+- **Client updates without re-downloading the game.** When the server moves to a newer client build
+  (`ClientVersion=` in `launcher.cfg`), an installed client shows **UPDATE** instead of PLAY and is
+  upgraded in place from a **delta pack**: only the data the player doesn't already have is
+  downloaded (about 1.5 GB instead of 11 GB for Jan -> Apr 2021). The pack is SHA-256-verified like
+  the full client (`PatchSha256=`), every rebuilt file is verified again before it replaces the old
+  one, and the installed client is left untouched if anything doesn't match - the launcher then
+  falls back to the full download by itself. Pausing, resuming and an interrupted update are handled.
+- `scripts\make_client_patch.ps1` builds the pack from the previous and the new client folders.
+- `ClientVersion`, `PatchUrl`, `PatchSha256` and `PatchProbe` keys in `launcher.cfg`.
+
+### Fixed
+- **Error messages are visible again.** "Download failed", the integrity-check failure and the
+  uninstall error were wiped the instant they appeared; they now stay under the button until your
+  next action. Short notices ("Launching...", "Client not installed - click Install first.") stay
+  for a few seconds.
+- **A leftover download of another build is never installed.** A client zip or update pack kept on
+  disk by an interrupted install is reused only if it is the file the launcher currently expects;
+  otherwise it is deleted and downloaded again.
+- Pausing while the game is being extracted no longer discards the verified download.
+- A download the server does not have (HTTP 404) now fails immediately with a clear message instead
+  of retrying for several minutes.
+
+### Changed
+- **Double-clicking the launcher no longer maximizes it.** (Dragging it to the top of the screen
+  still does.)
+- **Reworked settings panel.** Everything is now one list of rows in two groups. **Game** shows
+  which build you have and whether it is up to date, where the game is installed and how much
+  space it uses (with an Open button), the minimize-while-playing switch, and Uninstall.
+  **Launcher** has Discord Rich Presence and the data folder. The loose buttons and the "Done"
+  button are gone - close with the X, a click outside, or Esc.
+- **Server cards show their cover image sharp** (the slight blur is gone), and Training Grounds has
+  a new cover.
+- The launcher now names the April 2021 build ("APRIL UPDATE 2021", tagline, Discord presence).
+- The install marker now records which client build is installed.
+- `package_client.ps1` and the pack builder share one exclusion list (`scripts\client_filter.ps1`).
+  It now also leaves out `EasyAntiCheat\`, the root `Rust.exe` and the launcher's own files, so a
+  Steam depot folder or an installed client folder can be packaged as-is.
+
 ## [1.0.4] - 2026-09-29
 
 ### Added

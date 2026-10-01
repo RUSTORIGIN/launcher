@@ -32,9 +32,9 @@ Line references point at the current source.
    hover (`#F0F1F4`), glass secondaries with a faint fill swap. `DropShadowEffect` is used
    sparingly (cards, the toggle knob, hero logo/text). White is the primary-action color; the
    launcher's own accent is rust-red, and the settings panel uses the site's violet brand.
-6. **Build with factory methods.** Controls come from named factories (`PrimaryPill`,
-   `UtilityBtn`, `CaptionBtn`, `MakeToggle`, `ServerTile`, `Icon`, `GroupLabel`, `GroupCard`,
-   `SettingRow`). Reuse them; don't hand-roll a one-off `Border` that duplicates one.
+6. **Build with factory methods.** Controls come from named factories (`UtilityBtn`,
+   `DangerBtn`, `CaptionBtn`, `MakeToggle`, `ServerTile`, `Icon`, `GroupLabel`, `GroupCard`,
+   `InfoRow`, `SettingRow`, `StatusChip`). Reuse them; don't hand-roll a one-off `Border` that duplicates one.
 
 ---
 
@@ -86,7 +86,7 @@ The window background is `#0B0D12` (used in `Background`, `mainGrid`; lines 252,
   `#E0B341` = checking, green `#3FB950` = online, red `#F85149` = offline. Reuse these exact
   values for any new status indicator.
 - **One accent.** `Accent`/`AccentHi` is for the toggle-on state, the accent eyebrow, the
-  active carousel dot, the caret, the "Done" pill, and the close-button hover. The main
+  active carousel dot, the caret, and the close-button hover. The main
   PLAY/INSTALL CTAs are **white** (`TextHi`) with near-black glyphs (`#12141A`), not accent.
 
 ---
@@ -101,7 +101,7 @@ The window background is `#0B0D12` (used in `Background`, `mainGrid`; lines 252,
 - **`Site`** (`MakeSite()`): bundled **Poppins** (the rustorigin.com typeface), loaded from
   `assets/fonts/Poppins-*.ttf`, falling back to installed Poppins then Segoe UI. Used by the
   website-styled **settings panel** and by the **site-styled buttons** (the white PLAY/INSTALL
-  and "Done" pills, and the "DISCOVER MORE" glass pill), so those read like the site's buttons;
+  pills and the "DISCOVER MORE" glass pill), so those read like the site's buttons;
   the rest of the launcher uses `Brand`.
 - **`Icons`** = `Segoe MDL2 Assets` for glyph icons, via the `Icon(glyph, size, brush)`
   helper (lines 889–896). Caption/social/play glyphs are MDL2 code points.
@@ -173,9 +173,9 @@ Standardize on the existing factories. These are the canonical shapes.
   button ("PLAY NOW"): **white** pill (`Background = TextHi`), near-black glyph+label (`Ink`),
   **Poppins** (`Site`), uppercase + `Track(_,1)`, height 46, radius 23, with a **subtle hover**
   to `#F0F1F4`. `LinkButton` doubles as INSTALL/PAUSE.
-- **`PrimaryPill`** — the settings "Done", same **white** site-primary pill as above (radius 20).
-- **`UtilityBtn`** — **settings-only** compact rounded-md button (the site's copy-button style),
-  covered in *Settings panel* below.
+- **`UtilityBtn`** / **`DangerBtn`** — **settings-only** compact rounded-md buttons (the site's
+  copy-button style; the danger one is red), used as a row's right-hand control - covered in
+  *Settings panel* below.
 - **"DISCOVER MORE"** (`BuildServerGrid`) — the site's **secondary glass** pill: `white/6` fill,
   no border, `Ink100` label, `Site` font, full radius, hover `white/12`.
 - **`CaptionBtn(glyph, onClick, closeBtn)`** — circular 34px glass button (MDL2
@@ -201,19 +201,27 @@ uses the *website design tokens* block in the palette (mirrored from the site's
 - **Sheet:** a borderless flat `Ink900` card (radius 14) over a solid dark scrim
   (`#CC0B0B0C`, no frost/blur); content sits in a `ScrollViewer` so it never clips on short
   windows.
-- **Header (`SectionHeading` pattern):** violet `Brand400` eyebrow → big uppercase `Ink100`
-  title → a short left-aligned **gradient accent rule** (`AccentRule()`, `Brand500` →
-  transparent) → an `Ink200` blurb. A flat ghost close sits top-right (hovers `Danger`).
+- **Header:** violet `Brand400` eyebrow → uppercase `Ink100` title, kept compact (no rule, no
+  blurb). A flat ghost close sits top-right (hovers `Danger`). The panel closes on that X, the
+  backdrop or Esc - there is no "Done" button.
 - **Grouped rows:** each group is a `GroupLabel` eyebrow above a `GroupCard` — a raised
   `Ink850` rounded-md card whose rows are split by `white/5` hairlines (rounded-corner
-  clipped). Each `SettingRow` has a faint `white/[0.03]` hover and a live-green `MakeToggle`.
-- **Actions & footer:** compact rounded-md `UtilityBtn`s (faint fill; glyph+label lift to
-  `Brand300` on hover, like the site's copy button), then a `white/5` divider, version text
-  (`Ink400`), and the white `PrimaryPill("Done")` (the site's primary button).
+  clipped). Two groups: **GAME** (game version + status, install location + size, minimize in
+  game, uninstall) and **LAUNCHER** (Discord Rich Presence, data folder).
+- **One row shape — `InfoRow(title, desc, right)`:** label + a one-line `RowDesc` on the left,
+  exactly **one control on the right**, faint `white/[0.03]` hover. The control is a live-green
+  `MakeToggle` (`SettingRow` is the shorthand), a `StatusChip` (coloured dot + tracked caption:
+  `Live` up to date / `StatChecking` update required or in progress / `Ink400` not installed), or
+  a compact `UtilityBtn` / `DangerBtn` (faint fill; the utility one lifts to `Brand300` on hover,
+  like the site's copy button). Don't add loose buttons under the cards - make a row.
+- **Live rows:** the Game rows describe current state, so `RefreshSettingsInfo()` refills them
+  each time the panel opens (the folder size is measured on a background thread). Keep row
+  descriptions short enough for one line at the 500px sheet width.
+- **Footer:** one `Ink400` line - launcher version + the update policy.
 
-The helpers `GroupLabel`, `GroupCard`, `SettingRow`, `MakeToggle`, `UtilityBtn`, `AccentRule`
-are **settings-only**, so this website styling does not leak into the rest of the (glass)
-launcher. `PrimaryPill` is shared with the hero CTAs (both are the site's white primary button).
+The helpers `GroupLabel`, `GroupCard`, `InfoRow`, `RowDesc`, `SettingRow`, `StatusChip`,
+`MakeToggle`, `UtilityBtn`, `DangerBtn` are **settings-only**, so this website styling does not
+leak into the rest of the (glass) launcher.
 
 > Font: the panel renders in **Poppins** — the site's typeface — via the bundled `Site`
 > family (`MakeSite()`, loaded from `assets/fonts/Poppins-*.ttf`, embedded by
@@ -263,7 +271,7 @@ animations, Aero Snap, taskbar and the system menu.
   > Conversely, decorative overlays set `IsHitTestVisible = false` so they never swallow clicks.
 
 - **Maximize** is kept inside the monitor work area via `WM_GETMINMAXINFO` (`WndProc`, 670),
-  so a maximized window doesn't cover the taskbar. Double-click an empty area toggles it.
+  so a maximized window doesn't cover the taskbar. A double-click on an empty area does nothing (it no longer maximizes); Aero Snap still does.
 
 ---
 

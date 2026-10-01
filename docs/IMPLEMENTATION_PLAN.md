@@ -58,7 +58,7 @@ plus the `Avatar`/`Offline` helpers) have been **removed** (section 4 T-cleanup,
 | Hero action 1: **PLAY** white pill | `PlayButton()` | ✅ rendered (-> `IN-GAME` while the client runs) |
 | Hero action 2: **INSTALL / RESUME** + progress/status | `LinkButton()` -> `StartInstall()`, `progTrack`/`statusText` | ✅ rendered (see section 4 T1) |
 | Right column: 6 server cards + DISCOVER MORE | `BuildServerGrid()` / `ServerTile()` | ✅ rendered; each card launches with its args |
-| **Settings panel** | caption gear -> `BuildSettingsOverlay()` / `ToggleSettings()` | ✅ glass overlay: 4 Pref toggles + launch args + "Open data folder" + "Uninstall client" (prefs still editable in `prefs.cfg`) |
+| **Settings panel** | caption gear -> `BuildSettingsOverlay()` / `ToggleSettings()` | ✅ site-styled modal, one row per item: GAME (version + status chip, install location + size, minimize in game, uninstall) and LAUNCHER (Discord Rich Presence, data folder); prefs still editable in `prefs.cfg` |
 | Hero "Most Played" tag | - | ❌ not rendered (removed) |
 | Top-left brand mark | (was `BuildBrandMark()`) | ❌ removed |
 | Left rail (icon buttons) | - | ❌ never implemented (no builder) |
@@ -86,7 +86,7 @@ superseded: the reductions are the intended shipping state.
   per-file progress.
 - **Launch**: `Play` starts `LaunchExe` (default `RustClient.exe`) with per-server or default
   args; single-instance (focuses a running client instead of launching twice).
-- **Window/UX**: rounded frameless window via `WindowChrome` with native drag/resize/maximize/Aero-snap and custom settings/minimize/close caption buttons (no maximize button; maximize via double-click/Aero Snap), system-tray icon (`SetupTray`), optional
+- **Window/UX**: rounded frameless window via `WindowChrome` with native drag/resize/maximize/Aero-snap and custom settings/minimize/close caption buttons (no maximize button; maximize via Aero Snap only - a double-click does nothing), system-tray icon (`SetupTray`), optional
   minimize-on-play (`MinimizeInGame` pref, default **off**), restore-on-exit (`WatchGame` /
   `RestoreFromGame`), install-time launcher self-copy + shortcut (`InstallLauncherAndShortcut`).
 - **Config**: `launcher.cfg` (embedded defaults, overridden by a copy next to the exe) drives

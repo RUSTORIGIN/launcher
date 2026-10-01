@@ -48,7 +48,7 @@ $res = @("/resource:assets\1.jpg,assets/1.jpg",
 Get-Process RustoriginLauncher -ErrorAction SilentlyContinue | Stop-Process -Force
 & "$fw\csc.exe" /nologo /nowarn:0108 /target:winexe /optimize+ `
     /win32icon:assets\release_icon.ico /win32manifest:src\app.manifest `
-    /out:RustoriginLauncher.exe $refs $res src\WpfLauncher.cs src\UpdateParsing.cs src\A2S.cs src\DiscordRpc.cs
+    /out:RustoriginLauncher.exe $refs $res src\WpfLauncher.cs src\UpdateParsing.cs src\A2S.cs src\DiscordRpc.cs src\ClientPatch.cs
 if ($LASTEXITCODE -ne 0) { throw "BUILD FAILED" }
 
 New-Item -ItemType Directory -Force "$repo\release" | Out-Null

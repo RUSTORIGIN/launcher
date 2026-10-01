@@ -30,6 +30,10 @@ itself**, behind a clean, custom WPF interface built entirely in code (no XAML).
   transfers via HTTP Range, and **rejects any download whose SHA-256 doesn't match** before extract.
 - **One-click install & play**: downloads over parallel connections, extracts, and launches, with
   live progress inside the install button.
+- **Small client updates**: when the server moves to a newer game build, installed players update
+  in place from a **delta pack** (only the data they don't already have - about 1.5 GB instead of
+  11 GB for Jan → Apr 2021), with every rebuilt file SHA-256-verified before it is swapped in and an
+  automatic fall-back to the full download.
 - **Live server cards**: cover-image tiles with a status dot, name, and a live player-count bar
   (Steam A2S, refreshed ~60 s); click a card to connect.
 - **Self-update**: checks GitHub Releases on launch; when a newer, checksum-verified build exists
@@ -61,6 +65,9 @@ server). Key settings:
 |-----|---------|
 | `DownloadUrl` | Direct link to `RustClient.zip`. **Required.** |
 | `Sha256` | Expected SHA-256 of `RustClient.zip`. **Required**: installs are blocked without it. |
+| `ClientVersion` | Id of the client build `DownloadUrl` serves (e.g. `2021-04`). Installs recording another version (or none) show **UPDATE** instead of PLAY. Blank disables update detection. |
+| `PatchUrl` / `PatchSha256` | Direct link + SHA-256 of the delta pack that upgrades the previous build in place. Optional; without it outdated installs download the full client. |
+| `PatchProbe` | `relative\path\|size` of a file in the build the pack upgrades from; the pack is only tried when it matches. |
 | `InstallDir` | Suggested install folder (default `C:\Rustorigin`; blank = `.\Rust`). On first INSTALL the player picks the folder (pre-selecting the launcher's drive); the game goes into a `Rustorigin` subfolder of the pick. |
 | `LaunchExe` | Client executable the Play button runs (default `RustClient.exe`). |
 | `Title` / `Tagline` / `Player` | Hero title, description line, and the displayed player name. |
@@ -81,6 +88,17 @@ For server owners distributing the game:
    ```
 2. **Upload** it somewhere serving a **direct** download link (Cloudflare R2, S3, your web server…).
 3. **Set** `DownloadUrl` and `Sha256` in `config/launcher.cfg`, then cut a release (below).
+
+**Moving to a newer client build?** Also build a delta pack so existing players don't re-download
+everything, and upload it next to the zip:
+
+```powershell
+.\scripts\make_client_patch.ps1 -OldDir <previous client> -NewDir <new client> -From 2021-01 -To 2021-04
+```
+
+It prints the pack's SHA-256 and the `ClientVersion` / `PatchUrl` / `PatchSha256` / `PatchProbe`
+lines for `config/launcher.cfg`. The full zip must be the **new** build too: it serves new players
+and anyone the pack doesn't fit. See [CLAUDE.md](CLAUDE.md) ("Client updates (delta pack)").
 
 ## Releasing & self-update
 
