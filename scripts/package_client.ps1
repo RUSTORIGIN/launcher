@@ -1,11 +1,9 @@
 # Packages the Rust client folder into a single RustClient.zip for hosting.
 # - Streams via .NET ZipArchive (Zip64) so it handles the full ~16 GB.
 # - Client files sit at the zip ROOT (RustClient.exe at top level).
-# - Automatically EXCLUDES things that must never ship, even if the game
-#   recreated them after a test launch:
-#     temp\            (video cache)          maps\   (map cache, fetched from the server)
-#     cfg\*            except keys_default.cfg (personal keybinds/settings)
-#     *.bak *.log *.dmp *.tmp *.old *.orig *.py *.vdf *.bat *.before*  Thumbs.db desktop.ini
+# - Automatically EXCLUDES things that must never ship (temp\, maps\, personal cfg, EasyAntiCheat\,
+#   the launcher's own files, *.bak/*.log/... ) - the list lives in scripts\client_filter.ps1, shared
+#   with make_client_patch.ps1 so the full zip and the delta pack always ship the same file set.
 #
 # Usage (PowerShell), from the repo root:
 #   .\scripts\package_client.ps1
@@ -32,16 +30,7 @@ if ($OutFile.StartsWith($SourceDir, [StringComparison]::OrdinalIgnoreCase)) {
 }
 if (-not (Test-Path -LiteralPath 'C:\' )) { }  # no-op guard
 
-function Test-Excluded([string]$rel) {
-    $r = $rel.ToLowerInvariant()
-    if ($r.StartsWith('temp/') -or $r.StartsWith('maps/')) { return $true }
-    if ($r.StartsWith('cfg/') -and $r -ne 'cfg/keys_default.cfg') { return $true }
-    $name = [System.IO.Path]::GetFileName($r)
-    if ($name -match '\.(bak|log|dmp|tmp|old|orig|py|vdf|bat)$') { return $true }
-    if ($name -like '*.before*') { return $true }
-    if ($name -in 'thumbs.db','desktop.ini','.ds_store') { return $true }
-    return $false
-}
+. (Join-Path $PSScriptRoot 'client_filter.ps1')   # Test-ClientExcluded
 
 # ---- enumerate + filter ----
 $all  = Get-ChildItem -LiteralPath $SourceDir -Recurse -File -Force
@@ -49,7 +38,7 @@ $keep = New-Object System.Collections.Generic.List[object]
 $skip = New-Object System.Collections.Generic.List[string]
 foreach ($f in $all) {
     $rel = $f.FullName.Substring($SourceDir.Length + 1).Replace('\', '/')
-    if (Test-Excluded $rel) { $skip.Add($rel) } else { $keep.Add([pscustomobject]@{ File = $f; Rel = $rel }) }
+    if (Test-ClientExcluded $rel) { $skip.Add($rel) } else { $keep.Add([pscustomobject]@{ File = $f; Rel = $rel }) }
 }
 $total = ($keep | ForEach-Object { $_.File.Length } | Measure-Object -Sum).Sum
 if (-not $total) { Write-Error "Nothing to package."; exit 1 }

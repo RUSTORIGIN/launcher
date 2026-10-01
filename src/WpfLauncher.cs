@@ -148,6 +148,10 @@ public class LauncherWindow : Window
     string LaunchExe   = "RustClient.exe";
     string LaunchArgs  = "";
     int    DownloadConnections = 6;   // parallel HTTP Range connections for the client download (1 = single stream)
+    string ClientVersion = "";   // id of the client build DownloadUrl serves (e.g. "2021-04"), recorded in the install marker. An install recording another (or no) version is outdated -> UPDATE. Empty disables the check.
+    string PatchUrl    = "";     // direct link to the delta pack (scripts\make_client_patch.ps1) that upgrades the previous build in place. Empty = outdated installs get the full client.
+    string PatchSha256 = "";     // hex SHA-256 of the delta pack. Required for the pack to be used.
+    string PatchProbe  = "";     // "relative\path|size" of a file in the build the pack upgrades FROM; the pack is only tried when it matches.
     string Version     = "";
     string UpdateRepo  = "RUSTORIGIN/launcher";   // owner/repo checked for launcher self-updates (GitHub Releases). Empty disables.
     string DiscordAppId = "";        // Discord application id for Rich Presence. Empty disables.
@@ -157,7 +161,7 @@ public class LauncherWindow : Window
     DiscordRpc discord;
     long sessionStartUnix;
     string GameTitle   = "RUSTORIGIN";
-    string Tagline     = "RUSTORIGIN is a private Rust world on the January 2021 build. Craft, raid and survive with a tight community - one click to jump in.";
+    string Tagline     = "RUSTORIGIN is a private Rust world on the April 2021 build. Craft, raid and survive with a tight community - one click to jump in.";
     string PlayerName  = "White Pegasus";
     List<ServerEntry> Servers = new List<ServerEntry>();
     readonly List<Action> serverStatusRefreshers = new List<Action>();   // one live-status re-query per card
@@ -170,6 +174,10 @@ public class LauncherWindow : Window
     HttpWebRequest activeReq;
     Thread    dlThread;
     string    cacheDir, zipPath, partPath, metaPath, chunksPath;
+    string    downloadDir;                       // folder holding the download buffer (see SetDownloadPaths)
+    string    dlUrl, dlSha;                      // what the worker is fetching right now: the full client or the delta pack
+    const string ZipName = "RustClient.zip", PatchName = "RustClient.patchpack";
+    const string VerifiedExt = ".verified";      // sidecar holding the SHA-256 a kept download was verified against
     const string UA = "RUSTORIGIN-Launcher/1.0";
 
     // ---- ui refs ----
@@ -289,7 +297,13 @@ public class LauncherWindow : Window
         // Download cache (survives launcher restarts so a partial download can resume).
         cacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Rustorigin");
         try { string sfile = InstallDirFile(); if (File.Exists(sfile)) { string sv = File.ReadAllText(sfile).Trim(); if (sv.Length > 0) { InstallDir = sv; installDirChosen = true; } } } catch { }
+        // A client update whose file swap was cut short (crash, power loss) is finished before anything
+        // else looks at the install: its files are already rebuilt and verified, only the moves remain.
+        bool finishedUpdate = false;
+        try { if (ClientPatch.HasPendingCommit(InstallDir) && !GameRunning()) { CommitPendingUpdate(); finishedUpdate = true; } }
+        catch (Exception ex) { Log("pending update not applied yet: " + ex.Message); }
         SetDownloadPaths();
+        if (finishedUpdate) { DeletePatchBuffer(); RemoveEmptyDownloadDir(); }
 
         // ---- window chrome (native Windows title bar + standard window features) ----
         Title = "Rustorigin Launcher";
@@ -359,7 +373,7 @@ public class LauncherWindow : Window
         {
             if (e.ButtonState != MouseButtonState.Pressed) return;
             if (IsInteractive(e.OriginalSource as DependencyObject)) return;
-            if (e.ClickCount == 2) { ToggleMaximize(); return; }   // double-click empty area = maximize/restore
+            if (e.ClickCount > 1) return;   // a double-click does nothing - in particular it does not maximize the window
             try
             {
                 IntPtr hwnd = new WindowInteropHelper(this).Handle;
@@ -397,8 +411,8 @@ public class LauncherWindow : Window
     void SetDiscord(string state)
     {
         // The Discord app name is already the top line, so use details for the build and state for
-        // the activity: "RUSTORIGIN" / "January Update 2021" / "In the launcher".
-        try { if (discord != null) discord.SetPresence("January Update 2021", state, sessionStartUnix, DiscordLargeImage, GameTitle + " - January Update 2021", DiscordButtonLabel, DiscordButtonUrl); }
+        // the activity: "RUSTORIGIN" / "April Update 2021" / "In the launcher".
+        try { if (discord != null) discord.SetPresence("April Update 2021", state, sessionStartUnix, DiscordLargeImage, GameTitle + " - April Update 2021", DiscordButtonLabel, DiscordButtonUrl); }
         catch { }
     }
 
@@ -483,15 +497,21 @@ public class LauncherWindow : Window
         return b;
     }
 
-    void ToggleMaximize() { WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized; }
-
     // ---------- settings panel (gear button) ----------
-    // A frosted-glass modal over the (blurred) launcher, toggled by the caption gear. Exposes the
-    // per-user Prefs, the PLAY launch args, and a couple of utility actions - so nothing needs editing
-    // in prefs.cfg. Toggles persist immediately; launch args apply when the panel closes. Styled to the
-    // rustorigin.com theme, laid out like a site page: a dark ink-950 scrim, an ink-900 sheet, a
-    // SectionHeading-style header (violet eyebrow + gradient rule + blurb), and settings grouped into
-    // raised ink-850 cards whose rows are split by hairlines. Violet brand accent, live-green switches. No glass.
+    // A modal sheet over the dimmed launcher, toggled by the caption gear (closes on the X, the
+    // backdrop or Esc). Styled to the rustorigin.com theme: a dark ink-950 scrim, an ink-900 sheet,
+    // raised ink-850 cards whose rows are split by hairlines, violet brand accent, live-green
+    // switches. No glass. Two groups:
+    //   GAME      which build is installed and whether it is current, where it lives and how big it
+    //             is, minimize-while-playing, uninstall
+    //   LAUNCHER  Discord Rich Presence, the data/log folder
+    // Every row is "label + description on the left, ONE control on the right" (switch, status chip
+    // or compact button), so the panel reads as a single list. Toggles persist immediately. The Game
+    // rows describe live state, so RefreshSettingsInfo() refills them each time the panel opens.
+    TextBlock setGameDesc, setGameChipText, setPathDesc, setSizeText;
+    System.Windows.Shapes.Ellipse setGameDot;
+    Border setOpenGame;   // the Install-location row's Open button (hidden while there is no folder)
+
     void BuildSettingsOverlay()
     {
         // Solid dark scrim (ink-950 @ ~80%) - a flat modal dim, not a frosted-glass wash.
@@ -501,7 +521,7 @@ public class LauncherWindow : Window
 
         var card = new Border
         {
-            Width = 480, MaxHeight = 760,
+            Width = 500, MaxHeight = 760,
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
             Background = Ink900, CornerRadius = new CornerRadius(17), Cursor = Cursors.Arrow, Padding = new Thickness(26, 22, 26, 22),
             Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 44, ShadowDepth = 0, Opacity = 0.55, Color = Colors.Black }
@@ -512,15 +532,13 @@ public class LauncherWindow : Window
         var col = new StackPanel();
         card.Child = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = col };
 
-        // ---- header: eyebrow + title + accent rule + blurb (SectionHeading), flat close on the right ----
+        // ---- header: eyebrow + title, flat close on the right ----
         var head = new Grid();
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var htxt = new StackPanel { VerticalAlignment = VerticalAlignment.Top };
-        htxt.Children.Add(new TextBlock { Text = Track("RUSTORIGIN", 3), Foreground = Brand400, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 11 });
-        htxt.Children.Add(new TextBlock { Text = "SETTINGS", Foreground = Ink100, FontFamily = Site, FontSize = 26, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 3, 0, 0) });
-        htxt.Children.Add(new Border { Height = 2, Width = 46, CornerRadius = new CornerRadius(1), Margin = new Thickness(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Left, Background = AccentRule() });
-        htxt.Children.Add(new TextBlock { Text = "Preferences apply instantly.", Foreground = Ink200, FontFamily = Site, FontSize = 12, Margin = new Thickness(0, 12, 0, 0) });
+        htxt.Children.Add(new TextBlock { Text = Track("RUSTORIGIN", 3), Foreground = Brand400, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 10.5 });
+        htxt.Children.Add(new TextBlock { Text = "SETTINGS", Foreground = Ink100, FontFamily = Site, FontSize = 22, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 2, 0, 0) });
         Grid.SetColumn(htxt, 0); head.Children.Add(htxt);
         var xTb = new TextBlock { Text = "\uE711", FontFamily = Icons, FontSize = 12, Foreground = Ink400, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var x = new Border { Width = 30, Height = 30, CornerRadius = new CornerRadius(6), Background = Brushes.Transparent, Cursor = Cursors.Hand, Child = xTb, VerticalAlignment = VerticalAlignment.Top };
@@ -530,50 +548,72 @@ public class LauncherWindow : Window
         Grid.SetColumn(x, 1); head.Children.Add(x);
         col.Children.Add(head);
 
-        // ---- GENERAL ---- (background slideshow is always on; updates are mandatory - no toggles for either)
-        col.Children.Add(GroupLabel("GENERAL"));
-        col.Children.Add(GroupCard(
-            SettingRow("Discord Rich Presence", "Show your In the launcher / In game status on Discord.",
-                Prefs.GetBool("DiscordRpc", true), v => { Prefs.Set("DiscordRpc", v); ApplyDiscordPref(v); })));
-        col.Children.Add(new TextBlock { Text = "Updates are required - when a newer version is available the launcher prompts you to update before continuing.", Foreground = Ink400, FontFamily = Site, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 8, 2, 0) });
-
         // ---- GAME ----
         col.Children.Add(GroupLabel("GAME"));
+        setGameDesc = RowDesc("");
+        setPathDesc = RowDesc(""); setPathDesc.TextWrapping = TextWrapping.NoWrap; setPathDesc.TextTrimming = TextTrimming.CharacterEllipsis;
+        setSizeText = new TextBlock { Foreground = Ink200, FontFamily = Site, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
+        var pathRight = new StackPanel { Orientation = Orientation.Horizontal };
+        pathRight.Children.Add(setSizeText);
+        setOpenGame = UtilityBtn("\uE838", "Open", delegate { OpenFolder(InstallDir); }); setOpenGame.Margin = new Thickness(0);
+        pathRight.Children.Add(setOpenGame);
         col.Children.Add(GroupCard(
+            InfoRow("Game version", setGameDesc, StatusChip(out setGameDot, out setGameChipText)),
+            InfoRow("Install location", setPathDesc, pathRight),
             SettingRow("Minimize while in game", "Hide the launcher to the tray while playing.",
-                Prefs.GetBool("MinimizeInGame", false), v => Prefs.Set("MinimizeInGame", v))));
+                Prefs.GetBool("MinimizeInGame", false), v => Prefs.Set("MinimizeInGame", v)),
+            InfoRow("Uninstall game", RowDesc("Deletes the game files; the launcher is kept."),
+                DangerBtn("\uE74D", "Uninstall", delegate { UninstallClient(); }))));
 
-        // ---- utility actions (compact rounded-md buttons, like the site's copy button) ----
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 16, 0, 0) };
-        actions.Children.Add(UtilityBtn("\uE838", "Open data folder", delegate { try { Process.Start("explorer.exe", cacheDir); } catch { } }));
-        col.Children.Add(actions);
+        // ---- LAUNCHER ---- (the background slideshow is always on; updates are mandatory - no toggles for either)
+        col.Children.Add(GroupLabel("LAUNCHER"));
+        col.Children.Add(GroupCard(
+            SettingRow("Discord Rich Presence", "Show your In the launcher / In game status on Discord.",
+                Prefs.GetBool("DiscordRpc", true), v => { Prefs.Set("DiscordRpc", v); ApplyDiscordPref(v); }),
+            InfoRow("Data folder", RowDesc("Settings, download cache and launcher.log."),
+                UtilityBtn("\uE838", "Open", delegate { OpenFolder(cacheDir); }))));
 
-        // ---- uninstall (danger) ----
-        var danger = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
-        danger.Children.Add(DangerBtn("\uE74D", "Uninstall client", delegate { UninstallClient(); }));
-        col.Children.Add(danger);
-
-        // ---- footer: version (left) + Done pill (right) ----
-        col.Children.Add(new Border { Height = 1, Background = B("#0DFFFFFF"), Margin = new Thickness(0, 18, 0, 14) });
-        var foot = new Grid();
+        // ---- footer: version + the update policy ----
         string vs = "1.0.0";
         try { var vv = Assembly.GetExecutingAssembly().GetName().Version; vs = vv.Major + "." + vv.Minor + "." + vv.Build; } catch { }
-        foot.Children.Add(new TextBlock { Text = "Rustorigin Launcher  v" + vs, Foreground = Ink400, FontFamily = Site, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left });
-        foot.Children.Add(PrimaryPill("Done", delegate { ToggleSettings(false); }));
-        col.Children.Add(foot);
+        col.Children.Add(new TextBlock { Text = "Rustorigin Launcher  v" + vs + "  \u00B7  Launcher updates are required.", Foreground = Ink400, FontFamily = Site, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 16, 2, 0) });
 
         mainGrid.Children.Add(settingsOverlay);
     }
 
-    // Left-aligned accent rule under the header (violet -> transparent), like the site's SectionHeading divider.
-    static LinearGradientBrush AccentRule()
+    // The Game rows describe live state - is the game installed, is it the current build, where is
+    // it and how big - so they are refilled each time the panel opens. The folder size is measured
+    // on a background thread (it walks ~1,800 files) and filled in when it is ready.
+    void RefreshSettingsInfo()
     {
-        var g = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 0) };
-        g.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString("#8B5CF6"), 0));
-        g.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString("#008B5CF6"), 1));
-        return g;
+        if (setGameDesc == null) return;
+        bool installed = IsInstalled(), outdated = installed && ClientOutdated();
+        string build = Version.Length > 0 ? Version : ClientVersion;
+        Brush dot; string chip, desc;
+        if (busy)            { dot = StatChecking; chip = "IN PROGRESS";     desc = "An install or update is running."; }
+        else if (!installed) { dot = Ink400;       chip = "NOT INSTALLED";   desc = build.Length > 0 ? "Click Install to get " + build + "." : "Click Install to get the game."; }
+        else if (outdated)   { dot = StatChecking; chip = "UPDATE REQUIRED"; desc = (build.Length > 0 ? build : "A newer build") + " is out - click Update to play."; }
+        else                 { dot = Live;         chip = "UP TO DATE";      desc = build.Length > 0 ? "You have " + build + "." : "The game is installed."; }
+        setGameDot.Fill = dot; setGameChipText.Text = Track(chip, 1); setGameDesc.Text = desc;
+
+        string dir = InstallDir; bool exists = false;
+        try { exists = Directory.Exists(dir); } catch { }
+        setPathDesc.Text = exists ? dir : "Chosen when you click Install."; setPathDesc.ToolTip = exists ? dir : null;
+        setSizeText.Text = ""; setOpenGame.Visibility = exists ? Visibility.Visible : Visibility.Collapsed;
+        if (!exists) return;
+        var t = new Thread(delegate ()
+        {
+            long bytes = 0;
+            try { foreach (string f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)) { try { bytes += new FileInfo(f).Length; } catch { } } } catch { }
+            Dispatcher.BeginInvoke((Action)(() => { if (InstallDir == dir) setSizeText.Text = bytes > 0 ? Human(bytes) : ""; }));
+        }) { IsBackground = true, Name = "measure-install" };
+        t.Start();
     }
 
+    static void OpenFolder(string dir)
+    {
+        try { if (Directory.Exists(dir)) Process.Start("explorer.exe", "\"" + dir + "\""); } catch { }
+    }
     // Group eyebrow above a card of rows (violet, wide-tracked) - the site's section eyebrow.
     TextBlock GroupLabel(string t)
     {
@@ -594,25 +634,47 @@ public class LauncherWindow : Window
         return b;
     }
 
-    // One settings row: label + description on the left, switch on the right; faint hover fill.
-    Border SettingRow(string title, string desc, bool on, Action<bool> onChange)
+    // One settings row: label + description on the left, a single control on the right (switch,
+    // status chip or compact button); faint hover fill.
+    Border InfoRow(string title, TextBlock desc, FrameworkElement right)
     {
         var g = new Grid();
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var txt = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         txt.Children.Add(new TextBlock { Text = title, Foreground = Ink100, FontFamily = Site, FontSize = 13.5, FontWeight = FontWeights.SemiBold });
-        if (desc != null) txt.Children.Add(new TextBlock { Text = desc, Foreground = Ink400, FontFamily = Site, FontSize = 11.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) });
+        if (desc != null) txt.Children.Add(desc);
         Grid.SetColumn(txt, 0); g.Children.Add(txt);
-        var tg = MakeToggle(on, onChange);
-        tg.VerticalAlignment = VerticalAlignment.Center; tg.Margin = new Thickness(18, 0, 0, 0);
-        Grid.SetColumn(tg, 1); g.Children.Add(tg);
+        right.VerticalAlignment = VerticalAlignment.Center; right.Margin = new Thickness(18, 0, 0, 0);
+        Grid.SetColumn(right, 1); g.Children.Add(right);
         var row = new Border { Padding = new Thickness(16, 13, 16, 13), Background = Brushes.Transparent, Child = g };
         row.MouseEnter += (s, e) => row.Background = B("#0AFFFFFF");   // white/[0.03] hover
         row.MouseLeave += (s, e) => row.Background = Brushes.Transparent;
         return row;
     }
 
+    // The faint description line under a row's label.
+    TextBlock RowDesc(string text)
+    {
+        return new TextBlock { Text = text, Foreground = Ink400, FontFamily = Site, FontSize = 11.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) };
+    }
+
+    // A row whose control is a switch.
+    Border SettingRow(string title, string desc, bool on, Action<bool> onChange)
+    {
+        return InfoRow(title, desc == null ? null : RowDesc(desc), MakeToggle(on, onChange));
+    }
+
+    // Compact status pill for a row: a coloured dot + tracked caption on a faint fill. The caller
+    // keeps the dot and label so it can recolour/retext them (see RefreshSettingsInfo).
+    Border StatusChip(out System.Windows.Shapes.Ellipse dot, out TextBlock label)
+    {
+        dot = new System.Windows.Shapes.Ellipse { Width = 7, Height = 7, Fill = Ink400, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 7, 0) };
+        label = new TextBlock { Foreground = Ink100, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 10.5, VerticalAlignment = VerticalAlignment.Center };
+        var sp = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        sp.Children.Add(dot); sp.Children.Add(label);
+        return new Border { Height = 26, CornerRadius = new CornerRadius(13), Background = B("#0DFFFFFF"), Padding = new Thickness(10, 0, 12, 0), Child = sp };
+    }
     // Switch: live green when on, white/15 when off (the site's toggle); white knob slides with a soft ease.
     Border MakeToggle(bool on, Action<bool> onChange)
     {
@@ -663,22 +725,12 @@ public class LauncherWindow : Window
         return b;
     }
 
-    // White primary pill (the site's primary button, like "PLAY NOW"): white fill, near-black label,
-    // subtle hover. Uppercase tracked Poppins. Used for the settings "Done".
-    Border PrimaryPill(string label, Action onClick)
-    {
-        var tb = new TextBlock { Text = Track(label.ToUpperInvariant(), 1), Foreground = Ink, FontFamily = Site, FontWeight = FontWeights.SemiBold, FontSize = 12.5, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var b = new Border { Height = 40, MinWidth = 108, CornerRadius = new CornerRadius(20), Background = TextHi, Padding = new Thickness(24, 0, 24, 0), Cursor = Cursors.Hand, Child = tb, HorizontalAlignment = HorizontalAlignment.Right };
-        b.MouseEnter += (s, e) => b.Background = B("#F0F1F4");
-        b.MouseLeave += (s, e) => b.Background = TextHi;
-        b.MouseLeftButtonUp += (s, e) => { e.Handled = true; onClick(); };
-        return b;
-    }
     void ToggleSettings(bool show)
     {
         if (settingsOverlay == null) return;
         // Website style is flat (no glass): the solid scrim dims the launcher; keep the backdrop crisp.
         try { if (homeView != null) homeView.Effect = null; } catch { }
+        if (show) RefreshSettingsInfo();
         settingsOverlay.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -766,7 +818,7 @@ public class LauncherWindow : Window
                 "Uninstall", "Cancel")) return;
 
         ToggleSettings(false);
-        busy = true; SetDlLabel("REMOVING"); statusText.Text = ""; RefreshState();
+        busy = true; SetDlLabel("REMOVING"); ClearStatus(); RefreshState();
         var t = new Thread(delegate ()
         {
             string err = null;
@@ -791,10 +843,11 @@ public class LauncherWindow : Window
                 catch { }
                 DeleteDirContents(InstallDir, keep);
                 try { if (Directory.Exists(InstallDir) && Directory.GetFileSystemEntries(InstallDir).Length == 0) Directory.Delete(InstallDir, false); } catch { }
-                try { File.Delete(zipPath); } catch { }
-                try { File.Delete(partPath); } catch { }
-                try { File.Delete(metaPath); } catch { }
-                try { File.Delete(chunksPath); } catch { }
+                // the download buffer of either route: the full zip and the delta pack
+                foreach (string name in new[] { ZipName, PatchName })
+                    foreach (string ext in new[] { "", VerifiedExt, ".part", ".part.meta", ".part.chunks" })
+                    { try { File.Delete(Path.Combine(downloadDir, name + ext)); } catch { } }
+                try { File.Delete(PatchFailedFile()); } catch { }
                 Log("uninstalled client from " + InstallDir);
             }
             catch (Exception ex) { err = ex.Message; Log("uninstall failed: " + ex.Message); }
@@ -802,10 +855,10 @@ public class LauncherWindow : Window
             Dispatcher.BeginInvoke((Action)(() =>
             {
                 busy = false;
-                if (e2 != null) { statusText.Foreground = Danger; statusText.Text = "Uninstall error: " + e2; }
+                if (e2 != null) ShowStatus(Danger, "Uninstall error: " + e2, true);
                 else
                 {
-                    statusText.Foreground = TextMute; statusText.Text = "";
+                    ClearStatus();
                     // Forget the folder so a reinstall asks again (it pre-selects the last one).
                     try { File.Delete(InstallDirFile()); } catch { }
                     installDirChosen = false;
@@ -1171,7 +1224,7 @@ public class LauncherWindow : Window
         });
         hero.Children.Add(new TextBlock
         {
-            Text = Track("JANUARY UPDATE 2021", 1),
+            Text = Track("APRIL UPDATE 2021", 1),
             Foreground = Brand400, FontSize = 13, FontFamily = Brand, FontWeight = FontWeights.SemiBold, Margin = new Thickness(1, 8, 0, 0)   // violet brand eyebrow, matching the site
         });
         hero.Children.Add(new TextBlock
@@ -1364,8 +1417,7 @@ public class LauncherWindow : Window
         {
             var img = new Image { Source = cov, Stretch = Stretch.UniformToFill };
             RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
-            img.Effect = new System.Windows.Media.Effects.BlurEffect { Radius = 3, KernelType = System.Windows.Media.Effects.KernelType.Gaussian, RenderingBias = System.Windows.Media.Effects.RenderingBias.Performance };   // subtle blur so the overlays read
-            inner.Children.Add(img);
+            inner.Children.Add(img);   // shown sharp; the bottom scrim below keeps the overlay readable
         }
         else inner.Children.Add(new Rectangle { Fill = Grad(c1, c2) });
 
@@ -1541,6 +1593,10 @@ public class LauncherWindow : Window
                     case "launchexe":   LaunchExe = v; break;
                     case "launchargs":  LaunchArgs = v; break;
                     case "downloadconnections": { int dc; if (int.TryParse(v, out dc)) DownloadConnections = Math.Max(1, Math.Min(16, dc)); break; }
+                    case "clientversion": ClientVersion = v; break;
+                    case "patchurl":    PatchUrl = v; break;
+                    case "patchsha256": PatchSha256 = v; break;
+                    case "patchprobe":  PatchProbe = v; break;
                     case "version":     Version = v; break;
                     case "title":       if (v.Length > 0) GameTitle = v; break;
                     case "tagline":     if (v.Length > 0) Tagline = v; break;
@@ -1592,7 +1648,15 @@ public class LauncherWindow : Window
                 dir = Path.Combine(InstallDir, "_download");
         }
         catch { dir = cacheDir; }
-        zipPath  = Path.Combine(dir, "RustClient.zip");
+        downloadDir = dir;
+        // An outdated install that can take the delta pack resumes THAT download, not the full zip's.
+        SetDownloadFile(UsePatch() ? PatchName : ZipName);
+    }
+
+    // Points the download buffer at one file: the full client zip or the delta pack.
+    void SetDownloadFile(string name)
+    {
+        zipPath  = Path.Combine(downloadDir, name);
         partPath = zipPath + ".part";
         metaPath = zipPath + ".part.meta";
         chunksPath = zipPath + ".part.chunks";   // which 32 MB ranges of the .part are complete (parallel download)
@@ -1736,6 +1800,84 @@ public class LauncherWindow : Window
     // The game exe is present but the install is structurally incomplete (needs a reinstall/repair).
     bool IsBrokenInstall() { string exe = FindGameExe(); return exe != null && !InstallComplete(exe); }
 
+    // ---------- client updates ----------
+    // The install marker records which client build is installed ("client=<version>"). With
+    // ClientVersion set in launcher.cfg, an install recording anything else - including nothing, i.e.
+    // every install made before versions were tracked - is outdated: PLAY gives way to UPDATE,
+    // because the server only accepts the current build.
+    bool ClientOutdated()
+    {
+        if (ClientVersion.Length == 0) return false;
+        return !string.Equals(ClientPatch.ReadMarkerClient(InstallMarkerPath()), ClientVersion, StringComparison.OrdinalIgnoreCase);
+    }
+
+    string PatchFailedFile() { return Path.Combine(cacheDir, "patch-failed.txt"); }
+
+    // True when the installed client should be upgraded from the delta pack rather than the full
+    // download: a pack is configured, the install is outdated and is the build the pack upgrades
+    // from (PatchProbe), and this exact pack has not already failed on this machine.
+    bool UsePatch()
+    {
+        try
+        {
+            string sha = NormalizeHash(PatchSha256);
+            if (PatchUrl.Length == 0 || sha.Length == 0) return false;
+            if (!IsInstalled() || !ClientOutdated()) return false;
+            if (!ClientPatch.ProbeMatches(InstallDir, PatchProbe)) return false;
+            string failed = PatchFailedFile();
+            if (File.Exists(failed) && string.Equals(File.ReadAllText(failed).Trim(), sha, StringComparison.OrdinalIgnoreCase)) return false;
+            return true;
+        }
+        catch { return false; }
+    }
+
+    // Swaps a fully staged + verified update into place; Commit records the new client version in
+    // the marker before the update stops being pending, so an interruption can always be finished.
+    void CommitPendingUpdate()
+    {
+        string to = ClientPatch.Commit(InstallDir, InstallMarkerPath());
+        Log("update: client is now " + to);
+    }
+
+    // The delta pack and its partials are useless once the client is current.
+    void DeletePatchBuffer()
+    {
+        foreach (string ext in new[] { "", VerifiedExt, ".part", ".part.meta", ".part.chunks" })
+        { try { File.Delete(Path.Combine(downloadDir, PatchName + ext)); } catch { } }
+    }
+
+    // A finished download kept on disk (left by an interrupted extract or update) can be used without
+    // downloading it again - but only if it is the file the CURRENT config expects. FetchVerified
+    // records the hash it verified next to the file (".verified"); a file without that record was
+    // kept by an older launcher and is hashed once. Anything else is a leftover of another build:
+    // it is deleted, never installed. Throws OperationCanceledException if paused while hashing.
+    bool CachedDownloadUsable()
+    {
+        try { if (!File.Exists(zipPath)) return false; } catch { return false; }
+        string tag = zipPath + VerifiedExt, name = Path.GetFileName(zipPath);
+        bool ok = false;
+        try
+        {
+            if (File.Exists(tag)) ok = dlSha.Length > 0 && string.Equals(File.ReadAllText(tag).Trim(), dlSha, StringComparison.OrdinalIgnoreCase);
+            else
+            {
+                Log("cached " + name + " has no verification record; hashing it");
+                string actual;
+                ok = VerifyDownload(zipPath, out actual);
+                if (ok) File.WriteAllText(tag, dlSha);
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { Log("cached " + name + " could not be checked: " + ex.Message); ok = false; }
+        if (!ok)
+        {
+            Log("cached " + name + " is not the file this launcher expects; discarding it");
+            try { File.Delete(zipPath); } catch { }
+            try { File.Delete(tag); } catch { }
+        }
+        return ok;
+    }
+
     bool HasPartial() { return PartialBytes() > 0; }
 
     // Bytes already downloaded into the saved .part: from its chunk map when the parallel downloader
@@ -1795,14 +1937,15 @@ public class LauncherWindow : Window
         bool partial   = HasPartial();
         bool game      = GameRunning();
         bool broken    = !installed && !game && IsBrokenInstall();   // exe present but files missing
+        bool outdated  = installed && ClientOutdated();              // an older client build: needs UPDATE before it can join
 
         // The in-button progress fill is only for an active download; clear it once idle.
         if (!busy) SetInstallProgress(0);   // clear the in-button fill when idle (finished, paused, errored)
 
-        // PLAY: shown only when the client is installed (or our game is running) - hidden otherwise.
+        // PLAY: shown only when the current client is installed (or our game is running) - hidden otherwise.
         // While the game runs it becomes IN-GAME (clicking it focuses the running game).
         object[] pmeta = (object[])playBtn.Tag;
-        bool showPlay = installed || game;
+        bool showPlay = (installed && !outdated) || game;
         playBtn.Visibility = showPlay ? Visibility.Visible : Visibility.Collapsed;
         if (showPlay)
         {
@@ -1822,7 +1965,7 @@ public class LauncherWindow : Window
             ((TextBlock)imeta[1]).Text = Track(dlLabel.Length > 0 ? dlLabel : "WORKING", 1);   // live status inside the button
             ((TextBlock)imeta[2]).Text = "";                    // hide the glyph; the fill + status tell the story
         }
-        else if (installed && !partial)
+        else if (installed && !partial && !outdated)
         {
             installBtn.Visibility = Visibility.Collapsed;
         }
@@ -1830,7 +1973,7 @@ public class LauncherWindow : Window
         {
             installBtn.Visibility = Visibility.Visible;
             SetButtonEnabled(installBtn, true);
-            ((TextBlock)imeta[1]).Text = Track(partial ? "RESUME" : (broken ? "REPAIR" : "INSTALL"), 1);
+            ((TextBlock)imeta[1]).Text = Track(partial ? "RESUME" : (broken ? "REPAIR" : (outdated ? "UPDATE" : "INSTALL")), 1);
             ((TextBlock)imeta[2]).Text = partial ? "\uE768" : "\uE896";
         }
         AnimateInstallWidth();   // smoothly grow/shrink the pill to fit its new caption
@@ -1838,7 +1981,7 @@ public class LauncherWindow : Window
         if (!busy)
         {
             if (broken) { statusText.Foreground = Danger; statusText.Text = BrokenInstallMessage(); }
-            else { statusText.Foreground = TextMute; statusText.Text = ""; }
+            else if (DateTime.UtcNow >= statusHoldUntil) { statusText.Foreground = TextMute; statusText.Text = ""; }   // idle = empty; a held message stays (ShowStatus)
         }
     }
 
@@ -1857,10 +2000,12 @@ public class LauncherWindow : Window
     {
         if (busy) return;
         if (string.IsNullOrEmpty(DownloadUrl) || DownloadUrl.Contains("REPLACE-ME"))
-        { statusText.Foreground = Danger; statusText.Text = "Set DownloadUrl in launcher.cfg first."; return; }
+        { ShowStatus(Danger, "Set DownloadUrl in launcher.cfg first.", true); return; }
         // Verification is mandatory: refuse to download/install anything we can't check.
         if (NormalizedExpectedHash().Length == 0)
-        { statusText.Foreground = Danger; statusText.Text = "Set Sha256 in launcher.cfg first - downloads must be verified before install."; return; }
+        { ShowStatus(Danger, "Set Sha256 in launcher.cfg first - downloads must be verified before install.", true); return; }
+        // An update replaces the game's files, which Windows refuses while the game has them open.
+        if (GameRunning()) { Alert("Game is running", "Close the game before updating."); return; }
         // Fresh install only - a resume/repair keeps the folder it already uses.
         bool cachedZip = false; try { cachedZip = File.Exists(zipPath); } catch { }
         if (!installDirChosen && !HasPartial() && !cachedZip && FindGameExe() == null)
@@ -1869,10 +2014,10 @@ public class LauncherWindow : Window
             if (IsInstalled()) { RefreshState(); return; }   // picked a folder that already holds the game
         }
         try { Directory.CreateDirectory(InstallDir); Directory.CreateDirectory(cacheDir); Directory.CreateDirectory(Path.GetDirectoryName(zipPath)); }
-        catch (Exception ex) { statusText.Foreground = Danger; statusText.Text = "Folder error: " + ex.Message; return; }
+        catch (Exception ex) { ShowStatus(Danger, "Folder error: " + ex.Message, true); return; }
 
         busy = true; cancelRequested = false;
-        statusText.Foreground = TextMute; statusText.Text = "";
+        ClearStatus();
         SetInstallProgress(0);
         SetDlLabel("CONNECTING");
         RefreshState();
@@ -1894,6 +2039,24 @@ public class LauncherWindow : Window
     {
         cancelRequested = true;
         try { var r = activeReq; if (r != null) r.Abort(); } catch { }
+    }
+
+    // ---- status line under the hero buttons ----
+    // Idle, the line is empty: status lives in the button. RefreshState (every 2 s, and after every
+    // action) blanks it, so a message is shown through ShowStatus, which holds it: an error stays
+    // until the player's next action, a notice (feedback for a click) for a few seconds.
+    DateTime statusHoldUntil = DateTime.MinValue;
+
+    void ShowStatus(Brush brush, string text, bool untilNextAction)
+    {
+        statusText.Foreground = brush; statusText.Text = text;
+        statusHoldUntil = untilNextAction ? DateTime.MaxValue : DateTime.UtcNow.AddSeconds(5);
+    }
+
+    void ClearStatus()
+    {
+        statusText.Foreground = TextMute; statusText.Text = "";
+        statusHoldUntil = DateTime.MinValue;
     }
 
     // Timestamped diagnostics in <cache>\launcher.log (players can send this when a download misbehaves).
@@ -1926,15 +2089,29 @@ public class LauncherWindow : Window
     void DownloadWorker()
     {
         string error = null; bool cancelled = false; bool verifyFailed = false; string verifyMsg = null;
+        string errorPrefix = "Download failed: ";
         try
         {
+            // An outdated install is upgraded in place from the delta pack when it can be - a fraction
+            // of the full download. Whatever rules the pack out (other than the player pausing) falls
+            // through to the full client below. A swap that was interrupted earlier is finished first.
+            bool updated = false;
+            if (ClientPatch.HasPendingCommit(InstallDir)) { errorPrefix = "Update failed: "; CommitPendingUpdate(); DeletePatchBuffer(); RemoveEmptyDownloadDir(); updated = true; }
+            else if (!File.Exists(Path.Combine(downloadDir, ZipName)) && UsePatch()) updated = TryPatchUpdate(ref cancelled, ref errorPrefix);
+
+            if (!updated && !cancelled)
+            {
+            SetDownloadFile(ZipName); dlUrl = DownloadUrl; dlSha = NormalizedExpectedHash();
+            try { Directory.CreateDirectory(downloadDir); } catch { }
+            errorPrefix = "Download failed: ";
+
             // 0) Reuse a cached RustClient.zip (e.g. left by an interrupted extract) rather than
-            //    re-downloading the whole client. It was already SHA-256-verified when it was written,
-            //    so it is extracted directly - no re-hash. If extraction fails (the zip is corrupt),
-            //    it's discarded and a fresh, verified download runs. (The mandatory verification on a
-            //    fresh download - the trust anchor - is unchanged; only the redundant re-hash is gone.)
+            //    re-downloading the whole client - if it is the zip this config expects (see
+            //    CachedDownloadUsable: its recorded hash must equal Sha256; a zip of another build is
+            //    deleted). It is then extracted directly, with no re-hash. If extraction fails (the
+            //    zip is corrupt), it's discarded and a fresh, verified download runs.
             bool usedCache = false;
-            if (!cancelRequested && File.Exists(zipPath))
+            if (!cancelRequested && CachedDownloadUsable())
             {
                 Log("cached zip present (" + new FileInfo(zipPath).Length + " bytes); reusing without re-download");
                 SetDlLabelAsync("EXTRACTING");
@@ -1944,26 +2121,128 @@ public class LauncherWindow : Window
                     try { File.Delete(InstallMarkerPath()); } catch { }
                     ExtractZip(zipPath, InstallDir);
                     Log("extract done (from cached zip)");
-                    try { File.WriteAllText(InstallMarkerPath(), DateTime.Now.ToString("o")); } catch { }
-                    try { File.Delete(zipPath); } catch { }
+                    try { File.WriteAllText(InstallMarkerPath(), ClientPatch.MarkerText(ClientVersion)); } catch { }
+                    try { File.Delete(zipPath); File.Delete(zipPath + VerifiedExt); } catch { }
                     RemoveEmptyDownloadDir();
                     InstallLauncherAndShortcut();
                     usedCache = true;
                 }
+                catch (OperationCanceledException) { throw; }   // paused mid-extract: keep the zip for Resume
                 catch (Exception cex)
                 {
                     Log("cached zip extract failed (" + cex.Message + "); discarding and downloading fresh");
-                    try { File.Delete(zipPath); } catch { }   // corrupt cached zip -> re-download
+                    try { File.Delete(zipPath); File.Delete(zipPath + VerifiedExt); } catch { }   // corrupt cached zip -> re-download
                 }
             }
 
-            if (!usedCache && !cancelled)
+            if (!usedCache && !cancelled && FetchVerified(ref cancelled, ref verifyFailed, ref verifyMsg))
             {
+                Log("extracting to " + InstallDir);
+                SetDlLabelAsync("EXTRACTING");
+                try { Directory.CreateDirectory(InstallDir); File.Delete(InstallMarkerPath()); } catch { }  // clear any old marker: not "installed" until extract finishes
+                ExtractZip(zipPath, InstallDir);
+                Log("extract done");
+                try { File.WriteAllText(InstallMarkerPath(), ClientPatch.MarkerText(ClientVersion)); } catch { }   // mark the install complete only after a full extract
+                try { File.Delete(zipPath); File.Delete(zipPath + VerifiedExt); } catch { }
+                RemoveEmptyDownloadDir();
+                InstallLauncherAndShortcut();
+            }
+            }   // end if (!updated && !cancelled)
+        }
+        catch (OperationCanceledException) { cancelled = true; Log("cancelled by user"); }   // e.g. paused while extracting or hashing: not an error
+        catch (Exception ex) { error = ex.Message; Log("FAILED: " + ex.GetType().Name + ": " + ex.Message); }
+
+        Dispatcher.BeginInvoke((Action)(() =>
+        {
+            busy = false; activeReq = null;
+            SetDownloadPaths();   // the install state may have changed which file a Resume continues
+            if (verifyFailed && !cancelled) ShowStatus(Danger, verifyMsg ?? "Integrity check failed - the download was rejected. Nothing was installed.", true);
+            else if (error != null && !cancelled) ShowStatus(Danger, errorPrefix + error, true);
+            else ClearStatus();   // clean or paused: status lived in the button; nothing below
+            RefreshState();   // the .part is kept on cancel/error so Resume can continue
+        }));
+    }
+
+    // Upgrades an installed, outdated client in place from the delta pack: fetch + verify the pack
+    // (the same resumable, SHA-256-checked pipeline as the full client), rebuild the changed files
+    // under <install>\_update, verify every one, then swap them in. Returns true when the client is
+    // now current. False with `cancelled` set means the player paused (the partial is kept). False
+    // otherwise means this pack does not fit this install: that is remembered, and the caller
+    // installs the full client instead. A pack the host has removed (404) also falls back to the full
+    // client, but is not remembered. Any other download error is thrown like any download error.
+    bool TryPatchUpdate(ref bool cancelled, ref string errorPrefix)
+    {
+        SetDownloadFile(PatchName); dlUrl = PatchUrl; dlSha = NormalizeHash(PatchSha256);
+        Log("update: trying the delta pack " + PatchUrl);
+        string unusable = null; bool remember = true;
+        try
+        {
+            if (!CachedDownloadUsable())   // else: this exact pack, already verified, was left by an interrupted update
+            {
+                bool rejected = false; string msg = null;
+                try
+                {
+                    if (!FetchVerified(ref cancelled, ref rejected, ref msg))
+                    {
+                        if (cancelled) return false;
+                        unusable = "the pack failed its integrity check";
+                    }
+                }
+                // The host is free to stop hosting an old pack: whoever still needs it gets the full client.
+                catch (RemoteFileMissingException) { unusable = "the pack is no longer on the download server"; remember = false; }
+            }
+            if (unusable == null)
+            {
+                SetDlLabelAsync("UPDATING");
+                errorPrefix = "Update failed: ";   // from here on the verified pack is kept, so a retry skips the download
+                var sw = Stopwatch.StartNew(); long lastUi = -1000;
+                try
+                {
+                    ClientPatch.Recipe recipe = ClientPatch.Stage(zipPath, InstallDir, () => cancelRequested, (done, total) =>
+                    {
+                        if (sw.ElapsedMilliseconds - lastUi < 150 || total <= 0) return;
+                        lastUi = sw.ElapsedMilliseconds;
+                        double f = (double)done / total;
+                        Dispatcher.BeginInvoke((Action)(() => { SetInstallProgress(f); SetDlLabel("UPDATING  " + Pct(f)); }));
+                    });
+                    if (!string.Equals(recipe.To, ClientVersion, StringComparison.OrdinalIgnoreCase))
+                    {
+                        ClientPatch.DiscardStaged(InstallDir);
+                        unusable = "the pack builds client '" + recipe.To + "' but launcher.cfg expects '" + ClientVersion + "'";
+                    }
+                }
+                catch (PatchException ex) { unusable = ex.Message; }   // anything else (no space, a locked file) is an error the player can fix and retry
+            }
+        }
+        catch (OperationCanceledException) { cancelled = true; Log("cancelled by user"); return false; }
+
+        if (unusable != null)
+        {
+            Log("update: delta pack not usable (" + unusable + ") - installing the full client instead");
+            DeletePatchBuffer();
+            if (remember) { try { Directory.CreateDirectory(cacheDir); File.WriteAllText(PatchFailedFile(), NormalizeHash(PatchSha256)); } catch { } }
+            return false;
+        }
+
+        Log("update: every rebuilt file verified; swapping in");
+        CommitPendingUpdate();   // if this throws, the staged update stays put and a retry only repeats the swap
+        DeletePatchBuffer();
+        RemoveEmptyDownloadDir();
+        InstallLauncherAndShortcut();
+        return true;
+    }
+
+    // Downloads dlUrl into the .part (resumable; several connections when the size is known), verifies
+    // it against dlSha and promotes it to zipPath. True only when zipPath now holds the verified file.
+    // False with `cancelled` set = paused (the .part is kept for Resume); false with `verifyFailed`
+    // set = the file was rejected.
+    bool FetchVerified(ref bool cancelled, ref bool verifyFailed, ref string verifyMsg)
+    {
             // 1) size + identity of the remote file (HEAD; optional)
             long total = -1; string etag = "";
             try
             {
-                var h = (HttpWebRequest)WebRequest.Create(DownloadUrl);
+                var h = (HttpWebRequest)WebRequest.Create(dlUrl);
                 h.Method = "HEAD"; h.Timeout = 30000; h.UserAgent = UA; h.AllowAutoRedirect = true;
                 using (var r = (HttpWebResponse)h.GetResponse())
                 { total = r.ContentLength; etag = (r.Headers["ETag"] ?? r.Headers["Last-Modified"] ?? "").Trim(); }
@@ -1973,7 +2252,7 @@ public class LauncherWindow : Window
 
             // 2) reuse a saved .part only if it belongs to this exact remote file
             long fileLen = File.Exists(partPath) ? new FileInfo(partPath).Length : 0;
-            string want  = DownloadUrl + "|" + etag + "|" + total;
+            string want  = dlUrl + "|" + etag + "|" + total;
             string saved = File.Exists(metaPath) ? File.ReadAllText(metaPath) : "";
             if (File.Exists(partPath) && (saved != want || (total > 0 && fileLen > total)))
             {
@@ -2040,6 +2319,7 @@ public class LauncherWindow : Window
                     catch (Exception ex)
                     {
                         if (cancelRequested) { cancelled = true; Log("cancelled by user"); break; }
+                        if (IsMissingOnServer(ex)) throw new RemoteFileMissingException(dlUrl);   // retrying never helps
                         attempt++;
                         if (attempt > 30) throw new Exception("Gave up after 30 retries: " + ex.Message);
                         have = File.Exists(partPath) ? new FileInfo(partPath).Length : 0;
@@ -2052,71 +2332,50 @@ public class LauncherWindow : Window
             }
             }   // end single stream
 
-            // 4) verify integrity, then finalize + extract
-            if (!cancelled)
-            {
-                // Verify the completed .part BEFORE promoting it to the real zip or extracting anything,
-                // so a corrupted or tampered download is never written into the install folder or launched.
-                // On cancel the .part + meta are kept, so Resume re-checks it; on mismatch they are deleted
-                // so the next attempt re-downloads cleanly (a bad file is never reused).
-                bool hadHash = NormalizedExpectedHash().Length > 0;
-                string actualHash = "";
-                bool integrityOk;
-                try { integrityOk = VerifyDownload(partPath, out actualHash); }
-                catch (OperationCanceledException) { cancelled = true; integrityOk = false; }
+            // 4) verify integrity, then finalize
+            if (cancelled) return false;
 
-                if (cancelled) { /* keep .part + meta for Resume */ }
-                else if (!integrityOk)
+            // Verify the completed .part BEFORE promoting it to the real file or using it for anything,
+            // so a corrupted or tampered download is never written into the install folder or launched.
+            // On cancel the .part + meta are kept, so Resume re-checks it; on mismatch they are deleted
+            // so the next attempt re-downloads cleanly (a bad file is never reused).
+            bool hadHash = dlSha.Length > 0;
+            string actualHash = "";
+            bool integrityOk;
+            try { integrityOk = VerifyDownload(partPath, out actualHash); }
+            catch (OperationCanceledException) { cancelled = true; integrityOk = false; }
+
+            if (cancelled) return false;   // keep .part + meta for Resume
+            if (!integrityOk)
+            {
+                verifyFailed = true;
+                if (hadHash)
                 {
-                    verifyFailed = true;
-                    if (hadHash)
-                    {
-                        // A hash was configured and the file did not match it: reject and discard,
-                        // so the next attempt re-downloads cleanly instead of reusing a bad file.
-                        verifyMsg = "Integrity check failed - the download did not match the expected SHA-256 and was rejected. Nothing was installed.";
-                        Log("INTEGRITY FAIL (mismatch): expected=" + ExpectedSha256 + " actual=" + actualHash + " - discarding download");
-                        try { File.Delete(partPath); } catch { }
-                        try { File.Delete(metaPath); } catch { }
-                        try { File.Delete(chunksPath); } catch { }
-                    }
-                    else
-                    {
-                        // No hash configured (StartInstall normally blocks this; defensive). Keep the
-                        // .part so that adding Sha256 and clicking Resume verifies it without re-downloading.
-                        verifyMsg = "Install blocked - no expected SHA-256 is configured, so the download can't be verified. Set Sha256 in launcher.cfg, then click Resume. Nothing was installed.";
-                        Log("INTEGRITY FAIL (no hash configured): actual=" + actualHash + " - keeping .part for Resume once a hash is set");
-                    }
+                    // A hash was configured and the file did not match it: reject and discard,
+                    // so the next attempt re-downloads cleanly instead of reusing a bad file.
+                    verifyMsg = "Integrity check failed - the download did not match the expected SHA-256 and was rejected. Nothing was installed.";
+                    Log("INTEGRITY FAIL (mismatch): expected=" + dlSha + " actual=" + actualHash + " - discarding download");
+                    try { File.Delete(partPath); } catch { }
+                    try { File.Delete(metaPath); } catch { }
+                    try { File.Delete(chunksPath); } catch { }
                 }
                 else
                 {
-                    if (File.Exists(zipPath)) File.Delete(zipPath);
-                    File.Move(partPath, zipPath);
-                    try { File.Delete(metaPath); } catch { }
-                    try { File.Delete(chunksPath); } catch { }
-                    Log("finalized+verified zip (" + new FileInfo(zipPath).Length + " bytes), extracting to " + InstallDir);
-                    SetDlLabelAsync("EXTRACTING");
-                    try { Directory.CreateDirectory(InstallDir); File.Delete(InstallMarkerPath()); } catch { }  // clear any old marker: not "installed" until extract finishes
-                    ExtractZip(zipPath, InstallDir);
-                    Log("extract done");
-                    try { File.WriteAllText(InstallMarkerPath(), DateTime.Now.ToString("o")); } catch { }        // mark the install complete only after a full extract
-                    try { File.Delete(zipPath); } catch { }
-                    RemoveEmptyDownloadDir();
-                    InstallLauncherAndShortcut();
+                    // No hash configured (StartInstall normally blocks this; defensive). Keep the
+                    // .part so that adding Sha256 and clicking Resume verifies it without re-downloading.
+                    verifyMsg = "Install blocked - no expected SHA-256 is configured, so the download can't be verified. Set Sha256 in launcher.cfg, then click Resume. Nothing was installed.";
+                    Log("INTEGRITY FAIL (no hash configured): actual=" + actualHash + " - keeping .part for Resume once a hash is set");
                 }
+                return false;
             }
-            }   // end if (!usedCache && !cancelled)
-        }
-        catch (Exception ex) { error = ex.Message; Log("FAILED: " + ex.GetType().Name + ": " + ex.Message); }
 
-        Dispatcher.BeginInvoke((Action)(() =>
-        {
-            busy = false; activeReq = null;
-            if (cancelled) statusText.Text = "";
-            else if (verifyFailed) { statusText.Foreground = Danger; statusText.Text = verifyMsg ?? "Integrity check failed - the download was rejected. Nothing was installed."; }
-            else if (error != null) { statusText.Foreground = Danger; statusText.Text = "Download failed: " + error; }
-            else { statusText.Text = ""; }   // clean: status lived in the button; nothing below
-            RefreshState();   // the .part is kept on cancel/error so Resume can continue
-        }));
+            if (File.Exists(zipPath)) File.Delete(zipPath);
+            File.Move(partPath, zipPath);
+            try { File.Delete(metaPath); } catch { }
+            try { File.Delete(chunksPath); } catch { }
+            try { File.WriteAllText(zipPath + VerifiedExt, dlSha); } catch { }   // lets a later run trust this file without re-hashing (CachedDownloadUsable)
+            Log("finalized+verified " + Path.GetFileName(zipPath) + " (" + new FileInfo(zipPath).Length + " bytes)");
+            return true;
     }
 
     // ---------- parallel download ----------
@@ -2130,6 +2389,22 @@ public class LauncherWindow : Window
     sealed class RangeNotSupportedException : Exception
     {
         public RangeNotSupportedException() : base("server ignored the Range header") { }
+    }
+
+    // The host does not (or no longer) serve the file: the GET answers 404, 410 or 403 (what an
+    // S3-style bucket returns for a removed object). Unlike a dropped connection this cannot be fixed
+    // by retrying, so the download fails at once instead of looping for minutes. Only the GET decides:
+    // a failed HEAD is tolerated, because some hosts refuse HEAD but serve the file.
+    sealed class RemoteFileMissingException : Exception
+    {
+        public RemoteFileMissingException(string url) : base("the download server does not have this file: " + url) { }
+    }
+
+    static bool IsMissingOnServer(Exception ex)
+    {
+        var wex = ex as WebException;
+        var resp = wex == null ? null : wex.Response as HttpWebResponse;
+        return resp != null && (resp.StatusCode == HttpStatusCode.NotFound || resp.StatusCode == HttpStatusCode.Gone || resp.StatusCode == HttpStatusCode.Forbidden);
     }
 
     static int  ChunkCount(long total)      { return (int)((total + ChunkSize - 1) / ChunkSize); }
@@ -2212,7 +2487,7 @@ public class LauncherWindow : Window
                     HttpWebRequest req = null;
                     try
                     {
-                        req = (HttpWebRequest)WebRequest.Create(DownloadUrl);
+                        req = (HttpWebRequest)WebRequest.Create(dlUrl);
                         req.Method = "GET"; req.Timeout = 30000; req.ReadWriteTimeout = 60000;
                         req.UserAgent = UA; req.AllowAutoRedirect = true;
                         req.AddRange(start, start + len - 1);
@@ -2302,7 +2577,7 @@ public class LauncherWindow : Window
     // One GET (with a Range header when resuming). Returns normally only when the file is complete.
     void DownloadRange(ref long have, ref long total, bool resumed)
     {
-        var req = (HttpWebRequest)WebRequest.Create(DownloadUrl);
+        var req = (HttpWebRequest)WebRequest.Create(dlUrl);
         req.Method = "GET"; req.Timeout = 30000; req.ReadWriteTimeout = 60000;
         req.UserAgent = UA; req.AllowAutoRedirect = true;
         if (have > 0) req.AddRange(have);
@@ -2417,24 +2692,27 @@ public class LauncherWindow : Window
     // ---------- integrity verification (SHA-256) ----------
     // The configured expected hash, normalized: an optional "sha256:" prefix, spaces and dashes
     // stripped. Empty string means no usable hash is configured.
-    string NormalizedExpectedHash()
+    string NormalizedExpectedHash() { return NormalizeHash(ExpectedSha256); }
+
+    static string NormalizeHash(string hash)
     {
-        string expected = (ExpectedSha256 ?? "").Trim();
+        string expected = (hash ?? "").Trim();
         int colon = expected.IndexOf(':');
         if (colon >= 0) expected = expected.Substring(colon + 1);
         return expected.Replace(" ", "").Replace("-", "").Trim();
     }
 
-    // Returns true only when the file's SHA-256 matches the configured ExpectedSha256.
+    // Returns true only when the file's SHA-256 matches the hash expected for the file being
+    // fetched (dlSha: the client zip's Sha256, or the delta pack's PatchSha256).
     // Returns false on mismatch OR when no hash is configured (verification is mandatory).
     // Throws OperationCanceledException if the user cancels while hashing.
     bool VerifyDownload(string path, out string actualHex)
     {
         actualHex = ComputeSha256(path);
-        string expected = NormalizedExpectedHash();
+        string expected = dlSha ?? "";
         if (expected.Length == 0)
         {
-            Log("integrity: no ExpectedSha256 configured - refusing to install unverified download (sha256=" + actualHex + ")");
+            Log("integrity: no expected SHA-256 configured - refusing to install unverified download (sha256=" + actualHex + ")");
             return false;
         }
 
@@ -2540,7 +2818,7 @@ public class LauncherWindow : Window
             }
             else { try { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; Activate(); } } catch { } }
             RefreshState();
-            statusText.Foreground = TextMute; statusText.Text = "Ready to play.";
+            ShowStatus(TextMute, "Ready to play.", false);
         }
         catch { }
     }
@@ -2550,7 +2828,7 @@ public class LauncherWindow : Window
         string exe = FindGameExe();
         if (exe == null)
         {
-            statusText.Foreground = Danger; statusText.Text = "Client not installed - click Install first.";
+            ShowStatus(Danger, "Client not installed - click Install first.", false);
             RefreshState(); return;
         }
         // Don't launch a structurally-incomplete install (a server-card click also lands here).
@@ -2559,10 +2837,16 @@ public class LauncherWindow : Window
             statusText.Foreground = Danger; statusText.Text = BrokenInstallMessage();
             RefreshState(); return;
         }
+        // An older client build would only be rejected by the server (a server-card click also lands here).
+        if (!GameRunning() && ClientOutdated())
+        {
+            ShowStatus(Danger, "A game update is required - click Update first.", false);
+            RefreshState(); return;
+        }
         // single instance: never launch a second copy of OUR client - focus the running one instead
         if (GameRunning())
         {
-            statusText.Foreground = TextMute; statusText.Text = "Rustorigin is already running.";
+            ShowStatus(TextMute, "Rustorigin is already running.", false);
             try
             {
                 foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(LaunchExe)))
@@ -2577,9 +2861,9 @@ public class LauncherWindow : Window
             if (!string.IsNullOrEmpty(args)) psi.Arguments = args;
             var proc = Process.Start(psi);
             if (proc != null) { gameProc = proc; WatchGame(proc); SetDiscord("In game"); if (Prefs.GetBool("MinimizeInGame", false)) HideForGame(); }
-            statusText.Foreground = TextMute; statusText.Text = "Launching...";
+            ShowStatus(TextMute, "Launching...", false);
         }
-        catch (Exception ex) { statusText.Foreground = Danger; statusText.Text = "Launch error: " + ex.Message; }
+        catch (Exception ex) { ShowStatus(Danger, "Launch error: " + ex.Message, true); }
     }
 
     // ---------- settings panel ----------

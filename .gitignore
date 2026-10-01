@@ -8,6 +8,8 @@ release/
 # Packaged client (multi-GB) and download temp - never commit
 RustClient.zip
 RustClient.zip.sha256
+*.patchpack
+*.patchpack.sha256
 *.part
 *.part.meta
 

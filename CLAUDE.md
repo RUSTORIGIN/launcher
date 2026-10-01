@@ -1,8 +1,10 @@
 # Rustorigin Launcher
 
-A Windows launcher for a community-hosted Rust ("January 2021" build) server. The launcher
+A Windows launcher for a community-hosted Rust ("April 2021" build) server. The launcher
 downloads the Rust client from a URL the host controls, extracts it, and launches it. Players
-download a small (~3 MB) launcher instead of the full multi-GB client up front.
+download a small (~3 MB) launcher instead of the full multi-GB client up front. When the host
+moves to a newer client build, installed players **update in place from a delta pack** instead of
+downloading the whole client again.
 
 > "Rust" here is the **game**. This project is written in **C#/.NET Framework 4.x (WPF)** - it
 > is not a Rust-language project. There is no `cargo`, no `src/api/`, and no `.rs` files.
@@ -14,7 +16,7 @@ All three live in `src/`, each with its own `Main()` - they are *not* compiled t
 | Source | Output | Built by | Notes |
 |--------|--------|----------|-------|
 | `src/WpfLauncher.cs` | `RustoriginLauncher.exe` | `csc` via `scripts/build.bat` / `scripts/make_release.ps1` | The single shipping build. WPF, single-file, cross-fading screenshot background. Downloads + **SHA-256-verifies** + extracts + launches. |
-| `src/UpdateParsing.cs`, `src/A2S.cs`, `src/DiscordRpc.cs` | (compiled in) | same `csc` build | Self-update parsing, Steam A2S live status, and Discord Rich Presence helpers. |
+| `src/UpdateParsing.cs`, `src/A2S.cs`, `src/DiscordRpc.cs`, `src/ClientPatch.cs` | (compiled in) | same `csc` build | Self-update parsing, Steam A2S live status, Discord Rich Presence, and the client delta-update (pack recipe, stage, commit) helpers. |
 
 Nearly all real work happens in `src/WpfLauncher.cs`. It is one self-contained code-only WPF file
 (~1800 lines): window chrome, glass UI, config parsing, and the resumable, verified
@@ -50,14 +52,19 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
 ## Download behavior (implemented)
 
 - **Resumable**: written to `%LOCALAPPDATA%\RustOrigin\RustClient.zip.part` via HTTP Range
-  requests; auto-retries a dropped connection (up to 30 times, 5s apart) from the last byte.
+  requests; auto-retries a dropped connection (up to 30 times, 5s apart) from the last byte. A file
+  the server does not have (the GET answers 404, 410 or 403) is not retried - it fails at once
+  (`RemoteFileMissingException`). A failed HEAD is still tolerated: some hosts refuse HEAD.
 - **Pause / resume from the UI**: the hero download button is INSTALL, then **PAUSE** while a
   download runs (calls `CancelDownload` -> keeps the `.part`), then **RESUME** to continue via Range
   from the saved byte. One handler, `OnDownloadButton`, dispatches on `busy`; `RefreshState` sets the
   label/glyph. The **PLAY** button is hidden unless the client is installed (or our client is running).
 - **Cached-zip reuse (self-healing repair)**: `DownloadWorker` step 0 checks for an already-cached
-  `RustClient.zip` (e.g. left when an extract was interrupted). It was SHA-256-verified when written,
-  so it is extracted directly - **no re-download and no re-hash**. If extraction fails (corrupt zip)
+  `RustClient.zip` (e.g. left when an extract was interrupted). `FetchVerified` records the hash it
+  verified in a `.verified` sidecar; `CachedDownloadUsable` reuses the file only when that record
+  equals the **currently configured** hash (a file without a record, kept by an older launcher, is
+  hashed once; a file of another build is deleted, never installed). A matching file is extracted
+  directly - **no re-download and no re-hash**. The delta pack is reused under the same rule. If extraction fails (corrupt zip)
   it is discarded and a fresh, verified download runs. So a **REPAIR** after a broken extract reuses
   the ~9.5 GB zip instead of pulling it again. (Verification on a *fresh* download is unchanged - the
   trust anchor stays mandatory; only the redundant re-hash of the already-verified cache was removed.)
@@ -72,6 +79,53 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
   `Sha256`, and the finished download is verified before extraction and rejected on mismatch
   (see the security section below).
 - **Logging**: every step is timestamped to `%LOCALAPPDATA%\RustOrigin\launcher.log`.
+
+## Client updates (delta pack)
+
+Moving the server to a newer client build must not cost every player a full re-download. Rust keeps
+almost everything in a few multi-GB bundles that **all** change between builds, so a per-file update
+saves almost nothing (Jan -> Apr 2021: 16.2 of 17.5 GB "changed") - but most of the bytes *inside*
+those bundles are identical and have only moved. The delta pack ships just the bytes a player does
+not already have.
+
+- **Detecting an outdated client.** `ClientVersion=` in `launcher.cfg` names the build `DownloadUrl`
+  serves. The install marker (`<InstallDir>\.rustorigin-installed`) records it as a second line,
+  `client=<version>`. An install recording another version - or none, i.e. every install made before
+  1.1 - is outdated (`ClientOutdated`): `RefreshState` hides **PLAY**, shows **UPDATE**, and `Play`
+  refuses (the server would reject the old build anyway). Blank `ClientVersion` disables all of this.
+- **The pack** (`scripts\make_client_patch.ps1` -> `RustClient-<from>-to-<to>.patchpack`, a zip):
+  `recipe.txt` lists, for every changed/new file, its size + SHA-256 and how to rebuild it from
+  `c <source> <offset> <length>` (copy a range of an installed file) and `d <length>` (next bytes of
+  `data.bin`) ops, plus the files to delete; `data.bin` holds only the new bytes, in recipe order.
+  The builder (`scripts\client_patch_builder.cs`) finds reusable data with content-defined chunking,
+  so data that moved to another offset or another bundle is still found.
+- **Applying it** (`TryPatchUpdate` on the download worker, logic in `src/ClientPatch.cs`):
+  1. the pack is downloaded + SHA-256-verified against `PatchSha256` by the **same** `FetchVerified`
+     pipeline as the full client (resumable, parallel, mandatory hash);
+  2. `ClientPatch.Stage` rebuilds every changed file under `<InstallDir>\_update\files`, hashing as
+     it writes, and rejects the whole update unless **each file matches its SHA-256**. The installed
+     client is only read, so a failed or cancelled update leaves it exactly as it was;
+  3. `ClientPatch.Commit` moves the staged files into place, deletes the files the new build
+     dropped, writes the marker with the new `client=`, and only then removes the `ready` flag.
+     Commit is idempotent: a swap cut short by a crash is finished on the next launch
+     (constructor) or the next UPDATE click, and removing the leftover staging folder is
+     best-effort (something holding it open cannot fail a finished update). Staged files are
+     flushed to disk before `ready` is written.
+- **Fallback.** If the pack does not fit the install (a file differs from the expected build, a
+  source is missing, the pack fails its hash, or its `to` version is not `ClientVersion`), that
+  is logged, the pack's hash is remembered in `patch-failed.txt` so it is not
+  retried, and the worker continues straight into the normal **full download**. `PatchProbe`
+  (`relative\path|size` of a file in the previous build) is checked *before* downloading the pack, so
+  an install that is obviously another build skips it. A pack the host has **removed** (the GET answers 404, 410
+  or 403) also falls back to the full download, without being remembered - so an old pack can be deleted from the CDN
+  once most players have updated. Any other network error is not a fallback - it is
+  reported like any download error and Resume continues the pack. Neither is a full disk or a locked
+  file while staging (the full download would need at least as much room): that shows `Update failed`
+  and keeps the verified pack, so the retry skips the download.
+- **Space.** Staging needs room for the rebuilt files (~16 GB for Jan -> Apr 2021) on the install
+  drive until the swap; the full-download route needs about the same for the zip + extract.
+- The full zip (`DownloadUrl`/`Sha256`) must always be the **new** build: it serves new players and
+  everyone the pack does not fit.
 
 ## Self-update (launcher)
 
@@ -108,7 +162,9 @@ dormant. An optional `DiscordLargeImage` names a Rich Presence art asset uploade
 
 **Implemented - SHA-256 verification (mandatory):** the launcher hashes the finished download and
 **rejects it** (deletes it, never extracts or launches it) unless it matches the configured
-`Sha256`. Verification is **required**, not optional:
+`Sha256`. The delta pack goes through the same gate against `PatchSha256`, and every file rebuilt
+from it is verified against the SHA-256 in the pack's recipe before anything is swapped in.
+Verification is **required**, not optional:
 
 - `StartInstall` refuses to begin a download when no `Sha256` is configured (`NormalizedExpectedHash`
   is empty) - nothing is downloaded until a hash is set, so a config mistake can't install an
@@ -159,9 +215,16 @@ dir, so no admin rights needed):
 | `assets\<version>\` | Screenshots (`1.jpg`-`3.jpg`)/logo/fonts/`launcher.cfg` unpacked from the exe at first run. Keyed by assembly version, so a new build unpacks fresh. |
 | `RustClient.zip.part` + `.part.meta` | Resumable-download buffer and its identity (URL+ETag+size) for validating a resume. |
 | `RustClient.zip` | The verified download, briefly, between finalize and extract (deleted after). |
+| `RustClient.zip.verified` / `RustClient.patchpack.verified` | The SHA-256 a kept download was verified against, so a later run reuses it only for the same configured hash. |
+| `RustClient.patchpack` (+ `.part`, `.part.meta`, `.part.chunks`) | The delta pack's download buffer / verified pack, same lifecycle as the zip; deleted once the client is current. |
+| `patch-failed.txt` | SHA-256 of a delta pack that did not fit this install, so it is not downloaded again (a new pack has a new hash and gets a fresh try). |
 | `launcher.log` | Timestamped diagnostics of every download/verify step - ask players for this when an install misbehaves. |
 | `installdir.txt` | The install folder the player picked on first INSTALL (`ChooseInstallDir`), remembered across runs; cleared by Uninstall client so a reinstall asks again. |
 | `prefs.cfg` | Per-user settings (see below). |
+
+Inside the install folder: `.rustorigin-installed` (the install marker: line 1 the install time,
+then `client=<ClientVersion>`) and, only while an update is being applied, `_update\` (staged
+rebuilt files + `ready` flag; removed by the commit).
 
 Install also creates a **desktop shortcut** (`<name>.lnk` via `WScript.Shell` COM) and
 **self-copies the launcher** into the install area - see `InstallLauncherAndShortcut()`.
@@ -191,12 +254,15 @@ manifest - everything is baked in, nothing needs to sit beside it):
 .\scripts\make_release.ps1 -Version 1.0.0   # -> release\RustoriginLauncher.exe
 ```
 
-There is no `cargo` or clippy here. Two `Add-Type`-based test scripts exist:
+There is no `cargo` or clippy here. Three `Add-Type`-based test scripts exist:
 `scripts\test_updater_parsing.ps1` (compiles `src\UpdateParsing.cs`, unit-tests the self-update
-JSON/`SHA256SUMS`/version parsing) and `scripts\test_a2s_parsing.ps1` (compiles `src\A2S.cs`,
-unit-tests the A2S reply parser and runs one end-to-end query against a loopback UDP responder).
+JSON/`SHA256SUMS`/version parsing), `scripts\test_a2s_parsing.ps1` (compiles `src\A2S.cs`,
+unit-tests the A2S reply parser and runs one end-to-end query against a loopback UDP responder) and
+`scripts\test_client_patch.ps1` (compiles `src\ClientPatch.cs` + the pack builder, builds a pack from
+two synthetic client folders, applies it, checks the result byte-for-byte, and checks every way an
+update must be refused: modified install, missing source, cancel, truncated pack, unsafe recipe).
 Two GitHub Actions workflows exist: **build-check** (`.github/workflows/build-check.yml`) compiles
-both builds **and runs both tests** on every push/PR, and **release**
+both builds **and runs all three tests** on every push/PR, and **release**
 (`.github/workflows/release.yml`) builds and publishes on a version tag (see the release checklist).
 Do not reference commands that don't exist here. After changing `src\WpfLauncher.cs`, the fastest
 correctness check is a clean `csc` compile (as `build.bat` does).
@@ -256,8 +322,18 @@ A single self-contained setup executable, the same *kind* electron-builder's NSI
 ```
 
 `package_client.ps1` excludes things that must never ship (e.g. `temp\`, `maps\`, most of `cfg\`,
-and `*.bak`/`*.py`/`*.vdf`/`*.bat`/`*.before*`), then prints the zip's **SHA-256** and writes a
-`RustClient.zip.sha256` sidecar next to it.
+`EasyAntiCheat\` + the root `Rust.exe`, the launcher's own files, and
+`*.bak`/`*.py`/`*.vdf`/`*.bat`/`*.before*`), then prints the zip's **SHA-256** and writes a
+`RustClient.zip.sha256` sidecar next to it. The exclusion list lives in `scripts\client_filter.ps1`
+and is shared with the delta-pack builder, so the zip and the pack always ship the same file set
+(and a Steam depot folder or an installed client folder can be used as a source as-is).
+
+```powershell
+# delta pack for players on the previous build (see "Client updates (delta pack)")
+.\scripts\make_client_patch.ps1 -OldDir <previous client> -NewDir <new client> -From 2021-01 -To 2021-04
+```
+
+It prints the pack's **SHA-256**, the suggested `PatchProbe`, and how much players download.
 
 ## Release / publish checklist (DO THIS IN ORDER)
 
@@ -273,6 +349,17 @@ these steps move together - never upload a repackaged zip without rebuilding the
 4. Upload **that exact** `RustClient.zip` to the `DownloadUrl` host (e.g.
    `rclone copyto RustClient.zip r2:rustorigin/RustClient.zip --s3-no-check-bucket`).
 5. Publish `release\RustoriginLauncher.exe` (e.g. to the R2 bucket next to the client).
+
+**When the client build changes** (new server build), also, before step 3:
+
+- set a new `ClientVersion=` (and `Version=` / `Tagline=` if they name the build);
+- give the new zip a **new file name** in `DownloadUrl` (e.g. `RustClient-2021-04.zip`) rather than
+  overwriting the old one - a CDN may keep serving the cached old file under the old name;
+- run `.\scripts\make_client_patch.ps1` against the **same** new client folder the zip was made
+  from, upload the `.patchpack`, and set `PatchUrl=`, `PatchSha256=` and `PatchProbe=` from its
+  output. The pack only ever upgrades the *immediately previous* build; anyone else gets the zip;
+- smoke-test the update with a `launcher.cfg` next to a dev exe against a copy of the old client
+  before tagging: the launcher self-update is mandatory, so a release reaches every player at once.
 
 If the uploaded zip and the embedded hash ever drift apart, players get a (correct) integrity
 rejection and cannot install - re-run from step 1.
@@ -305,6 +392,10 @@ Plain `Key=Value`, `#`/`;` comments. Loaded embedded-defaults-first, then overri
 | `InstallDir` | Default/suggested install path. Blank = `.\Rust` next to the launcher. Shipped as `C:\RustOrigin`. On a fresh INSTALL the player picks the folder (`ChooseInstallDir`, pre-selecting `<launcher drive>:\Rustorigin` when the launcher is on another drive); the game always goes in a `Rustorigin` subfolder of the pick, because Uninstall deletes the whole install folder. When that folder is on another drive than `%LOCALAPPDATA%`, the download buffer goes to `<InstallDir>\_download` (`SetDownloadPaths`; not on FAT32, and a partial already in `%LOCALAPPDATA%` still resumes there). |
 | `LaunchExe` | Exe the Play button runs (searched recursively inside `InstallDir`). Default `RustClient.exe`. |
 | `LaunchArgs` | Optional args for the main PLAY button, e.g. `-console +connect 127.0.0.1:28015`. |
+| `ClientVersion` | Id of the client build `DownloadUrl` serves (e.g. `2021-04`), recorded in the install marker. An install recording another version - or none (installs made before 1.1) - is outdated and shows **UPDATE** instead of PLAY. Blank disables update detection. Must equal the `-To` the delta pack was built with. |
+| `PatchUrl` | Direct link to the delta pack (`scripts\make_client_patch.ps1`) that upgrades the previous build in place. Blank = outdated installs download the full client. |
+| `PatchSha256` | Expected hex SHA-256 of the delta pack. **Required** for the pack to be used; a mismatched pack is rejected and the full client is installed instead. |
+| `PatchProbe` | `relative\path\|size` of a file in the build the pack upgrades **from** (e.g. `GameAssembly.dll\|43225944`). The pack is only tried when it matches, so other builds skip straight to the full download. Blank = always try the pack. |
 | `Version` | Optional label shown in the launcher. |
 | `Title` | Big hero title (default `RUSTORIGIN`). |
 | `Tagline` | Description line under the title. |
@@ -324,13 +415,20 @@ Two separate mechanisms - don't confuse them:
   embedded in the exe, optionally overridden by a copy next to the exe. Parsed in `ApplyConfig`.
 - **`Prefs`** = per-user preferences read at runtime, persisted to
   `%LOCALAPPDATA%\RustOrigin\prefs.cfg` (a plain file - **not** the registry). `static class Prefs`
-  with `Get` / `GetBool` / `Set`. A **settings panel** (the caption **gear** button, top-right) exposes
-  the toggles below plus "Open data folder" and a red **"Uninstall client"**
-  action (`UninstallClient` - deletes the installed game files + download cache after a confirm, keeping
-  the launcher). It's a modal built in `BuildSettingsOverlay`, **styled to rustorigin.com** (Poppins
-  `Site` font, `Ink*`/violet `Brand*` tokens, green switches, grouped `GroupCard`s), toggled by
-  `ToggleSettings` (closes on the X / Done / backdrop / Esc). Toggles persist immediately. There is no
-  slideshow toggle - the background slideshow is always on. Users can still edit `prefs.cfg` directly.
+  with `Get` / `GetBool` / `Set`. A **settings panel** (the caption **gear** button, top-right) is a
+  modal built in `BuildSettingsOverlay`, **styled to rustorigin.com** (Poppins `Site` font,
+  `Ink*`/violet `Brand*` tokens, green switches, grouped `GroupCard`s), toggled by `ToggleSettings`
+  (closes on the X / backdrop / Esc). Every item is one `InfoRow`: label + one-line description on
+  the left, a single control on the right. Two groups:
+  - **GAME** - *Game version* (a `StatusChip`: up to date / update required / not installed / in
+    progress), *Install location* (path, size on disk, an Open button), *Minimize while in game*
+    (toggle), *Uninstall game* (red button -> `UninstallClient`: deletes the installed game files +
+    download cache after a confirm, keeping the launcher).
+  - **LAUNCHER** - *Discord Rich Presence* (toggle), *Data folder* (Open button).
+
+  The Game rows show live state, so `RefreshSettingsInfo` refills them each time the panel opens.
+  Toggles persist immediately. There is no slideshow toggle - the background slideshow is always
+  on. Users can still edit `prefs.cfg` directly.
 
 | Prefs key | Default | Effect |
 |-----------|---------|--------|
@@ -352,6 +450,7 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 │   ├── UpdateParsing.cs     #   pure self-update parsers (tested by scripts/test_updater_parsing.ps1)
 │   ├── A2S.cs               #   Steam A2S_INFO query for live server status (tested by scripts/test_a2s_parsing.ps1)
 │   ├── DiscordRpc.cs        #   dependency-free Discord Rich Presence over the Discord IPC named pipe
+│   ├── ClientPatch.cs       #   client delta update: pack recipe, stage + verify, commit (tested by scripts/test_client_patch.ps1)
 │   ├── app.manifest         #   Win32 manifest (csc /win32manifest)
 │   └── app.ico              #   app icon
 ├── assets/                  # build-time embedded resources + icon sources
@@ -366,10 +465,14 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 │   ├── build.bat            # dev compile check of WpfLauncher.cs via csc
 │   ├── make_release.ps1     # release build: stamp version, embed resources, icon+manifest
 │   ├── package_client.ps1   # zip the client into RustClient.zip for hosting
+│   ├── make_client_patch.ps1 # build the delta pack (previous build -> new build) for hosting
+│   ├── client_patch_builder.cs # the pack builder (content-defined chunking); compiled by the two scripts that use it, not part of the launcher
+│   ├── client_filter.ps1    # which client files ship - shared by package_client.ps1 and make_client_patch.ps1
 │   ├── build_msi.ps1        # build the per-user MSI installer (WiX)
 │   ├── build_installer_exe.ps1 # build the NSIS setup .exe (electron-builder style, Program Files)
 │   ├── test_updater_parsing.ps1 # unit tests for src/UpdateParsing.cs (run in build-check CI)
 │   ├── test_a2s_parsing.ps1 # unit + loopback tests for src/A2S.cs live server status (run in build-check CI)
+│   ├── test_client_patch.ps1 # end-to-end tests for the client delta update (run in build-check CI)
 │   └── installer/
 │       ├── RustOrigin.wxs   # WiX source for the MSI (WixUI_InstallDir wizard)
 │       ├── RustOrigin.nsi   # NSIS source for the setup .exe (MUI2 wizard)
@@ -385,6 +488,7 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 ├── release/                 # built RustoriginLauncher.exe output (git-ignored)
 ├── src/bin/ , src/obj/      # dotnet build output, not source of truth (git-ignored)
 ├── RustClient.zip(.sha256)  # packaged client + hash, ~9 GB (git-ignored; from package_client.ps1)
+├── *.patchpack(.sha256)     # delta pack + hash (git-ignored; from make_client_patch.ps1)
 ├── .gitignore  .gitattributes
 ├── LICENSE                  # MIT
 ├── SECURITY.md              # vulnerability-reporting policy (rustorigin@proton.me)
@@ -403,7 +507,7 @@ are normalized to LF (CRLF for `.bat`/`.ps1`).
 `.gitignore` keeps build output and the multi-GB client out of git:
 
 - `bin/`, `obj/`, `release/` - build output (dotnet output lands in `src/bin`, `src/obj`)
-- `RustClient.zip`, `RustClient.zip.sha256`, `*.part` - packaged client (9+ GB) and download temp
+- `RustClient.zip`, `RustClient.zip.sha256`, `*.patchpack`, `*.part` - packaged client (9+ GB), delta pack and download temp
 - loose built exes at the repo root (`RustoriginLauncher.exe`, `RustClient.exe`)
 - `.superdesign/tmp/` - design scratch
 - key/cert/secret file types (`*.pem`, `*.key`, `*.pfx`, `.env`, `rclone.conf`, ...)
@@ -414,8 +518,9 @@ and docs. When it goes public, remember the commit history exposes the author em
 
 ## Threading model
 
-- The download/verify/extract pipeline runs on a **background `Thread`** (`DownloadWorker`,
-  started by `StartInstall`). It must never touch WPF UI objects directly.
+- The download/verify/extract pipeline - and the client update (`TryPatchUpdate`: fetch the pack,
+  stage, commit) - runs on a **background `Thread`** (`DownloadWorker`, started by `StartInstall`).
+  It must never touch WPF UI objects directly.
 - All UI updates from that thread marshal back via `Dispatcher.BeginInvoke` (see `SetStatus`,
   `ReportProgress`, and the completion block). Follow that pattern for any new background work.
 - Cancellation is cooperative: `volatile bool cancelRequested` (+ `activeReq.Abort()` for the
@@ -424,12 +529,13 @@ and docs. When it goes public, remember the commit history exposes the author em
 
 ## Run & smoke-test
 
-There are no automated tests; verify by running the exe:
+The automated tests cover the parsers and the delta-update logic, not the window; verify the UI by
+running the exe:
 
 - Launch `release\RustoriginLauncher.exe` (or a `scripts\build.bat` exe with assets beside it). The window
   opens at 1440x860 in a **rounded frameless window** with full native behaviour (drag from anywhere,
   resize, maximize, Aero Snap, taskbar) via `WindowChrome`, custom **settings (gear) / minimize / close**
-  caption buttons (there is no maximize button - maximize via double-click or Aero Snap), the
+  caption buttons (there is no maximize button - maximize via Aero Snap; a double-click does nothing), the
   screenshot slideshow, PLAY, INSTALL, and the server grid. Corners flatten when maximized.
 - **Native min/max animations:** the window is intentionally **not** layered (`AllowsTransparency =
   false`) - a layered window loses the native minimize/maximize/restore animations. The 32px rounded
@@ -439,6 +545,11 @@ There are no automated tests; verify by running the exe:
   anti-aliased, so they read very slightly harder than a layered window's.
 - **Integrity smoke test:** blank `Sha256` -> INSTALL refused; correct `Sha256` -> download -> verify
   -> extract; wrong `Sha256` -> download rejected, nothing installed. (Also in docs/IMPLEMENTATION_PLAN.md section 5.)
+- **Update smoke test** (with a `launcher.cfg` next to the exe and a copy of the previous client as
+  the install): UPDATE shows instead of PLAY -> the pack downloads, verifies, "UPDATING" runs to 100%
+  -> PLAY appears and the marker ends with `client=<ClientVersion>`. Wrong `PatchSha256` -> the pack
+  is rejected and the full download starts. A modified install file -> the log says the pack is not
+  usable and the full download starts; the install is untouched until then.
 
 ## Conventions for edits
 
@@ -446,6 +557,11 @@ There are no automated tests; verify by running the exe:
   directly by `csc.exe`, so it must not take a NuGet dependency.
 - UI colors/brand come from `docs/brand-kit/` and the `B("#hex")` brush helpers; reuse existing
   palette brushes (`Accent`, `Glass`, `Stroke`, ...) rather than adding new literals.
+- **Status line** (the text under the hero buttons): it is empty when idle - status lives in the
+  button. Show a message with `ShowStatus(brush, text, untilNextAction)` and clear it with
+  `ClearStatus()`; never assign `statusText.Text` from an action, because `RefreshState` (every 2 s
+  and after every action) blanks the line unless a message is being held. Errors hold until the
+  player's next action, notices (feedback for a click) for a few seconds.
 - Config keys are parsed case-insensitively in `ApplyConfig`; add new keys there and document
   them in both this file and `README.md`. Per-user toggles go through `Prefs`, not `launcher.cfg`.
 - After changing `src/WpfLauncher.cs`, rebuild with `scripts\build.bat` (or `scripts\make_release.ps1`)

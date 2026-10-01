@@ -18,7 +18,8 @@ Examples of in-scope issues:
 - A way to make the launcher install or run a file that does **not** match the expected
   SHA-256, or to bypass the mandatory verification gate.
 - TLS downgrade / insecure-transport fallback, or acceptance of an unverified download.
-- Path traversal ("zip slip") or writing outside the install directory during extraction.
+- Path traversal ("zip slip") or writing outside the install directory during extraction, or
+  while applying a client update (delta pack).
 - Local privilege escalation, arbitrary code execution, or persistence introduced by the launcher.
 - Handling of untrusted server/config input that leads to code execution.
 
@@ -50,5 +51,7 @@ checksums, and (where available) build attestation.
 
 The launcher enforces integrity itself: it refuses to install unless the downloaded client's
 SHA-256 matches the value baked into the release, and rejects (deletes) any mismatch instead of
-installing or launching it. If you believe a hosted file does not match its expected hash, treat
+installing or launching it. A client update (delta pack) passes the same gate, and every game file
+rebuilt from it must match the SHA-256 listed in the pack before it replaces the installed one. If
+you believe a hosted file does not match its expected hash, treat
 it as a potential incident and report it using the channel above.
