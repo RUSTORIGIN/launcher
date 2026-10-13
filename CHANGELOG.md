@@ -3,6 +3,12 @@
 All notable changes to the RustOrigin launcher are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are Git tags (`vX.Y.Z`).
 
+## [Unreleased]
+
+### Changed
+- **Rustorigin Main** server card uses the new "OG MAIN" banner (`assets/main.png`, 1024x512, the
+  same format as the Training Grounds cover) instead of the old `main.jpg` screenshot.
+
 ## [1.1.0] - 2026-10-01
 
 ### Added
