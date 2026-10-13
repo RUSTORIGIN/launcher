@@ -8,6 +8,8 @@ All notable changes to the RustOrigin launcher are documented here. Format loose
 ### Changed
 - **Rustorigin Main** server card uses the new "OG MAIN" banner (`assets/main.png`, 1024x512, the
   same format as the Training Grounds cover) instead of the old `main.jpg` screenshot.
+- **Training Grounds** card uses the new "OG TRAIN" banner (`assets/train.png`, 1024x512) instead of
+  the previous `train.jpg` cover.
 
 ## [1.1.0] - 2026-10-01
 

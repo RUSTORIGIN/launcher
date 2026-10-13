@@ -83,7 +83,7 @@ static class Assets
 {
     public static string Dir = "";
     static readonly string[] Files = {
-        "1.jpg", "2.jpg", "3.jpg", "main.png", "train.jpg",
+        "1.jpg", "2.jpg", "3.jpg", "main.png", "train.png",
         "logo.png", "launcher.cfg",
         "fonts/Montserrat-Regular.ttf", "fonts/Montserrat-Medium.ttf",
         "fonts/Montserrat-SemiBold.ttf", "fonts/Montserrat-Bold.ttf", "fonts/OFL.txt",
@@ -289,7 +289,7 @@ public class LauncherWindow : Window
         LoadConfig();
         if (Servers.Count == 0)
         {
-            Servers.Add(new ServerEntry("Training", "Training Grounds", "-console +connect 51.195.60.227:28015", "", "train.jpg"));
+            Servers.Add(new ServerEntry("Training", "Training Grounds", "-console +connect 51.195.60.227:28015", "", "train.png"));
             Servers.Add(new ServerEntry("Vanilla",  "Rustorigin Main",  "", "", "main.png"));
         }
         logoBmp = LoadBitmap(Path.Combine(Assets.Dir, "logo.png")) ?? LoadBitmap(Path.Combine(AppDir(), "logo.png"));
