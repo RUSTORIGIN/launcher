@@ -23,8 +23,8 @@ using System.Windows.Media.Animation;
 [assembly: AssemblyDescription("Rustorigin Launcher - downloads, installs and launches the client")]
 [assembly: AssemblyCompany("Rustorigin")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 kaveOO")]
-[assembly: AssemblyVersion("1.0.4.0")]
-[assembly: AssemblyFileVersion("1.0.4.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
 
 // RUSTORIGIN launcher - WPF port of the Superdesign canvas composition:
 // rounded dark card, full-bleed cross-fading screenshot slideshow, floating glass UI
@@ -83,7 +83,7 @@ static class Assets
 {
     public static string Dir = "";
     static readonly string[] Files = {
-        "1.jpg", "2.jpg", "3.jpg", "main.jpg", "train.jpg",
+        "1.jpg", "2.jpg", "3.jpg", "main.png", "train.jpg",
         "logo.png", "launcher.cfg",
         "fonts/Montserrat-Regular.ttf", "fonts/Montserrat-Medium.ttf",
         "fonts/Montserrat-SemiBold.ttf", "fonts/Montserrat-Bold.ttf", "fonts/OFL.txt",
@@ -290,7 +290,7 @@ public class LauncherWindow : Window
         if (Servers.Count == 0)
         {
             Servers.Add(new ServerEntry("Training", "Training Grounds", "-console +connect 51.195.60.227:28015", "", "train.jpg"));
-            Servers.Add(new ServerEntry("Vanilla",  "Rustorigin Main",  "", "", "main.jpg"));
+            Servers.Add(new ServerEntry("Vanilla",  "Rustorigin Main",  "", "", "main.png"));
         }
         logoBmp = LoadBitmap(Path.Combine(Assets.Dir, "logo.png")) ?? LoadBitmap(Path.Combine(AppDir(), "logo.png"));
 

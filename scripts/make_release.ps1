@@ -30,7 +30,7 @@ $refs = @("/r:$fw\WPF\PresentationFramework.dll","/r:$fw\WPF\PresentationCore.dl
 $res = @("/resource:assets\1.jpg,assets/1.jpg",
          "/resource:assets\2.jpg,assets/2.jpg",
          "/resource:assets\3.jpg,assets/3.jpg",
-         "/resource:assets\main.jpg,assets/main.jpg",
+         "/resource:assets\main.png,assets/main.png",
          "/resource:assets\train.jpg,assets/train.jpg",
          "/resource:assets\logo.png,assets/logo.png",
          "/resource:config\launcher.cfg,assets/launcher.cfg",
