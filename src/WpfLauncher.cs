@@ -41,11 +41,16 @@ public class App
     static System.Threading.Mutex instanceMutex;
 
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
-        bool createdNew;
-        instanceMutex = new System.Threading.Mutex(true, MutexName, out createdNew);
-        if (!createdNew)
+        // A launch right after a self-update starts while the old process is still shutting down and
+        // holding the mutex: wait for it to exit instead of treating this as a second instance (which
+        // used to exit at once and leave no launcher running at all).
+        instanceMutex = new System.Threading.Mutex(false, MutexName);
+        bool owned;
+        try { owned = instanceMutex.WaitOne(IsRelaunchAfterUpdate(args) ? 30000 : 0, false); }
+        catch (System.Threading.AbandonedMutexException) { owned = true; }   // previous instance exited without releasing it
+        if (!owned)
         {
             // Already running: signal that instance to surface itself, then exit.
             try { System.Threading.EventWaitHandle.OpenExisting(ShowEventName).Set(); } catch { }
@@ -72,6 +77,20 @@ public class App
 
         app.Run(win);
         GC.KeepAlive(instanceMutex);     // hold the handle for the whole process lifetime
+    }
+
+    // True when this process was started by the self-updater: either with --relaunch (this version's
+    // updater), or by an older updater that passes no flag, which leaves "<exe>.old" next to a freshly
+    // written exe.
+    static bool IsRelaunchAfterUpdate(string[] args)
+    {
+        foreach (string a in args) if (a == "--relaunch") return true;
+        try
+        {
+            string self = Process.GetCurrentProcess().MainModule.FileName;
+            return File.Exists(self + ".old") && (DateTime.Now - File.GetLastWriteTime(self)).TotalMinutes < 5;
+        }
+        catch { return false; }
     }
 }
 
@@ -3010,6 +3029,7 @@ public class LauncherWindow : Window
 
     Grid updateGate; TextBlock updateGateMsg; Border updateGateFill, updateGateBar, updateGateUpdateBtn; const double UpdateBarW = 260;
     string pendingRepo, pendingExeUrl, pendingSumsUrl, pendingTag;
+    bool applyingUpdate;   // set while the self-update closes this process; the new version is already starting
 
     // Blocking update prompt shown when a newer release is available. It does NOT auto-download - the
     // player presses UPDATE to install (or QUIT). Sits on top of everything (incl. the caption buttons).
@@ -3080,8 +3100,14 @@ public class LauncherWindow : Window
             try { if (File.Exists(old)) File.Delete(old); } catch { }
             File.Move(self, old);       // a running exe can be renamed on Windows
             File.Move(newPath, self);   // put the new build in its place
-            Process.Start(new ProcessStartInfo(self) { UseShellExecute = true });
-            Dispatcher.Invoke((Action)(() => { try { if (tray != null) tray.Visible = false; } catch { } Application.Current.Shutdown(); }));
+            Process.Start(new ProcessStartInfo(self) { UseShellExecute = true, Arguments = "--relaunch" });   // waits for this process to exit
+            Dispatcher.Invoke((Action)(() =>
+            {
+                applyingUpdate = true;               // close without the "download running" prompt
+                if (busy) CancelDownload();          // a client download pauses here and resumes in the new version
+                try { if (tray != null) tray.Visible = false; } catch { }
+                Application.Current.Shutdown();
+            }));
         }
         catch (Exception ex)
         {
@@ -3181,7 +3207,7 @@ public class LauncherWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        if (busy && dlThread != null && dlThread.IsAlive)
+        if (!applyingUpdate && busy && dlThread != null && dlThread.IsAlive)
         {
             if (!Confirm("Quit", "A download is running. Quit now? Progress is saved.", "Quit", "Keep downloading"))
             { e.Cancel = true; return; }
