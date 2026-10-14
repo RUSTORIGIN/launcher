@@ -105,7 +105,7 @@ and anyone the pack doesn't fit. See [CLAUDE.md](CLAUDE.md) ("Client updates (de
 Push a version tag and CI does everything:
 
 ```bash
-git tag v1.0.4 && git push origin v1.0.4
+git tag v1.1.1 && git push origin v1.1.1
 ```
 
 The **Release** workflow builds the launcher, NSIS setup, and MSI; generates `SHA256SUMS.txt`;
@@ -119,14 +119,14 @@ Uses the .NET Framework `csc` that ships with Windows 10/11 (no SDK or NuGet).
 
 ```powershell
 .\scripts\build.bat                        # quick compile check
-.\scripts\make_release.ps1 -Version 1.0.4  # -> release\RustoriginLauncher.exe (single file)
+.\scripts\make_release.ps1 -Version 1.1.1  # -> release\RustoriginLauncher.exe (single file)
 ```
 
 Installers are optional and need WiX v5 + NSIS:
 
 ```powershell
-.\scripts\build_installer_exe.ps1 -Version 1.0.4   # NSIS setup .exe
-.\scripts\build_msi.ps1 -Version 1.0.4             # MSI
+.\scripts\build_installer_exe.ps1 -Version 1.1.1   # NSIS setup .exe
+.\scripts\build_msi.ps1 -Version 1.1.1             # MSI
 ```
 
 ## How it works
