@@ -5,6 +5,13 @@ All notable changes to the RustOrigin launcher are documented here. Format loose
 
 ## [Unreleased]
 
+### Fixed
+- **The launcher now always reopens by itself after a self-update.** The updater started the new
+  version while the old one was still closing; the new one saw "already running" and quit, leaving
+  no launcher open. It now waits for the old process to exit (up to 30 s) and then opens. This also
+  works when the update is run by an older launcher's updater. A client download running at that
+  moment is paused and resumes in the new version, instead of blocking the restart with a prompt.
+
 ### Changed
 - **Rustorigin Main** server card uses the new "OG MAIN" banner (`assets/main.png`, 1024x512, the
   same format as the Training Grounds cover) instead of the old `main.jpg` screenshot.
