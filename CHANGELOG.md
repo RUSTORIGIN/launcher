@@ -3,6 +3,12 @@
 All notable changes to the RustOrigin launcher are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are Git tags (`vX.Y.Z`).
 
+## [Unreleased]
+
+### Fixed
+- **YouTube button opens the right channel.** It pointed to `@Rustorigin-v1`, which no longer
+  exists; it now opens `https://www.youtube.com/@RUSTORIGlN`, the same link as the website.
+
 ## [1.1.1] - 2026-10-14
 
 ### Fixed
