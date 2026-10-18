@@ -3,6 +3,22 @@
 All notable changes to the RustOrigin launcher are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are Git tags (`vX.Y.Z`).
 
+## [Unreleased]
+
+### Fixed
+- **A download damaged on the player's PC now repairs itself** instead of failing with "Integrity
+  check failed" and starting over from zero. The launcher ships the SHA-256 of every 32 MB piece of
+  the client zip and the update pack (`config\piece-hashes.txt`). Each piece is checked as it
+  arrives and fetched again if it got damaged. If the finished file still fails its SHA-256 check
+  (e.g. antivirus or a disk changed it afterwards), only the damaged pieces are downloaded again,
+  up to 3 times. After a failure the next attempt switches to a single connection on its own, and
+  a piece that keeps arriving damaged ends with a clear antivirus-exclusion hint.
+- Long error messages under the install button wrap instead of being cut off.
+
+### Added
+- `scripts\make_piece_hashes.ps1` builds `config\piece-hashes.txt` from the hosted files. Re-run it
+  whenever the client zip or the pack changes.
+
 ## [1.1.2] - 2026-10-14
 
 ### Fixed

@@ -361,6 +361,13 @@ these steps move together - never upload a repackaged zip without rebuilding the
 - smoke-test the update with a `launcher.cfg` next to a dev exe against a copy of the old client
   before tagging: the launcher self-update is mandatory, so a release reaches every player at once.
 
+**Whenever the hosted zip or pack changes**, also run
+`.\scripts\make_piece_hashes.ps1 <zip> <patchpack>` on the exact uploaded files before step 3. It
+writes `config\piece-hashes.txt` (the SHA-256 of every 32 MB piece), which the launcher embeds to
+check each piece as it downloads and to re-fetch only the damaged pieces when the final SHA-256
+check fails. A stale or missing entry is harmless (that file just downloads without piece repair),
+but players whose PC damages downloads then get the old fail-and-restart behaviour.
+
 If the uploaded zip and the embedded hash ever drift apart, players get a (correct) integrity
 rejection and cannot install - re-run from step 1.
 
@@ -460,12 +467,14 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 │   ├── app_icon_source.png
 │   └── fonts/               #   bundled Montserrat (4 weights) + OFL.txt
 ├── config/
-│   └── launcher.cfg         # runtime config (URL, hash, install dir, servers, branding)
+│   ├── launcher.cfg         # runtime config (URL, hash, install dir, servers, branding)
+│   └── piece-hashes.txt     # per-32 MB-piece SHA-256 of the hosted zip + pack (make_piece_hashes.ps1)
 ├── scripts/
 │   ├── build.bat            # dev compile check of WpfLauncher.cs via csc
 │   ├── make_release.ps1     # release build: stamp version, embed resources, icon+manifest
 │   ├── package_client.ps1   # zip the client into RustClient.zip for hosting
 │   ├── make_client_patch.ps1 # build the delta pack (previous build -> new build) for hosting
+│   ├── make_piece_hashes.ps1 # per-piece hashes of the hosted files -> config\piece-hashes.txt (download self-repair)
 │   ├── client_patch_builder.cs # the pack builder (content-defined chunking); compiled by the two scripts that use it, not part of the launcher
 │   ├── client_filter.ps1    # which client files ship - shared by package_client.ps1 and make_client_patch.ps1
 │   ├── build_msi.ps1        # build the per-user MSI installer (WiX)
