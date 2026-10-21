@@ -15,7 +15,7 @@ public sealed class FakeService
     public readonly string Key = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
     public int SessionCalls, HeartbeatCalls, BadSignatures, FailOpens, RejectBeatNumber = -1;
     public long LastSeq;
-    public string LastBody;
+    public string LastBody, LastOpenBody;
     public int SessionCount;
     public string Tools;   // "tools" field of the session reply, or null for none
     public string Post(string url, string body, string sig)
@@ -25,6 +25,7 @@ public sealed class FakeService
             if (url.EndsWith("/v1/session"))
             {
                 SessionCalls++;
+                LastOpenBody = body;
                 if (FailOpens > 0) { FailOpens--; return null; }
                 SessionCount++;
                 LastSeq = 0;
@@ -76,6 +77,14 @@ public static class Harness
         return c;
     }
 
+    // Like Make, with a hardware id source: a fixed value, or one that throws.
+    public static AcSessionClient WithHardware(FakeService svc, int stopAfterBeats, string hw, bool throws)
+    {
+        var c = Make(svc, stopAfterBeats, 0);
+        c.HardwareId = () => { if (throws) throw new System.InvalidOperationException("boom"); return hw; };
+        return c;
+    }
+
     // The real HTTP client against a running service, for the given number of accepted heartbeats.
     public static AcSessionClient Live(string url, string steamId, int beats)
     {
@@ -112,6 +121,21 @@ Check "session request: short nonce -> null" ($null -eq [AcSession]::BuildSessio
 $evil = [AcSession]::BuildSessionRequest($sid, '1.2"},"x":"y', $nonce, 1)
 Check "session request: version cannot break out of its string" ($evil -match '"launcher":"1\.2",' -and $evil -notmatch '"x"')
 Check "session request: empty version -> 0" ([AcSession]::BuildSessionRequest($sid, '', $nonce, 1) -match '"launcher":"0"')
+
+# ---- hardware id (expected value computed independently with Python's hashlib) ----
+$guid = '6f1e2d3c-4b5a-4968-8776-655443322110'
+$hw = '4e66d5084224e1e815223d5682aaafd69662875cbf6deb4d28902f6edd6d08bf'
+Check "hardware id matches the reference vector"   ([AcSession]::HardwareIdFromMachineGuid($guid) -eq $hw)
+Check "hardware id ignores case and spaces"        ([AcSession]::HardwareIdFromMachineGuid(" $($guid.ToUpperInvariant()) ") -eq $hw)
+foreach ($bad in '', 'not-a-guid', '{6f1e2d3c-4b5a-4968-8776-655443322110}', '00000000-0000-0000-0000-000000000000', $null) {
+    Check "hardware id refused: '$bad'" ($null -eq [AcSession]::HardwareIdFromMachineGuid($bad))
+}
+$mine = [AcSession]::ReadHardwareId()
+Check "hardware id of this PC is 64 hex and stable" ([AcSession]::IsHex($mine, 64) -and $mine -eq [AcSession]::ReadHardwareId())
+$reqHw = [AcSession]::BuildSessionRequest($sid, '1.2.0', $nonce, 1760000000, $hw.ToUpperInvariant())
+Check "session request with hardware id exact body" ($reqHw -eq "{`"v`":1,`"steamid`":`"$sid`",`"launcher`":`"1.2.0`",`"nonce`":`"$nonce`",`"t`":1760000000,`"hw`":`"$hw`"}")
+Check "session request: bad hardware id left out"   ([AcSession]::BuildSessionRequest($sid, '1.2.0', $nonce, 1760000000, 'abc"}') -eq $req)
+Check "session request: no hardware id left out"    ([AcSession]::BuildSessionRequest($sid, '1.2.0', $nonce, 1760000000, $null) -eq $req)
 
 # ---- heartbeat ----
 $hb = [AcSession]::BuildHeartbeat($sess, 7, 1760000210, $true, [string[]]@('tool:autohotkey'))
@@ -202,6 +226,13 @@ Check "client: waits for Steam, then opens"   ($r.Done -and $r.C.Opened -eq 1 -a
 
 $svc = New-Object FakeService; $r = RunClient $svc 0 0
 Check "client: does nothing when the game is not running" ($r.Done -and $svc.SessionCalls -eq 0)
+
+$svc = New-Object FakeService
+$c = [Harness]::WithHardware($svc, 2, $hw, $false); $c.Start()
+Check "client: the hardware id goes with the session request" ($c.Wait(5000) -and $svc.LastOpenBody -match "`"hw`":`"$hw`"}$")
+$svc = New-Object FakeService
+$c = [Harness]::WithHardware($svc, 2, $null, $true); $c.Start()
+Check "client: a throwing hardware id source still opens, without hw" ($c.Wait(5000) -and $c.HeartbeatsOk -eq 2 -and $svc.LastOpenBody -notmatch '"hw"')
 
 $svc = New-Object FakeService
 $c = [Harness]::Make($svc, 1000000, 0); $c.SecondMs = 1000; $c.Start()

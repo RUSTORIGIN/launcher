@@ -52,12 +52,54 @@ public static class AcSession
     // POST /v1/session body. Null when the SteamID or nonce is unusable, so a broken claim is never sent.
     public static string BuildSessionRequest(string steamId, string launcherVersion, string nonceHex, long unixTime)
     {
+        return BuildSessionRequest(steamId, launcherVersion, nonceHex, unixTime, null);
+    }
+
+    // The same, with the PC's hardware id (see HardwareIdFromMachineGuid). An unusable id is left out
+    // rather than failing the request: the id is review evidence, never a condition for a session.
+    public static string BuildSessionRequest(string steamId, string launcherVersion, string nonceHex, long unixTime, string hardwareId)
+    {
         if (!IsSteamId64(steamId) || !IsHex(nonceHex, 32)) return null;
         return "{\"v\":" + ProtocolVersion +
                ",\"steamid\":\"" + steamId + "\"" +
                ",\"launcher\":\"" + Escape(CleanVersion(launcherVersion)) + "\"" +
                ",\"nonce\":\"" + nonceHex.ToLowerInvariant() + "\"" +
-               ",\"t\":" + unixTime.ToString(CultureInfo.InvariantCulture) + "}";
+               ",\"t\":" + unixTime.ToString(CultureInfo.InvariantCulture) +
+               (IsHex(hardwareId, 64) ? ",\"hw\":\"" + hardwareId.ToLowerInvariant() + "\"" : "") + "}";
+    }
+
+    // Hardware id of this PC for the alt-account signal: lowercase hex SHA-256 of "rustorigin-hw-v1:" + the
+    // Windows MachineGuid. The prefix makes it a Rustorigin-only value, so it can't be matched against the
+    // raw MachineGuid other software may report. MachineGuid is random per Windows install, so two PCs never
+    // share one; the SMBIOS UUID is not used because many boards ship a generic one, which would link
+    // strangers. Null unless the input is a GUID.
+    public static string HardwareIdFromMachineGuid(string machineGuid)
+    {
+        Guid g;
+        if (string.IsNullOrEmpty(machineGuid) || !Guid.TryParseExact(machineGuid.Trim(), "D", out g) || g == Guid.Empty) return null;
+        using (var sha = SHA256.Create())
+            return ToHex(sha.ComputeHash(Encoding.UTF8.GetBytes("rustorigin-hw-v1:" + g.ToString("D"))));
+    }
+
+    // HardwareIdFromMachineGuid of HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid (readable without admin
+    // rights; read from the 64-bit registry view, which is where it lives even for a 32-bit process). Null
+    // when it can't be read.
+    public static string ReadHardwareId()
+    {
+        foreach (var view in new[] { RegistryView.Registry64, RegistryView.Default })
+        {
+            try
+            {
+                using (var hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view))
+                using (var k = hklm.OpenSubKey(@"SOFTWARE\Microsoft\Cryptography"))
+                {
+                    string id = HardwareIdFromMachineGuid(k == null ? null : k.GetValue("MachineGuid") as string);
+                    if (id != null) return id;
+                }
+            }
+            catch { }
+        }
+        return null;
     }
 
     // POST /v1/heartbeat body. Signals are filtered (see CleanSignals) rather than escaped, so the body
@@ -363,6 +405,8 @@ public sealed class AcSessionClient
     // added by the client itself, from the rules the server sent with the session.
     public Func<IList<string>> Signals;
     public Func<IEnumerable<string>> ProcessNames = AcSignals.RunningProcessNames;   // replaceable for tests
+    // The PC's hardware id sent with each session request (AcSession.ReadHardwareId), read once. Null = none.
+    public Func<string> HardwareId;
     public int RetryDelayMs = 5000;      // first retry after a failed open; doubles up to MaxRetryDelayMs
     public int MaxRetryDelayMs = 60000;
     public int SecondMs = 1000;          // one second of the server's heartbeat interval (tests shorten it)
@@ -405,11 +449,13 @@ public sealed class AcSessionClient
         int retry = RetryDelayMs;
         bool waitingForSteam = false;
         string lastLabels = "";
+        string hw = null;
+        try { if (HardwareId != null) hw = HardwareId(); } catch { }
         while (!stopped.WaitOne(0) && gameRunning())
         {
             if (grant == null)
             {
-                string body = AcSession.BuildSessionRequest(steamId(), launcherVersion, AcSession.NewNonceHex(), AcSession.UnixNow());
+                string body = AcSession.BuildSessionRequest(steamId(), launcherVersion, AcSession.NewNonceHex(), AcSession.UnixNow(), hw);
                 if (body == null)
                 {
                     if (!waitingForSteam) log("no Steam account logged in yet - waiting for Steam");
@@ -430,7 +476,8 @@ public sealed class AcSessionClient
                 seq = 0; retry = RetryDelayMs;
                 tools = AcSignals.ParseToolSpec(grant.ToolSpec);
                 Interlocked.Increment(ref Opened);
-                log("session opened, heartbeat every " + grant.Heartbeat + " s, " + tools.Count + " tool rule(s) from the server");
+                log("session opened, heartbeat every " + grant.Heartbeat + " s, " + tools.Count + " tool rule(s) from the server, " +
+                    (AcSession.IsHex(hw, 64) ? "hardware id sent" : "no hardware id"));
             }
 
             seq++;

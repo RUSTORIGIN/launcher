@@ -2913,6 +2913,7 @@ public class LauncherWindow : Window
             acSession = new AcSessionClient(AcSessionUrl, AppVer(), AcSession.ReadSteamIdFromRegistry,
                 () => { try { return !proc.HasExited; } catch { return false; } },
                 m => Log("ac-session: " + m), null);
+            acSession.HardwareId = AcSession.ReadHardwareId;
             // Evidence labels, gathered on the session thread: the game files are hashed once per launch (at the
             // first heartbeat). The tool check is done by the client itself, with the rules the server sends.
             string clientDir = null;
@@ -2936,7 +2937,8 @@ public class LauncherWindow : Window
                         "While you play, the launcher keeps a session with the Rustorigin server, so the server can tell a game " +
                         "started from the launcher from one started on its own.\n\n" +
                         "It sends your SteamID, the launcher version, whether the game is running, whether a few key game files " +
-                        "match the official build, and the name of a known macro tool (such as AutoHotkey) if one is running. " +
+                        "match the official build, the name of a known macro tool (such as AutoHotkey) if one is running, and an " +
+                        "anonymous ID of this PC (a one-way hash of your Windows install ID, so staff can see when several accounts play from one PC). " +
                         "Nothing else: no list of your programs and no files.\n\n" +
                         "The server keeps sessions in memory only and logs whether each join had one. This never stops you from playing.");
                 }));

@@ -1,6 +1,6 @@
 # Client-side anti-cheat: launcher session (design, v1)
 
-Status: slices 1-5 are built (see [Build slices](#build-slices)). They run on the dev server only, and the
+Status: slices 1-6 are built (see [Build slices](#build-slices)). They run on the dev server only, and the
 shipped `launcher.cfg` leaves `AcSessionUrl` blank. This file is the contract the launcher, the session
 service and the gate plugin are built against.
 
@@ -36,8 +36,9 @@ game runs, every N seconds:                     ^ 127.0.0.1 only: GET /v1/check
                                       signals -> OriginAntiCheat as log-only "Launcher" evidence
 ```
 
-- **Launcher:** `src/AcSession.cs` builds and signs the messages and parses the replies. The network
-  calls and the PLAY wiring come in a later slice.
+- **Launcher:** `src/AcSession.cs` builds and signs the messages, parses the replies, gathers the
+  evidence labels and the hardware id, and runs the session client that `Play` starts (`StartAcSession`
+  in `src/WpfLauncher.cs`).
 - **Session service and gate plugin:** live in `RUSTORIGIN/plugins`, not in this repo. The Oxide sandbox
   normally keeps plugins away from raw network listeners, so the plugin does not host the endpoint. It
   asks the service over `127.0.0.1` with Oxide's `webrequest`.
@@ -55,13 +56,17 @@ computed over the **raw body bytes as sent**, so no canonical re-encoding is eve
 Request (unsigned; there is no secret yet):
 
 ```json
-{"v":1,"steamid":"76561198000000000","launcher":"1.2.0","nonce":"<32 hex>","t":1760000000}
+{"v":1,"steamid":"76561198000000000","launcher":"1.2.0","nonce":"<32 hex>","t":1760000000,"hw":"<64 hex>"}
 ```
 
 - `steamid`: the SteamID64 of the Steam account logged in on this PC (read from Steam's registry entry by
   the launcher). It is a **claim**: the server checks it against the SteamID that actually joins.
 - `nonce`: 16 random bytes, so two requests in the same second are distinct in logs.
 - `t`: the launcher's Unix time; the server only uses it to log large clock skew.
+- `hw` (optional, slice 6): the PC's hardware id, lowercase hex `SHA-256("rustorigin-hw-v1:" + MachineGuid)`,
+  where MachineGuid is `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` in lower case. Like the SteamID it
+  is a claim. The service ignores a malformed value and still opens the session, and a launcher that can't
+  read it leaves the field out. See [Hardware id](#hardware-id-slice-6).
 
 Reply:
 
@@ -101,16 +106,39 @@ session. `next` lets the server slow heartbeats down under load.
 
 `signals` are short labels (`[a-z0-9_.:-]`, at most 64 characters each, at most 32 per heartbeat). The
 launcher sends a label only when something matched (for example a known macro tool), never a process list.
-Signal labels and the rules that produce them are defined in a later slice.
+The labels and the rules that produce them are in slice 5 below.
 
 ### 3. Gate check (local only): `GET /v1/check?steamid=<id>&ip=<ip>`
 
-Bound to `127.0.0.1`. Reply `{"status":"ok"}` or `none` / `stale` / `mismatch`:
+Bound to `127.0.0.1`. Reply `{"status":"ok", ...}` or `none` / `stale` / `mismatch`:
 
 - `ok`: a fresh session exists for this exact SteamID and IP.
 - `stale`: one existed, but its last heartbeat is older than `ttl`.
 - `mismatch`: there is a fresh session for this SteamID from another IP, or for this IP with another SteamID.
 - `none`: nothing.
+
+An `ok` reply also carries the launcher version, `game`, the raw `signals`, the staff-readable `labels`
+(tool ids turned back into names), the heartbeat `age` and the `heartbeats` count. When the session was
+opened with a hardware id it adds `"hw":"<first 16 hex>"` and `"hw_accounts":[...]`: the other SteamIDs
+(at most 16) that hold a session from the same PC, fresh or not, among the sessions the service still
+remembers (6 hours after their last heartbeat).
+
+### Hardware id (slice 6)
+
+The alt-account signal: it shows staff that several accounts play from one PC. **Review only**: it never
+refuses a session, never kicks and is never a ban reason on its own. Families, shared PCs and LAN parties
+legitimately produce it.
+
+- **Source: the Windows MachineGuid.** It is random per Windows install, so two PCs never share one by
+  accident. The SMBIOS UUID was rejected: many boards ship the same generic UUID, which would link strangers.
+  MachineGuid changes when Windows is reinstalled, and someone determined can change it; that is acceptable
+  for a review signal.
+- **Hashed with a Rustorigin prefix** on the PC, so what leaves the PC is not the MachineGuid itself and can't
+  be matched against the raw value other software may report. The prefix is public: the hash keeps the id
+  out of plain sight, it is not a secret.
+- **It is a claim.** The launcher is open source, so anyone can send any value or none. A fake value only
+  hides a link; a forged link would need another player's hash, which only appears, shortened, in the staff
+  logs on the server.
 
 ## Binding and abuse cases
 
@@ -123,6 +151,8 @@ Bound to `127.0.0.1`. Reply `{"status":"ok"}` or `none` / `stale` / `mismatch`:
   abuse.
 - **Session theft.** The key never leaves the launcher process and is only sent over TLS. A stolen key
   still only works from the original IP.
+- **Hardware id.** Not part of the binding: two sessions with the same `hw` are both valid. It only adds
+  `hw_accounts` to the check reply, for staff.
 
 ## Rollout
 
@@ -135,14 +165,15 @@ Bound to `127.0.0.1`. Reply `{"status":"ok"}` or `none` / `stale` / `mismatch`:
 ## Privacy
 
 What leaves the player's PC: the SteamID, the launcher version, heartbeat timing, whether the game is
-running, and the labels of matched signals (`tool:<id>`, `client:modified:<file>`). Game files are hashed
-on the PC, and only the "modified" label is sent, never a hash or file contents. There are no process lists
-or personal files. A hardware fingerprint would come later (slice 6).
+running, the labels of matched signals (`tool:<id>`, `client:modified:<file>`) and the hardware id (a
+one-way hash of the Windows MachineGuid). Game files are hashed on the PC, and only the "modified" label is
+sent, never a hash or file contents. There are no process lists or personal files.
 
 The session service keeps sessions in memory only and forgets them 6 hours after their last heartbeat. Its
 log carries counts only. The gate plugin's daily log records each join's status and labels with the
-player's name and SteamID, for staff review. **Those log files are not pruned yet**: add a retention limit
-before production. A one-time notice in the launcher, shown after the first session-enabled PLAY, says
+player's name and SteamID, the first 16 hex characters of the hardware id, and the other accounts seen on
+the same PC, for staff review. **Those log files are not pruned yet**: add a retention limit before
+production. A one-time notice in the launcher, shown after the first session-enabled PLAY, says
 what is sent.
 
 ## Build slices
@@ -176,5 +207,11 @@ what is sent.
    kick anyone. The tool list is the one part that is not public: it lives in `ac_tools.txt` on the
    server, and players see only rule numbers. Anyone with a session can still read the rules from the
    reply, so it is out of plain sight, not secret.
-6. Hardware fingerprint (alt-account signal, review only).
+6. **Hardware id** (alt-account signal, review only). The launcher sends `hw` with every session request
+   (see [Hardware id](#hardware-id-slice-6)). The service indexes sessions by it and answers `hw` and
+   `hw_accounts` in the check reply. OriginSession 0.2.0 adds `pc <id>` to the join line, logs
+   `shared-pc` when another account turns up on the same PC, shows both in `session`, and exposes
+   `GetLauncherPc` / `GetLauncherSharedAccounts`. It never kicks. Tested: the launcher against a reference
+   vector computed independently, the service's interop fixture with the launcher's exact body, and the
+   plugin compiled with C# 6 against the dev server's DLLs; not yet run on the dev server.
 7. Enforcement switch.
