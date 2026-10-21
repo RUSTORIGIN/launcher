@@ -1,7 +1,7 @@
 # Client-side anti-cheat: launcher session (design, v1)
 
-Status: slices 1-6 are built (see [Build slices](#build-slices)). They run on the dev server only, and the
-shipped `launcher.cfg` leaves `AcSessionUrl` blank. This file is the contract the launcher, the session
+Status: slices 1-6 and 8 are built (see [Build slices](#build-slices)). They run on the dev server only, and
+the shipped `launcher.cfg` leaves `AcSessionUrl` blank. This file is the contract the launcher, the session
 service and the gate plugin are built against.
 
 ## Goal and limits
@@ -121,12 +121,16 @@ An `ok` reply also carries the launcher version, `game`, the raw `signals`, the 
 (tool ids turned back into names), the heartbeat `age` and the `heartbeats` count. When the session was
 opened with a hardware id it adds `"hw":"<first 16 hex>"` and `"hw_accounts":[...]`: the other SteamIDs
 (at most 16) that hold a session from the same PC, fresh or not, among the sessions the service still
-remembers (6 hours after their last heartbeat).
+remembers (6 hours after their last heartbeat). Since slice 8, `hw` is the **server-keyed device id**, not
+the launcher's value, and a contested session (see [Device id](#device-id-slice-8)) answers `"contested":1`
+instead of `hw` / `hw_accounts`.
 
 ### Hardware id (slice 6)
 
-The alt-account signal: it shows staff that several accounts play from one PC. **Review only**: it never
-refuses a session, never kicks and is never a ban reason on its own. Families, shared PCs and LAN parties
+The alt-account signal: it shows staff that several accounts play from one PC. It never refuses a session and
+is never a ban reason on its own. Since slice 8 the RustRCON panel uses it for one thing beyond review: a
+match to the PC of an **actively banned** account kicks and opens a case (shadow mode first, see
+[Device id](#device-id-slice-8)). Families, shared PCs and LAN parties
 legitimately produce it.
 
 - **Source: the Windows MachineGuid.** It is random per Windows install, so two PCs never share one by
@@ -140,6 +144,37 @@ legitimately produce it.
   hides a link; a forged link would need another player's hash, which only appears, shortened, in the staff
   logs on the server.
 
+### Device id (slice 8)
+
+The launcher is unchanged: it still sends `hw` as above. The service never keeps that value. On arrival it
+replaces it with `HMAC-SHA256(AC_HW_KEY, "rustorigin-pc-v1:" + hw)`, where `AC_HW_KEY` is a 32-byte secret in
+the service's `server.env` (never in git, the exe or a player's config). Everything downstream (the check
+reply, the gate plugin's log, the RustRCON panel) only ever sees this keyed id, so a leaked log can't be
+matched against a PC's MachineGuid without the key. A new key gives every PC a new id: old links age out.
+The `rustorigin-pc-v1:` prefix versions the scheme.
+
+**Contested pairs.** Sessions are keyed by (SteamID, IP) and the SteamID is only a claim, so someone behind
+the same public IP as a player could open sessions in that player's name with their own PC. When a fresh
+session of a pair is replaced by one with another device (or none), the new session is *contested*: it
+reports no device, isn't counted in `hw_accounts`, and stays contested while sessions of that pair keep
+fighting. Once the pair has been quiet for a ttl, a new session is trusted again.
+
+**Ban evasion (RustRCON panel).** The panel reads the device id from OriginSession's join line, keeps it on
+the player record, and checks it against banned accounts. A same-PC match to an active ban is the only
+launcher signal that acts by itself: by default it **kicks and opens a case for an admin**, configurable to
+review-only or to a ban as long as the linked one, and it starts in **shadow mode** (the case says what would
+have happened; nothing is done). IP, name and family-share links only ever open a case; private and
+carrier-NAT addresses link nobody. An admin's "false alarm" on the case clears the link. Setup and config:
+"Ban evasion by PC" in the RustRCON README.
+
+Limits, stated plainly: the device id is a claim from a machine the player controls. Leaving it out,
+skipping the launcher (until slice 7 requires a session) or changing the MachineGuid hides a link; a match
+is good evidence, a missing match proves nothing. Shared family PCs, LAN cafés and cloned Windows images
+without sysprep share one id, which is why the default is a kick plus a human decision, not a ban. A player
+who shares the victim's IP and holds a session in their name while the victim plays *without* the launcher
+can still put their PC on that account; requiring a session (slice 7) closes most of that. The SteamID
+itself is only as trustworthy as the game server's Steam authentication.
+
 ## Binding and abuse cases
 
 - **Sessions are keyed by (SteamID, IP), and several may exist per SteamID.** A session opened from
@@ -152,7 +187,9 @@ legitimately produce it.
 - **Session theft.** The key never leaves the launcher process and is only sent over TLS. A stolen key
   still only works from the original IP.
 - **Hardware id.** Not part of the binding: two sessions with the same `hw` are both valid. It only adds
-  `hw_accounts` to the check reply, for staff.
+  `hw_accounts` to the check reply, for staff, and (slice 8) the device id the panel's ban-evasion check uses.
+- **Planting a device on someone else's account.** A pair taken over by another device is contested and
+  reports none (see [Device id](#device-id-slice-8)).
 
 ## Rollout
 
@@ -173,7 +210,10 @@ The session service keeps sessions in memory only and forgets them 6 hours after
 log carries counts only. The gate plugin's daily log records each join's status and labels with the
 player's name and SteamID, the first 16 hex characters of the hardware id, and the other accounts seen on
 the same PC, for staff review. **Those log files are not pruned yet**: add a retention limit before
-production. A one-time notice in the launcher, shown after the first session-enabled PLAY, says
+production. The RustRCON panel keeps
+each account's keyed device ids (at most 10) for 180 days after they were last seen
+(`evasion.pcRetentionDays`), longer only on accounts with an active ban, since that is what a ban-evasion
+match is made of. Raw MachineGuids and the launcher's own hash are kept nowhere. A one-time notice in the launcher, shown after the first session-enabled PLAY, says
 what is sent.
 
 ## Build slices
@@ -215,3 +255,11 @@ what is sent.
    vector computed independently, the service's interop fixture with the launcher's exact body, and the
    plugin compiled with C# 6 against the dev server's DLLs; not yet run on the dev server.
 7. Enforcement switch.
+8. **Device id + ban evasion** (this repo unchanged). `ac_session.py` keys the hardware id with `AC_HW_KEY`
+   and marks contested pairs; OriginSession 0.2.1 logs `pc contested`; the RustRCON panel stores device ids
+   from the join line, links same-PC accounts, and on a match to an active ban kicks + opens a case (default),
+   reviews only, or bans, starting in shadow mode, with audit entries and retention. Tested: the service's
+   unit tests (keying, contested takeovers in both orders), the panel's link tests (join-line parsing against
+   forged names, IP-only never acting, false-alarm clearing, retention) and the real panel end to end against
+   a fake RCON server in shadow, kick, ban and cleared modes; the plugin compiled with C# 6 against the dev
+   server's DLLs. Not yet run on the dev server.

@@ -2938,9 +2938,12 @@ public class LauncherWindow : Window
                         "started from the launcher from one started on its own.\n\n" +
                         "It sends your SteamID, the launcher version, whether the game is running, whether a few key game files " +
                         "match the official build, the name of a known macro tool (such as AutoHotkey) if one is running, and an " +
-                        "anonymous ID of this PC (a one-way hash of your Windows install ID, so staff can see when several accounts play from one PC). " +
+                        "anonymous ID of this PC (a one-way hash of your Windows install ID). " +
                         "Nothing else: no list of your programs and no files.\n\n" +
-                        "The server keeps sessions in memory only and logs whether each join had one. This never stops you from playing.");
+                        "Staff use the PC ID to see when several accounts play from one PC, and to keep banned players from coming back " +
+                        "on a new account: an account playing from the PC of a banned account can be kicked while an admin reviews it. " +
+                        "The server keeps the PC ID with your account for up to 180 days after you last played. " +
+                        "The session itself never stops you from playing.");
                 }));
         }
         catch (Exception ex) { Log("ac-session: not started: " + ex.Message); }
