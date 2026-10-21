@@ -178,6 +178,8 @@ public class LauncherWindow : Window
     string DiscordButtonLabel = "";  // Rich Presence button label (e.g. "Play on Rustorigin").
     string DiscordButtonUrl = "";    // Rich Presence button link (e.g. https://rustorigin.com).
     DiscordRpc discord;
+    string AcSessionUrl = "";        // launcher anti-cheat session service (docs/CLIENT_ANTICHEAT.md). Empty disables.
+    AcSessionClient acSession;       // the session of the current game launch, if any
     long sessionStartUnix;
     string GameTitle   = "RUSTORIGIN";
     string Tagline     = "RUSTORIGIN is a private Rust world on the April 2021 build. Craft, raid and survive with a tight community - one click to jump in.";
@@ -438,6 +440,7 @@ public class LauncherWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         try { if (discord != null) discord.Stop(); } catch { }
+        try { if (acSession != null) acSession.Stop(); } catch { }
         base.OnClosed(e);
     }
 
@@ -1605,6 +1608,7 @@ public class LauncherWindow : Window
                     case "discordlargeimage": DiscordLargeImage = v; break;
                     case "discordbuttonlabel": DiscordButtonLabel = v; break;
                     case "discordbuttonurl":   DiscordButtonUrl = v; break;
+                    case "acsessionurl":       AcSessionUrl = v; break;
                     case "sha256":
                     case "clientsha256":
                     case "expectedsha256": ExpectedSha256 = v; break;
@@ -2879,10 +2883,32 @@ public class LauncherWindow : Window
             var psi = new ProcessStartInfo(exe) { WorkingDirectory = Path.GetDirectoryName(exe) };
             if (!string.IsNullOrEmpty(args)) psi.Arguments = args;
             var proc = Process.Start(psi);
-            if (proc != null) { gameProc = proc; WatchGame(proc); SetDiscord("In game"); if (Prefs.GetBool("MinimizeInGame", false)) HideForGame(); }
+            if (proc != null) { gameProc = proc; WatchGame(proc); StartAcSession(proc); SetDiscord("In game"); if (Prefs.GetBool("MinimizeInGame", false)) HideForGame(); }
             ShowStatus(TextMute, "Launching...", false);
         }
         catch (Exception ex) { ShowStatus(Danger, "Launch error: " + ex.Message, true); }
+    }
+
+    // Launcher anti-cheat session (docs/CLIENT_ANTICHEAT.md): opened on a background thread right after the
+    // game starts and kept alive with heartbeats until it exits. Purely additive: nothing here can stop or
+    // delay the game, and every problem only goes to launcher.log.
+    void StartAcSession(Process proc)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(AcSessionUrl)) return;
+            if (!AcSession.IsAllowedEndpoint(AcSessionUrl))
+            {
+                Log("ac-session: AcSessionUrl ignored - it must be https (plain http only for a local or private IP address)");
+                return;
+            }
+            if (acSession != null) acSession.Stop();
+            acSession = new AcSessionClient(AcSessionUrl, AppVer(), AcSession.ReadSteamIdFromRegistry,
+                () => { try { return !proc.HasExited; } catch { return false; } },
+                m => Log("ac-session: " + m), null);
+            acSession.Start();
+        }
+        catch (Exception ex) { Log("ac-session: not started: " + ex.Message); }
     }
 
     // ---------- settings panel ----------

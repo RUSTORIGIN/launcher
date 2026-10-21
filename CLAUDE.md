@@ -16,7 +16,7 @@ All three live in `src/`, each with its own `Main()` - they are *not* compiled t
 | Source | Output | Built by | Notes |
 |--------|--------|----------|-------|
 | `src/WpfLauncher.cs` | `RustoriginLauncher.exe` | `csc` via `scripts/build.bat` / `scripts/make_release.ps1` | The single shipping build. WPF, single-file, cross-fading screenshot background. Downloads + **SHA-256-verifies** + extracts + launches. |
-| `src/UpdateParsing.cs`, `src/A2S.cs`, `src/DiscordRpc.cs`, `src/ClientPatch.cs` | (compiled in) | same `csc` build | Self-update parsing, Steam A2S live status, Discord Rich Presence, and the client delta-update (pack recipe, stage, commit) helpers. |
+| `src/UpdateParsing.cs`, `src/A2S.cs`, `src/DiscordRpc.cs`, `src/ClientPatch.cs`, `src/AcSession.cs` | (compiled in) | same `csc` build | Self-update parsing, Steam A2S live status, Discord Rich Presence, the client delta-update (pack recipe, stage, commit) helpers, and the anti-cheat session protocol + background session client (started by `Play` when `AcSessionUrl` is set, see `docs/CLIENT_ANTICHEAT.md`). |
 
 Nearly all real work happens in `src/WpfLauncher.cs`. It is one self-contained code-only WPF file
 (~1800 lines): window chrome, glass UI, config parsing, and the resumable, verified
@@ -254,15 +254,19 @@ manifest - everything is baked in, nothing needs to sit beside it):
 .\scripts\make_release.ps1 -Version 1.0.0   # -> release\RustoriginLauncher.exe
 ```
 
-There is no `cargo` or clippy here. Three `Add-Type`-based test scripts exist:
+There is no `cargo` or clippy here. Four `Add-Type`-based test scripts exist:
 `scripts\test_updater_parsing.ps1` (compiles `src\UpdateParsing.cs`, unit-tests the self-update
 JSON/`SHA256SUMS`/version parsing), `scripts\test_a2s_parsing.ps1` (compiles `src\A2S.cs`,
 unit-tests the A2S reply parser and runs one end-to-end query against a loopback UDP responder) and
 `scripts\test_client_patch.ps1` (compiles `src\ClientPatch.cs` + the pack builder, builds a pack from
 two synthetic client folders, applies it, checks the result byte-for-byte, and checks every way an
-update must be refused: modified install, missing source, cancel, truncated pack, unsafe recipe).
+update must be refused: modified install, missing source, cancel, truncated pack, unsafe recipe), and
+`scripts\test_ac_session.ps1` (compiles `src\AcSession.cs`, unit-tests the anti-cheat session messages,
+HMAC signing against an independent reference vector, reply parsing, the endpoint rule, and the session
+client's loop against an in-process fake service; with `AC_TEST_URL` set it also runs the real HTTP client
+against a running `ac_session.py`).
 Two GitHub Actions workflows exist: **build-check** (`.github/workflows/build-check.yml`) compiles
-both builds **and runs all three tests** on every push/PR, and **release**
+both builds **and runs all four tests** on every push/PR, and **release**
 (`.github/workflows/release.yml`) builds and publishes on a version tag (see the release checklist).
 Do not reference commands that don't exist here. After changing `src\WpfLauncher.cs`, the fastest
 correctness check is a clean `csc` compile (as `build.bat` does).
@@ -404,6 +408,7 @@ Plain `Key=Value`, `#`/`;` comments. Loaded embedded-defaults-first, then overri
 | `DiscordAppId` | Discord application id enabling **Rich Presence** (`src/DiscordRpc.cs`) - shows "RUSTORIGIN - In the launcher / In game" on the player's Discord. Blank disables. |
 | `DiscordLargeImage` | Optional Rich Presence art-asset key (uploaded in the Discord app) shown as the large image. |
 | `DiscordButtonLabel` / `DiscordButtonUrl` | Optional clickable button under the presence (Discord can't make the image itself a link). e.g. `Play on RustOrigin` -> `https://rustorigin.com`. |
+| `AcSessionUrl` | Base URL of the launcher anti-cheat session service (`docs/CLIENT_ANTICHEAT.md`). When set, `Play` starts an `AcSessionClient` (`src/AcSession.cs`) right after the game process starts: it opens a session for the SteamID logged in to Steam (registry `ActiveUser`) and heartbeats until the game exits, on its own background thread, logging only to `launcher.log`. It never blocks or delays PLAY. Must be `https`; plain `http` is accepted only for a local/private IP literal (a dev server, e.g. in WSL) - anything else is ignored with a log line. Blank (the shipped default) disables it. |
 | `Server` | Repeatable, up to 6: `Server=Tag\|Name\|launch args\|players\|cover` (everything after Name optional). Rendered as a **website-style card** (`ServerTile`, matching rustorigin.com): a cover-image header (`cover` is an embedded image name e.g. `main.png`, else `server-cover.png`, else a gradient) with a **status-dot badge** (top-left) + **dark tag pills** (top-right) overlaid, then a body with a live **PLAYERS ONLINE** count + **violet progress bar**, the `Name` + a `RUSTORIGIN \| tags` subtitle, the connect address, and a violet **CONNECT** chip (or **SOON** when the card has no join target). `Tag` may be **comma/slash-separated** (e.g. `Vanilla, Main, Old Recoil`) to show several pills. Cards stack vertically; clicking a joinable card (or its CONNECT chip) launches with its args. **Live status:** when the launch args contain `+connect HOST:PORT`, the launcher queries A2S (`src/A2S.cs`) and fills the count/bar (green ONLINE / grey SOON, refreshed ~60s); a `statusUrl` (6th field) web feed is used instead when set; otherwise the static `players` text shows. A source that defines `Server=` lines replaces the previous source's list. |
 | `Social` | Repeatable: `Social=platform\|url` -> a clickable brand icon in the bar above the server cards (opens the URL in the browser). Built-in brand marks (inline vector paths in `SocialGlyph`): `discord`, `youtube`, `tiktok`; an unknown platform key is skipped. A source that defines `Social=` lines replaces the list from the previous source. |
 
@@ -451,6 +456,7 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 │   ├── A2S.cs               #   Steam A2S_INFO query for live server status (tested by scripts/test_a2s_parsing.ps1)
 │   ├── DiscordRpc.cs        #   dependency-free Discord Rich Presence over the Discord IPC named pipe
 │   ├── ClientPatch.cs       #   client delta update: pack recipe, stage + verify, commit (tested by scripts/test_client_patch.ps1)
+│   ├── AcSession.cs         #   anti-cheat session protocol v1: build/sign messages, parse replies (tested by scripts/test_ac_session.ps1)
 │   ├── app.manifest         #   Win32 manifest (csc /win32manifest)
 │   └── app.ico              #   app icon
 ├── assets/                  # build-time embedded resources + icon sources
@@ -473,12 +479,14 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 │   ├── test_updater_parsing.ps1 # unit tests for src/UpdateParsing.cs (run in build-check CI)
 │   ├── test_a2s_parsing.ps1 # unit + loopback tests for src/A2S.cs live server status (run in build-check CI)
 │   ├── test_client_patch.ps1 # end-to-end tests for the client delta update (run in build-check CI)
+│   ├── test_ac_session.ps1  # unit tests for src/AcSession.cs, the anti-cheat session protocol (run in build-check CI)
 │   └── installer/
 │       ├── RustOrigin.wxs   # WiX source for the MSI (WixUI_InstallDir wizard)
 │       ├── RustOrigin.nsi   # NSIS source for the setup .exe (MUI2 wizard)
 │       └── license.rtf      # MIT license shown on both installers' license page
 ├── docs/
 │   ├── IMPLEMENTATION_PLAN.md  # design->code status record (reconciled to current code)
+│   ├── CLIENT_ANTICHEAT.md  # launcher anti-cheat session: design, protocol v1, rollout, privacy
 │   ├── README-PLAYERS.txt
 │   ├── screenshot.png       # launcher screenshot used in README
 │   └── brand-kit/           # design system (css, style guide, docs)
