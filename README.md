@@ -73,7 +73,8 @@ server). Key settings:
 | `Title` / `Tagline` / `Player` | Hero title, description line, and the displayed player name. |
 | `UpdateRepo` | `owner/repo` checked for self-updates (public repo; blank disables). |
 | `DiscordAppId` | Discord Application ID for Rich Presence (blank disables). |
-| `AcSessionUrl` | Launcher anti-cheat session service ([docs/CLIENT_ANTICHEAT.md](docs/CLIENT_ANTICHEAT.md)); the launcher opens a session when the game starts and heartbeats while it runs. Must be `https` (plain `http` only for a local/private IP, for dev servers). Blank disables. Never blocks PLAY. |
+| `AcSessionUrl` | Launcher anti-cheat session service ([docs/CLIENT_ANTICHEAT.md](docs/CLIENT_ANTICHEAT.md)); the launcher opens a session when the game starts and heartbeats while it runs. Must be `https` (plain `http` only for a local/private IP, for dev servers). Blank disables. Never blocks PLAY. The list of tools it looks for (reported only as `tool:<number>`) comes from the server with each session, so it is not in this repo or the config. |
+| `AcClientFile` | Repeatable `path\|size\|sha256` of a game file; the session reports `client:modified:<file>` / `client:missing:<file>` when the installed file differs. Generate with `scripts\make_client_filehashes.ps1`. |
 | `Server` | Repeatable card: `Tag\|Name\|launch args\|players\|cover`. A `+connect HOST:PORT` in the args enables the live A2S count. |
 | `Social` | Repeatable link: `platform\|url` (built-in icons: `discord`, `youtube`, `tiktok`). |
 

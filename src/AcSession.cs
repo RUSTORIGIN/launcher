@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
@@ -31,6 +32,7 @@ public static class AcSession
         public string KeyHex;      // 64 lowercase hex (32-byte HMAC key)
         public int Heartbeat;      // seconds between heartbeats
         public int Ttl;            // seconds a session stays fresh without a heartbeat
+        public string ToolSpec;    // tool rules from the server ("1=autohotkey,autohotkeyu64;2=..."), or null - see AcSignals.ParseToolSpec
     }
 
     // Steam's registry stores the logged-in account as a 32-bit account id; the server sees SteamID64s.
@@ -122,7 +124,7 @@ public static class AcSession
         int hb = Clamp(JsonInt(json, "heartbeat", 30), MinHeartbeat, MaxHeartbeat);
         int ttl = Clamp(JsonInt(json, "ttl", 120), MinTtl, MaxTtl);
         if (ttl < 2 * hb) ttl = Math.Min(MaxTtl, 2 * hb);
-        return new Grant { Session = session.ToLowerInvariant(), KeyHex = key.ToLowerInvariant(), Heartbeat = hb, Ttl = ttl };
+        return new Grant { Session = session.ToLowerInvariant(), KeyHex = key.ToLowerInvariant(), Heartbeat = hb, Ttl = ttl, ToolSpec = JsonStr(json, "tools") };
     }
 
     // Reply to POST /v1/heartbeat: true when accepted. nextSeconds is the clamped interval the server
@@ -229,6 +231,115 @@ public static class AcSession
     }
 }
 
+// Evidence labels for the heartbeat. Only labels ever leave the PC, never a process list or file contents:
+//   tool:<id>               a running process matches tool rule <id>. The rules come from the server in
+//                           the session reply, so the list of tools is not in this repo, the exe or the
+//                           player's config, and the label is only a number.
+//   client:modified:<file>  a game file listed in AcClientFile= differs from the hosted build
+//   client:missing:<file>   that file is not there at all
+// They are evidence for staff review on the server, never a reason to block anything here.
+public static class AcSignals
+{
+    public sealed class ToolRule { public string Label; public string[] Names; }
+    public sealed class FileRule { public string Path; public long Size; public string Sha256; public string Name; }
+
+    public const int MaxToolRules = 64;
+
+    // The "tools" field of the session reply: "<id>=<process>,<process>;<id>=..." with numeric ids and lower-case
+    // process names without ".exe". Malformed rules are dropped one by one; a missing field gives no rules.
+    public static List<ToolRule> ParseToolSpec(string spec)
+    {
+        var rules = new List<ToolRule>();
+        if (string.IsNullOrEmpty(spec) || spec.Length > 8192) return rules;
+        foreach (var part in spec.Split(';'))
+        {
+            int eq = part.IndexOf('=');
+            if (eq <= 0) continue;
+            string id = part.Substring(0, eq).Trim();
+            if (!Regex.IsMatch(id, "^[0-9]{1,4}$")) continue;
+            var names = new List<string>();
+            foreach (var raw in part.Substring(eq + 1).Split(','))
+            {
+                string n = ProcessKey(raw);
+                if (Regex.IsMatch(n, "^[a-z0-9_.+ -]{1,64}$") && !names.Contains(n)) names.Add(n);
+            }
+            if (names.Count > 0) rules.Add(new ToolRule { Label = "tool:" + id, Names = names.ToArray() });
+            if (rules.Count == MaxToolRules) break;
+        }
+        return rules;
+    }
+
+    // AcClientFile=<path relative to the client folder>|<size>|<sha256>. Rooted paths and ".." are refused.
+    public static FileRule ParseClientFile(string v)
+    {
+        var p = (v ?? "").Split('|');
+        if (p.Length != 3) return null;
+        string path = p[0].Trim().Replace('/', '\\');
+        long size;
+        if (path.Length == 0 || System.IO.Path.IsPathRooted(path) || path.Contains(":") || ("\\" + path + "\\").Contains("\\..\\")) return null;
+        if (!long.TryParse(p[1].Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out size) || !AcSession.IsHex(p[2].Trim(), 64)) return null;
+        string name = Regex.Replace(System.IO.Path.GetFileName(path).ToLowerInvariant(), "[^a-z0-9_.-]", "_");
+        if (name.Length > 48) name = name.Substring(0, 48);
+        return new FileRule { Path = path, Size = size, Sha256 = p[2].Trim().ToLowerInvariant(), Name = name };
+    }
+
+    // Labels of the rules whose process names appear among the running ones (rule order, each once).
+    public static List<string> MatchTools(IEnumerable<string> running, IList<ToolRule> rules)
+    {
+        var have = new HashSet<string>();
+        if (running != null) foreach (var r in running) have.Add(ProcessKey(r));
+        var labels = new List<string>();
+        if (rules != null)
+            foreach (var rule in rules)
+                foreach (var n in rule.Names)
+                    if (have.Contains(n)) { if (!labels.Contains(rule.Label)) labels.Add(rule.Label); break; }
+        return labels;
+    }
+
+    // Labels for listed game files that are missing or differ from the expected size + SHA-256. Reads the
+    // files with full sharing, so it works while the game has them open. A file that can't be read at
+    // all is left out rather than reported (a locked file is not evidence of anything).
+    public static List<string> CheckClientFiles(string clientDir, IList<FileRule> rules)
+    {
+        var labels = new List<string>();
+        if (string.IsNullOrEmpty(clientDir) || rules == null) return labels;
+        foreach (var r in rules)
+        {
+            string full = System.IO.Path.Combine(clientDir, r.Path);
+            try
+            {
+                var fi = new FileInfo(full);
+                if (!fi.Exists) { labels.Add("client:missing:" + r.Name); continue; }
+                if (fi.Length != r.Size) { labels.Add("client:modified:" + r.Name); continue; }
+                using (var fs = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1 << 20))
+                using (var sha = SHA256.Create())
+                {
+                    var sb = new StringBuilder(64);
+                    foreach (byte x in sha.ComputeHash(fs)) sb.Append(x.ToString("x2", CultureInfo.InvariantCulture));
+                    if (sb.ToString() != r.Sha256) labels.Add("client:modified:" + r.Name);
+                }
+            }
+            catch { }
+        }
+        return labels;
+    }
+
+    // Names of the running processes (no paths, nothing else).
+    public static List<string> RunningProcessNames()
+    {
+        var names = new List<string>();
+        try { foreach (var p in Process.GetProcesses()) { try { names.Add(p.ProcessName); } catch { } finally { p.Dispose(); } } }
+        catch { }
+        return names;
+    }
+
+    static string ProcessKey(string s)
+    {
+        s = (s ?? "").Trim().ToLowerInvariant();
+        return s.EndsWith(".exe") ? s.Substring(0, s.Length - 4) : s;
+    }
+}
+
 // Runs the session for one game launch on a background thread: opens a session, then sends a heartbeat
 // until the game exits or Stop() is called. It never throws and never blocks the caller - every failure
 // is logged and retried, because a session problem must never keep anyone from playing.
@@ -247,6 +358,11 @@ public sealed class AcSessionClient
     Thread thread;
 
     public int Opened, HeartbeatsOk, HeartbeatsRejected, NetworkErrors;
+    // Evidence labels to send with each heartbeat (see AcSignals), asked for on the client thread before
+    // every heartbeat. Null = none. A throwing source just sends no labels that time. The tool labels are
+    // added by the client itself, from the rules the server sent with the session.
+    public Func<IList<string>> Signals;
+    public Func<IEnumerable<string>> ProcessNames = AcSignals.RunningProcessNames;   // replaceable for tests
     public int RetryDelayMs = 5000;      // first retry after a failed open; doubles up to MaxRetryDelayMs
     public int MaxRetryDelayMs = 60000;
     public int SecondMs = 1000;          // one second of the server's heartbeat interval (tests shorten it)
@@ -284,9 +400,11 @@ public sealed class AcSessionClient
     void Loop()
     {
         AcSession.Grant grant = null;
+        List<AcSignals.ToolRule> tools = null;
         long seq = 0;
         int retry = RetryDelayMs;
         bool waitingForSteam = false;
+        string lastLabels = "";
         while (!stopped.WaitOne(0) && gameRunning())
         {
             if (grant == null)
@@ -310,12 +428,20 @@ public sealed class AcSessionClient
                     continue;
                 }
                 seq = 0; retry = RetryDelayMs;
+                tools = AcSignals.ParseToolSpec(grant.ToolSpec);
                 Interlocked.Increment(ref Opened);
-                log("session opened, heartbeat every " + grant.Heartbeat + " s");
+                log("session opened, heartbeat every " + grant.Heartbeat + " s, " + tools.Count + " tool rule(s) from the server");
             }
 
             seq++;
-            string hb = AcSession.BuildHeartbeat(grant.Session, seq, AcSession.UnixNow(), gameRunning(), null);
+            var gathered = new List<string>();
+            try { if (Signals != null) { var s = Signals(); if (s != null) gathered.AddRange(s); } } catch { }
+            try { if (tools.Count > 0 && ProcessNames != null) gathered.AddRange(AcSignals.MatchTools(ProcessNames(), tools)); } catch { }
+            IList<string> labels = AcSession.CleanSignals(gathered);
+            // Tell the player's own log what is being reported, whenever it changes.
+            string joined = string.Join(",", labels);
+            if (joined != lastLabels) { log(joined.Length > 0 ? "reporting: " + joined : "reporting nothing"); lastLabels = joined; }
+            string hb = AcSession.BuildHeartbeat(grant.Session, seq, AcSession.UnixNow(), gameRunning(), labels);
             string r = post(baseUrl + "/v1/heartbeat", hb, AcSession.Sign(grant.KeyHex, hb));
             int next; string reason;
             if (r == null)

@@ -17,6 +17,7 @@ public sealed class FakeService
     public long LastSeq;
     public string LastBody;
     public int SessionCount;
+    public string Tools;   // "tools" field of the session reply, or null for none
     public string Post(string url, string body, string sig)
     {
         lock (this)
@@ -27,7 +28,8 @@ public sealed class FakeService
                 if (FailOpens > 0) { FailOpens--; return null; }
                 SessionCount++;
                 LastSeq = 0;
-                return "{\"session\":\"" + SessionCount.ToString("x32") + "\",\"key\":\"" + Key + "\",\"heartbeat\":30,\"ttl\":120}";
+                return "{\"session\":\"" + SessionCount.ToString("x32") + "\",\"key\":\"" + Key + "\",\"heartbeat\":30,\"ttl\":120" +
+                       (Tools != null ? ",\"tools\":\"" + Tools + "\"" : "") + "}";
             }
             HeartbeatCalls++;
             LastBody = body;
@@ -54,6 +56,23 @@ public static class Harness
             () => svc.HeartbeatCalls < stopAfterBeats,
             null, svc.Post);
         c.RetryDelayMs = 1; c.MaxRetryDelayMs = 4; c.SecondMs = 1;
+        return c;
+    }
+
+    // Like Make, with a signal source: fixed labels, or one that throws.
+    public static AcSessionClient WithSignals(FakeService svc, int stopAfterBeats, string[] labels, bool throws)
+    {
+        var c = Make(svc, stopAfterBeats, 0);
+        c.Signals = () => { if (throws) throw new System.InvalidOperationException("boom"); return labels; };
+        return c;
+    }
+
+    // Like Make, with the server's tool rules and a fixed set of "running" processes.
+    public static AcSessionClient WithTools(FakeService svc, int stopAfterBeats, string toolSpec, string[] running)
+    {
+        svc.Tools = toolSpec;
+        var c = Make(svc, stopAfterBeats, 0);
+        c.ProcessNames = () => running;
         return c;
     }
 
@@ -189,6 +208,54 @@ $c = [Harness]::Make($svc, 1000000, 0); $c.SecondMs = 1000; $c.Start()
 Start-Sleep -Milliseconds 300
 $c.Stop()
 Check "client: Stop() ends it in the middle of a 30 s wait" ($c.Wait(2000) -and $svc.HeartbeatCalls -ge 1)
+
+# ---- evidence signals ----
+$svc = New-Object FakeService
+$c = [Harness]::WithSignals($svc, 2, [string[]]@('tool:autohotkey', 'client:modified:gameassembly.dll', 'Bad Label'), $false); $c.Start()
+Check "signals: sent in the heartbeat (invalid labels dropped)" ($c.Wait(5000) -and $svc.LastBody -match '"signals":\["tool:autohotkey","client:modified:gameassembly.dll"\]')
+$svc = New-Object FakeService
+$c = [Harness]::WithSignals($svc, 2, $null, $true); $c.Start()
+Check "signals: a throwing source still heartbeats, with no labels" ($c.Wait(5000) -and $c.HeartbeatsOk -eq 2 -and $svc.LastBody -match '"signals":\[\]')
+
+# tool rules come from the server ("tools" in the session reply); labels are only the rule's number
+$spec = [AcSignals]::ParseToolSpec('1=AutoHotkey.exe, autohotkeyu64 ,autohotkey;12=other;x=bad;3=;4=bad"name;5=ok name')
+Check "tool spec parsed: numeric ids, names lowered, .exe and duplicates dropped, bad rules skipped" (
+    (($spec | ForEach-Object { $_.Label + '=' + ($_.Names -join ',') }) -join ';') -eq 'tool:1=autohotkey,autohotkeyu64;tool:12=other;tool:5=ok name')
+Check "tool spec: missing field -> no rules" ([AcSignals]::ParseToolSpec($null).Count -eq 0)
+Check "tool spec: capped at MaxToolRules" ([AcSignals]::ParseToolSpec(((1..100) | ForEach-Object { "$_=p$_" }) -join ';').Count -eq [AcSignals]::MaxToolRules)
+Check "tool match: case-insensitive, with or without .exe" ((([AcSignals]::MatchTools([string[]]@('explorer', 'AUTOHOTKEYU64.EXE', 'autohotkey'), $spec)) -join ',') -eq 'tool:1')
+Check "tool match: nothing running -> no labels" ([AcSignals]::MatchTools([string[]]@('explorer'), $spec).Count -eq 0)
+$g = [AcSession]::ParseSessionReply("{`"session`":`"$sess`",`"key`":`"$key`",`"tools`":`"1=autohotkey;2=notepad`"}")
+Check "session reply carries the tool spec" ($g.ToolSpec -eq '1=autohotkey;2=notepad')
+
+$svc = New-Object FakeService
+$c = [Harness]::WithTools($svc, 2, '1=autohotkey,autohotkeyu64;2=notepad', [string[]]@('explorer', 'AutoHotkeyU64')); $c.Start()
+Check "client: server tool rules matched, only the number is sent" ($c.Wait(5000) -and $svc.LastBody -match '"signals":\["tool:1"\]')
+$svc = New-Object FakeService
+$c = [Harness]::WithTools($svc, 2, $null, [string[]]@('AutoHotkeyU64')); $c.Start()
+Check "client: no tool rules from the server -> no tool labels" ($c.Wait(5000) -and $svc.LastBody -match '"signals":\[\]')
+Check "running process names include this one" ([AcSignals]::RunningProcessNames() -contains [Diagnostics.Process]::GetCurrentProcess().ProcessName)
+
+$h = '0' * 64
+$f = [AcSignals]::ParseClientFile("RustClient_Data/il2cpp_data/Metadata/global-metadata.dat|12144316|$h")
+Check "client file rule parsed (path, size, label name)" ($f.Path -eq 'RustClient_Data\il2cpp_data\Metadata\global-metadata.dat' -and $f.Size -eq 12144316 -and $f.Name -eq 'global-metadata.dat')
+foreach ($bad in "C:\x.dll|1|$h", "\x.dll|1|$h", "..\x.dll|1|$h", "a\..\..\x.dll|1|$h", "x.dll:ads|1|$h", "x.dll|-1|$h", "x.dll|1|abc", "x.dll|1", $null) {
+    Check "client file rule refused: '$bad'" ($null -eq [AcSignals]::ParseClientFile($bad))
+}
+
+$dir = Join-Path ([IO.Path]::GetTempPath()) ("ac-signals-test-" + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force "$dir\sub" | Out-Null
+try {
+    $bytes = [Text.Encoding]::ASCII.GetBytes('original game file')
+    [IO.File]::WriteAllBytes("$dir\good.dll", $bytes); [IO.File]::WriteAllBytes("$dir\sub\same-size.dat", $bytes); [IO.File]::WriteAllBytes("$dir\bigger.dll", $bytes + 1)
+    $sha = (Get-FileHash -LiteralPath "$dir\good.dll" -Algorithm SHA256).Hash.ToLowerInvariant()
+    $frules = [System.Collections.Generic.List[AcSignals+FileRule]]::new()
+    foreach ($l in "good.dll|$($bytes.Length)|$sha", "sub\same-size.dat|$($bytes.Length)|$('1' * 64)", "bigger.dll|$($bytes.Length)|$sha", "gone.dll|5|$sha") { $frules.Add([AcSignals]::ParseClientFile($l)) }
+    $lock = [IO.File]::Open("$dir\good.dll", 'Open', 'Read', 'Read')   # held open like a loaded DLL
+    try { $labels = [AcSignals]::CheckClientFiles($dir, $frules) } finally { $lock.Dispose() }
+    Check "client files: modified (hash), modified (size) and missing reported; the good one is not" (($labels -join ',') -eq 'client:modified:same-size.dat,client:modified:bigger.dll,client:missing:gone.dll')
+    Check "client files: no folder -> no labels" ([AcSignals]::CheckClientFiles('', $frules).Count -eq 0)
+} finally { Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue }
 
 # ---- optional: the real client against a running session service ----
 if ($env:AC_TEST_URL) {

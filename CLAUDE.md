@@ -357,6 +357,8 @@ these steps move together - never upload a repackaged zip without rebuilding the
 **When the client build changes** (new server build), also, before step 3:
 
 - set a new `ClientVersion=` (and `Version=` / `Tagline=` if they name the build);
+- regenerate the `AcClientFile=` lines with `.\scripts\make_client_filehashes.ps1 -ClientDir <new client>`
+  (the anti-cheat session would otherwise report every player's new game files as `client:modified`);
 - give the new zip a **new file name** in `DownloadUrl` (e.g. `RustClient-2021-04.zip`) rather than
   overwriting the old one - a CDN may keep serving the cached old file under the old name;
 - run `.\scripts\make_client_patch.ps1` against the **same** new client folder the zip was made
@@ -408,7 +410,8 @@ Plain `Key=Value`, `#`/`;` comments. Loaded embedded-defaults-first, then overri
 | `DiscordAppId` | Discord application id enabling **Rich Presence** (`src/DiscordRpc.cs`) - shows "RUSTORIGIN - In the launcher / In game" on the player's Discord. Blank disables. |
 | `DiscordLargeImage` | Optional Rich Presence art-asset key (uploaded in the Discord app) shown as the large image. |
 | `DiscordButtonLabel` / `DiscordButtonUrl` | Optional clickable button under the presence (Discord can't make the image itself a link). e.g. `Play on RustOrigin` -> `https://rustorigin.com`. |
-| `AcSessionUrl` | Base URL of the launcher anti-cheat session service (`docs/CLIENT_ANTICHEAT.md`). When set, `Play` starts an `AcSessionClient` (`src/AcSession.cs`) right after the game process starts: it opens a session for the SteamID logged in to Steam (registry `ActiveUser`) and heartbeats until the game exits, on its own background thread, logging only to `launcher.log`. It never blocks or delays PLAY. Must be `https`; plain `http` is accepted only for a local/private IP literal (a dev server, e.g. in WSL) - anything else is ignored with a log line. Blank (the shipped default) disables it. |
+| `AcSessionUrl` | Base URL of the launcher anti-cheat session service (`docs/CLIENT_ANTICHEAT.md`). When set, `Play` starts an `AcSessionClient` (`src/AcSession.cs`) right after the game process starts: it opens a session for the SteamID logged in to Steam (registry `ActiveUser`) and heartbeats until the game exits, on its own background thread, logging only to `launcher.log`. It never blocks or delays PLAY. Must be `https`; plain `http` is accepted only for a local/private IP literal (a dev server, e.g. in WSL) - anything else is ignored with a log line. Blank (the shipped default) disables it. On the first PLAY with it set, a one-time notice (shown after the game has started; pref `AcNoticeShown`) tells the player what is sent. **The tool list is deliberately not a launcher setting:** the session service sends the rules in its session reply (`"tools"`, parsed by `AcSignals.ParseToolSpec`), and the client reports only `tool:<id>` - keep it that way, so the list stays out of this public repo, the exe and players' configs. |
+| `AcClientFile` | Repeatable `relative\path\|size\|sha256` (`AcSignals.ParseClientFile`; rooted paths and `..` refused): once per launch the session hashes these game files and reports `client:modified:<file>` / `client:missing:<file>` on a mismatch. **Regenerate with `scripts\make_client_filehashes.ps1` whenever the client build changes.** A source that defines them replaces the previous list. |
 | `Server` | Repeatable, up to 6: `Server=Tag\|Name\|launch args\|players\|cover` (everything after Name optional). Rendered as a **website-style card** (`ServerTile`, matching rustorigin.com): a cover-image header (`cover` is an embedded image name e.g. `main.png`, else `server-cover.png`, else a gradient) with a **status-dot badge** (top-left) + **dark tag pills** (top-right) overlaid, then a body with a live **PLAYERS ONLINE** count + **violet progress bar**, the `Name` + a `RUSTORIGIN \| tags` subtitle, the connect address, and a violet **CONNECT** chip (or **SOON** when the card has no join target). `Tag` may be **comma/slash-separated** (e.g. `Vanilla, Main, Old Recoil`) to show several pills. Cards stack vertically; clicking a joinable card (or its CONNECT chip) launches with its args. **Live status:** when the launch args contain `+connect HOST:PORT`, the launcher queries A2S (`src/A2S.cs`) and fills the count/bar (green ONLINE / grey SOON, refreshed ~60s); a `statusUrl` (6th field) web feed is used instead when set; otherwise the static `players` text shows. A source that defines `Server=` lines replaces the previous source's list. |
 | `Social` | Repeatable: `Social=platform\|url` -> a clickable brand icon in the bar above the server cards (opens the URL in the browser). Built-in brand marks (inline vector paths in `SocialGlyph`): `discord`, `youtube`, `tiktok`; an unknown platform key is skipped. A source that defines `Social=` lines replaces the list from the previous source. |
 
@@ -441,6 +444,7 @@ Two separate mechanisms - don't confuse them:
 | `MinimizeInGame` | `false` | Minimize the launcher while the client runs. |
 | `AutoUpdate` | `true` | Check `UpdateRepo`'s GitHub Releases on launch and offer a verified self-update. |
 | `DiscordRpc` | `true` | Publish Discord Rich Presence (needs `DiscordAppId` set in `launcher.cfg`). |
+| `AcNoticeShown` | `false` | Set once the one-time anti-cheat session notice has been shown (after the first PLAY with `AcSessionUrl` set). |
 
 To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, and (optionally) a
 `SettingRow(...)` in `BuildSettingsOverlay` so it shows in the gear panel; users can also set it in
@@ -480,6 +484,7 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 │   ├── test_a2s_parsing.ps1 # unit + loopback tests for src/A2S.cs live server status (run in build-check CI)
 │   ├── test_client_patch.ps1 # end-to-end tests for the client delta update (run in build-check CI)
 │   ├── test_ac_session.ps1  # unit tests for src/AcSession.cs, the anti-cheat session protocol (run in build-check CI)
+│   ├── make_client_filehashes.ps1 # AcClientFile= lines (size + SHA-256 of key game files) for launcher.cfg
 │   └── installer/
 │       ├── RustOrigin.wxs   # WiX source for the MSI (WixUI_InstallDir wizard)
 │       ├── RustOrigin.nsi   # NSIS source for the setup .exe (MUI2 wizard)

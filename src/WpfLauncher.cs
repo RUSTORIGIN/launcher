@@ -180,6 +180,7 @@ public class LauncherWindow : Window
     DiscordRpc discord;
     string AcSessionUrl = "";        // launcher anti-cheat session service (docs/CLIENT_ANTICHEAT.md). Empty disables.
     AcSessionClient acSession;       // the session of the current game launch, if any
+    List<AcSignals.FileRule> AcClientFiles = new List<AcSignals.FileRule>();    // AcClientFile= lines: game files checked against the hosted build
     long sessionStartUnix;
     string GameTitle   = "RUSTORIGIN";
     string Tagline     = "RUSTORIGIN is a private Rust world on the April 2021 build. Craft, raid and survive with a tight community - one click to jump in.";
@@ -1590,6 +1591,7 @@ public class LauncherWindow : Window
     {
         bool clearedServers = false;
         bool clearedSocial = false;
+        bool clearedAcFiles = false;
         try
         {
             foreach (string raw in lines)
@@ -1609,6 +1611,11 @@ public class LauncherWindow : Window
                     case "discordbuttonlabel": DiscordButtonLabel = v; break;
                     case "discordbuttonurl":   DiscordButtonUrl = v; break;
                     case "acsessionurl":       AcSessionUrl = v; break;
+                    case "acclientfile":
+                        // AcClientFile=relative\path|size|sha256 (anti-cheat session evidence). Like Server=, a source
+                        // that defines them replaces the previous list. (The tool list is not configured here: the
+                        // session service sends it, so it is not public.)
+                        { if (!clearedAcFiles) { AcClientFiles.Clear(); clearedAcFiles = true; } var fr = AcSignals.ParseClientFile(v); if (fr != null) AcClientFiles.Add(fr); break; }
                     case "sha256":
                     case "clientsha256":
                     case "expectedsha256": ExpectedSha256 = v; break;
@@ -2906,7 +2913,33 @@ public class LauncherWindow : Window
             acSession = new AcSessionClient(AcSessionUrl, AppVer(), AcSession.ReadSteamIdFromRegistry,
                 () => { try { return !proc.HasExited; } catch { return false; } },
                 m => Log("ac-session: " + m), null);
+            // Evidence labels, gathered on the session thread: the game files are hashed once per launch (at the
+            // first heartbeat). The tool check is done by the client itself, with the rules the server sends.
+            string clientDir = null;
+            try { clientDir = Path.GetDirectoryName(proc.StartInfo.FileName); } catch { }
+            var files = new List<AcSignals.FileRule>(AcClientFiles);
+            List<string> fileLabels = null;
+            acSession.Signals = () =>
+            {
+                if (fileLabels == null) fileLabels = AcSignals.CheckClientFiles(clientDir, files);
+                return fileLabels;
+            };
             acSession.Start();
+            // Tell the player once what the session sends. Shown after the game has already started, so it never
+            // holds up PLAY; skipped (and asked again next time) while the launcher is hidden in the tray.
+            if (!Prefs.GetBool("AcNoticeShown", false))
+                Dispatcher.BeginInvoke((Action)(() =>
+                {
+                    if (hiddenForGame) return;
+                    Prefs.Set("AcNoticeShown", true);
+                    Alert("Anti-cheat session",
+                        "While you play, the launcher keeps a session with the Rustorigin server, so the server can tell a game " +
+                        "started from the launcher from one started on its own.\n\n" +
+                        "It sends your SteamID, the launcher version, whether the game is running, whether a few key game files " +
+                        "match the official build, and the name of a known macro tool (such as AutoHotkey) if one is running. " +
+                        "Nothing else: no list of your programs and no files.\n\n" +
+                        "The server keeps sessions in memory only and logs whether each join had one. This never stops you from playing.");
+                }));
         }
         catch (Exception ex) { Log("ac-session: not started: " + ex.Message); }
     }
