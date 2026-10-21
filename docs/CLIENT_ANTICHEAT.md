@@ -128,9 +128,8 @@ instead of `hw` / `hw_accounts`.
 ### Hardware id (slice 6)
 
 The alt-account signal: it shows staff that several accounts play from one PC. It never refuses a session and
-is never a ban reason on its own. Since slice 8 the RustRCON panel uses it for one thing beyond review: a
-match to the PC of an **actively banned** account kicks and opens a case (shadow mode first, see
-[Device id](#device-id-slice-8)). Families, shared PCs and LAN parties
+is never a ban reason on its own, with one exception since slice 8: the RustRCON panel bans an account that
+plays from the PC of an **actively banned** account, automatically (see [Device id](#device-id-slice-8)). Families, shared PCs and LAN parties
 legitimately produce it.
 
 - **Source: the Windows MachineGuid.** It is random per Windows install, so two PCs never share one by
@@ -161,16 +160,23 @@ fighting. Once the pair has been quiet for a ttl, a new session is trusted again
 
 **Ban evasion (RustRCON panel).** The panel reads the device id from OriginSession's join line, keeps it on
 the player record, and checks it against banned accounts. A same-PC match to an active ban is the only
-launcher signal that acts by itself: by default it **kicks and opens a case for an admin**, configurable to
-review-only or to a ban as long as the linked one, and it starts in **shadow mode** (the case says what would
-have happened; nothing is done). IP, name and family-share links only ever open a case; private and
-carrier-NAT addresses link nobody. An admin's "false alarm" on the case clears the link. Setup and config:
-"Ban evasion by PC" in the RustRCON README.
+launcher signal that acts by itself: by default it **bans the new account at once**, for as long as the
+linked ban runs (permanent when that is unknown), and opens a case for staff. The player sees only
+**`Ban evasion`** ("Disconnected: Ban evasion"), at the kick and at every reconnect: the panel sends the
+ban to OriginSession 0.4+ (`session.ban`), which keeps its own list and kicks the player the moment they
+arrive (after the map load, before they can play). A refused login can't carry the message: this Rust client answers any refused login (Rust's own ban list included) by retrying over a second connection path and then shows only "Disconnected: Disconnected".
+On a server without the plugin the panel falls back to a normal Rust ban with the reason `Ban evasion`. Kick-only, review-only and shadow mode
+remain configurable. The panel also bans on the same **public IP** as a primary-banned account (seen by the
+game server, not reported by the launcher) when the banned account used it in the last 14 days and at most 3
+other accounts share it; name and family-share links only ever open a case; private and carrier-NAT
+addresses link nobody. Only a **primary** ban (one a person or OriginAntiCheat issued) makes a same-PC match act; a match with an account that is itself banned for ban evasion opens a case marked "review only", so one automatic ban is never the evidence for the next. A wrong ban is undone by lifting it in the panel (Bans) or
+deciding the case as a false alarm, which also clears the link. Setup and config: "Ban evasion by PC" in the RustRCON README.
 
 Limits, stated plainly: the device id is a claim from a machine the player controls. Leaving it out,
 skipping the launcher (until slice 7 requires a session) or changing the MachineGuid hides a link; a match
 is good evidence, a missing match proves nothing. Shared family PCs, LAN cafés and cloned Windows images
-without sysprep share one id, which is why the default is a kick plus a human decision, not a ban. A player
+without sysprep share one id: with the automatic ban (the host's choice), such an account is banned until
+staff lift it, so the cases deserve a regular look. A player
 who shares the victim's IP and holds a session in their name while the victim plays *without* the launcher
 can still put their PC on that account; requiring a session (slice 7) closes most of that. The SteamID
 itself is only as trustworthy as the game server's Steam authentication.

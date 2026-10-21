@@ -2964,7 +2964,7 @@ public class LauncherWindow : Window
                         "anonymous ID of this PC (a one-way hash of your Windows install ID). " +
                         "Nothing else: no list of your programs and no files.\n\n" +
                         "Staff use the PC ID to see when several accounts play from one PC, and to keep banned players from coming back " +
-                        "on a new account: an account playing from the PC of a banned account can be kicked while an admin reviews it. " +
+                        "on a new account: an account playing from the PC of a banned account is banned automatically. " +
                         "The server keeps the PC ID with your account for up to 180 days after you last played.\n\n" +
                         "Keep the launcher open while you play: the server only lets in players whose launcher is running. " +
                         "Closing its window while the game runs sends it to the tray, and it closes with the game.");
