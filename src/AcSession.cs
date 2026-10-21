@@ -432,6 +432,9 @@ public sealed class AcSessionClient
     // True once the thread has ended (tests).
     public bool Wait(int ms) { return thread == null || thread.Join(ms); }
 
+    // True while the session thread runs (it ends when the game exits or Stop() is called).
+    public bool Running { get { var t = thread; return t != null && t.IsAlive; } }
+
     // Sleeps, or returns false at once when Stop() is called.
     bool Sleep(int ms) { return !stopped.WaitOne(Math.Max(0, ms)); }
 

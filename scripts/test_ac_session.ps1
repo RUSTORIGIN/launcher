@@ -237,8 +237,10 @@ Check "client: a throwing hardware id source still opens, without hw" ($c.Wait(5
 $svc = New-Object FakeService
 $c = [Harness]::Make($svc, 1000000, 0); $c.SecondMs = 1000; $c.Start()
 Start-Sleep -Milliseconds 300
+$runningBefore = $c.Running
 $c.Stop()
 Check "client: Stop() ends it in the middle of a 30 s wait" ($c.Wait(2000) -and $svc.HeartbeatCalls -ge 1)
+Check "client: Running is true while the session runs, false once it ended" ($runningBefore -and -not $c.Running)
 
 # ---- evidence signals ----
 $svc = New-Object FakeService

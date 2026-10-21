@@ -23,8 +23,8 @@ using System.Windows.Media.Animation;
 [assembly: AssemblyDescription("Rustorigin Launcher - downloads, installs and launches the client")]
 [assembly: AssemblyCompany("Rustorigin")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 kaveOO")]
-[assembly: AssemblyVersion("1.1.2.0")]
-[assembly: AssemblyFileVersion("1.1.2.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
 
 // RUSTORIGIN launcher - WPF port of the Superdesign canvas composition:
 // rounded dark card, full-bleed cross-fading screenshot slideshow, floating glass UI
@@ -461,7 +461,7 @@ public class LauncherWindow : Window
             var open = new System.Windows.Forms.ToolStripMenuItem("Open Rustorigin");
             open.Click += delegate { ShowFromTray(); };
             var quit = new System.Windows.Forms.ToolStripMenuItem("Quit");
-            quit.Click += delegate { try { tray.Visible = false; } catch { } Close(); };
+            quit.Click += delegate { quitNow = true; try { tray.Visible = false; } catch { } Close(); };
             menu.Items.Add(open);
             menu.Items.Add(quit);
             tray.ContextMenuStrip = menu;
@@ -471,6 +471,7 @@ public class LauncherWindow : Window
 
     void ShowFromTray()
     {
+        closeAfterGame = false;   // opened again: the player wants the launcher, so it no longer quits with the game
         try
         {
             Show();
@@ -1935,30 +1936,49 @@ public class LauncherWindow : Window
     // True only when OUR client is running: the one we launched this session, or a process whose exe
     // is the installed client under InstallDir. A same-named process elsewhere on the PC (e.g. another
     // Rust client) must NOT count - otherwise the button shows IN-GAME while nothing is installed here.
-    bool GameRunning()
+    bool GameRunning() { return FindGameProcess() != null; }
+
+    // That client's process, or null. Safe to call from any thread (the anti-cheat session asks it too).
+    Process FindGameProcess()
     {
-        try { if (gameProc != null && !gameProc.HasExited) return true; } catch { }
+        try { var g = gameProc; if (g != null && !g.HasExited) return g; } catch { }
         try
         {
             string exe = FindGameExe();
-            if (exe == null) return false;                 // nothing installed here -> our game can't be running
+            if (exe == null) return null;                  // nothing installed here -> our game can't be running
             string full = Path.GetFullPath(exe);
             foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(LaunchExe)))
             {
-                try { if (string.Equals(Path.GetFullPath(p.MainModule.FileName), full, StringComparison.OrdinalIgnoreCase)) return true; }
+                try { if (string.Equals(Path.GetFullPath(p.MainModule.FileName), full, StringComparison.OrdinalIgnoreCase)) return p; }
                 catch { }                                   // access denied / bitness mismatch -> skip this one
             }
         }
         catch { }
-        return false;
+        return null;
     }
 
     void StartGameTimer()
     {
         var t = new System.Windows.Threading.DispatcherTimer();
         t.Interval = TimeSpan.FromSeconds(2);
-        t.Tick += delegate { try { RefreshState(); if (hiddenForGame && !GameRunning()) RestoreFromGame(); } catch { } };
+        t.Tick += delegate { try { RefreshState(); if (hiddenForGame && !GameRunning()) RestoreFromGame(); EnsureAcSession(); } catch { } };
         t.Start();
+    }
+
+    // The server kicks players without a launcher session (OriginSession enforcement). A game of ours that runs
+    // without one - the launcher was restarted mid-game by a self-update or a crash, or the player started the
+    // game first and the launcher second - gets one here. Looked at every 10 s at most.
+    DateTime lastSessionLook = DateTime.MinValue;
+    void EnsureAcSession()
+    {
+        if (string.IsNullOrEmpty(AcSessionUrl) || !AcSession.IsAllowedEndpoint(AcSessionUrl)) return;
+        if (acSession != null && acSession.Running) return;
+        if ((DateTime.UtcNow - lastSessionLook).TotalSeconds < 10) return;
+        lastSessionLook = DateTime.UtcNow;
+        var p = FindGameProcess();
+        if (p == null) return;
+        Log("ac-session: the game is running without a session - starting one");
+        StartAcSession(p);
     }
 
     void RefreshState()
@@ -2840,6 +2860,7 @@ public class LauncherWindow : Window
         {
             gameProc = null;                 // the process we launched has exited
             if (GameRunning()) return;       // a same-named client is still up (bootstrapper launch) - stay hidden; the game timer retries
+            if (closeAfterGame) { Log("game exited - closing, as asked while it ran"); Close(); return; }
             SetDiscord("In the launcher");
             if (hiddenForGame)
             {
@@ -2911,13 +2932,15 @@ public class LauncherWindow : Window
             }
             if (acSession != null) acSession.Stop();
             acSession = new AcSessionClient(AcSessionUrl, AppVer(), AcSession.ReadSteamIdFromRegistry,
-                () => { try { return !proc.HasExited; } catch { return false; } },
+                // the process we started, or - when that was only a bootstrapper, or the game was adopted - our client
+                () => { try { if (!proc.HasExited) return true; } catch { } return GameRunning(); },
                 m => Log("ac-session: " + m), null);
             acSession.HardwareId = AcSession.ReadHardwareId;
             // Evidence labels, gathered on the session thread: the game files are hashed once per launch (at the
             // first heartbeat). The tool check is done by the client itself, with the rules the server sends.
             string clientDir = null;
             try { clientDir = Path.GetDirectoryName(proc.StartInfo.FileName); } catch { }
+            if (string.IsNullOrEmpty(clientDir)) try { clientDir = Path.GetDirectoryName(FindGameExe()); } catch { }   // a game we did not start
             var files = new List<AcSignals.FileRule>(AcClientFiles);
             List<string> fileLabels = null;
             acSession.Signals = () =>
@@ -2942,8 +2965,9 @@ public class LauncherWindow : Window
                         "Nothing else: no list of your programs and no files.\n\n" +
                         "Staff use the PC ID to see when several accounts play from one PC, and to keep banned players from coming back " +
                         "on a new account: an account playing from the PC of a banned account can be kicked while an admin reviews it. " +
-                        "The server keeps the PC ID with your account for up to 180 days after you last played. " +
-                        "The session itself never stops you from playing.");
+                        "The server keeps the PC ID with your account for up to 180 days after you last played.\n\n" +
+                        "Keep the launcher open while you play: the server only lets in players whose launcher is running. " +
+                        "Closing its window while the game runs sends it to the tray, and it closes with the game.");
                 }));
         }
         catch (Exception ex) { Log("ac-session: not started: " + ex.Message); }
@@ -3269,8 +3293,22 @@ public class LauncherWindow : Window
         return v.ToString(i == 0 ? "0" : "0.0") + " " + u[i];
     }
 
+    bool closeAfterGame;   // closed while playing: waits in the tray (keeping the session) and quits when the game exits
+    bool quitNow;          // tray > Quit: quit for real, even mid-game
+
     protected override void OnClosing(CancelEventArgs e)
     {
+        // Closing the launcher would end the anti-cheat session, and the server kicks players without one. So while
+        // the game runs, the window goes to the tray instead, and the launcher quits by itself when the game exits.
+        if (!applyingUpdate && !quitNow && acSession != null && acSession.Running && GameRunning())
+        {
+            e.Cancel = true;
+            closeAfterGame = true;
+            HideForGame();
+            try { if (tray != null) tray.ShowBalloonTip(6000, "Rustorigin is still running", "The launcher waits in the tray while you play - the server needs it - and closes with the game.", System.Windows.Forms.ToolTipIcon.Info); } catch { }
+            Log("closed while playing: waiting in the tray until the game exits");
+            return;
+        }
         if (!applyingUpdate && busy && dlThread != null && dlThread.IsAlive)
         {
             if (!Confirm("Quit", "A download is running. Quit now? Progress is saved.", "Quit", "Keep downloading"))

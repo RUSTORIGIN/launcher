@@ -1,6 +1,6 @@
 # Client-side anti-cheat: launcher session (design, v1)
 
-Status: slices 1-6 and 8 are built (see [Build slices](#build-slices)). They run on the dev server only, and
+Status: slices 1-8 are built (see [Build slices](#build-slices)); enforcement (slice 7) ships switched off. They run on the dev server only, and
 the shipped `launcher.cfg` leaves `AcSessionUrl` blank. This file is the contract the launcher, the session
 service and the gate plugin are built against.
 
@@ -193,11 +193,20 @@ itself is only as trustworthy as the game server's Steam authentication.
 
 ## Rollout
 
-1. **Shadow:** the gate only logs `ok` / `none` / `stale` / `mismatch` counts. The launcher never blocks
-   PLAY when the service cannot be reached.
-2. **Measure** the share of joins that arrive with a session after the launcher release reaches players.
-3. **Enforce** only when nearly every join has a session: `none` / `stale` gets a kick after a grace
-   period, with a neutral message pointing at the launcher. A config flag rolls this back instantly.
+1. **Prerequisites:** the public session address (`ac.rustorigin.com`, TLS) is live and has an **A record
+   only**: the game connects over IPv4, so a launcher reaching the service over IPv6 would come from
+   another address and read as `mismatch`. A launcher release with `AcSessionUrl` set has reached players
+   (it is mandatory through self-update). `AC_HW_KEY` is set.
+2. **Shadow** (OriginSession 0.3.0 default, `Enforce` false): the gate logs every status, and a
+   `would-kick` line for each player who stayed without a usable session for the grace period. The
+   launcher never blocks PLAY when the service cannot be reached.
+3. **Measure:** `would-kick` lines against joins (the `session` console command counts both). Look at
+   who they are: players on an old launcher, players behind NAT that gives their HTTPS and game traffic
+   different addresses (`mismatch`), staff who test without the launcher (give them `originsession.bypass`).
+4. **Enforce** when nearly every join has a session: `session.enforce on`. A player with `none`, `stale`
+   or `mismatch` (the last can be switched off) for `GraceSeconds` (120) is kicked with a message pointing
+   at the launcher. `session.enforce off` rolls it back at once. If the service itself can't be asked
+   (`error`), nobody is kicked: an outage lets everyone play rather than emptying the server.
 
 ## Privacy
 
@@ -231,9 +240,8 @@ what is sent.
    right after the game process starts, opens a session for the Steam account in the registry (waiting
    for Steam if needed), heartbeats until the game exits, retries with backoff, and reopens when the
    service refuses a heartbeat. It never blocks PLAY. Tested against a fake service and live against the
-   dev `ac_session.py`. Known limit: closing the launcher while playing ends the heartbeats, so the
-   session goes `stale`. Enforcement (slice 7) has to account for that, for example by keeping the
-   launcher in the tray.
+   dev `ac_session.py`. (Closing the launcher while playing used to end the heartbeats; slice 7 keeps it
+   in the tray instead.)
 5. **Evidence signals + the privacy notice.** Two kinds of labels go with every heartbeat:
    - `tool:<id>` when a process from the server's tool rules (`tools` in the session reply) is running.
      The service translates the id back to a name for staff. A compiled script with its own exe name is
@@ -254,7 +262,24 @@ what is sent.
    `GetLauncherPc` / `GetLauncherSharedAccounts`. It never kicks. Tested: the launcher against a reference
    vector computed independently, the service's interop fixture with the launcher's exact body, and the
    plugin compiled with C# 6 against the dev server's DLLs; not yet run on the dev server.
-7. Enforcement switch.
+7. **Enforcement switch.** OriginSession 0.3.0: with `Enforce` on, a player without a fresh session for
+   this SteamID + IP (`none`, `stale`, and `mismatch` unless `KickMismatch` is off) for `GraceSeconds` is
+   kicked; the join is looked at again right when the grace ends, then every re-check (60 s). `error`
+   never kicks. `originsession.bypass` exempts staff. `session.enforce on|off` switches it and saves the
+   config. Off by default: shadow mode logs `would-kick` instead. The launcher keeps the session alive
+   for honest players:
+   - closing the window while the game runs hides it to the tray (with a notice) and the launcher quits
+     when the game exits; tray > Quit still quits at once;
+   - a game of ours running without a session (the launcher restarted by a self-update or a crash, or
+     opened after the game) gets one within about 10 s;
+   - the session follows the game rather than only the process the launcher started, so a client that
+     hands over to a second process keeps its session.
+
+   What it does not do: prove the client is clean, or stop a reimplementation of this open protocol
+   (see [Goal and limits](#goal-and-limits)). It makes "start `RustClient.exe` on its own" stop working,
+   which is what most launcher-skipping is. Tested: the launcher's session tests (including `Running`),
+   the launcher and the plugin compiled (C# 6 against the dev server's DLLs). Not yet run on the dev
+   server; the tray and adopt behaviour needs a manual check there.
 8. **Device id + ban evasion** (this repo unchanged). `ac_session.py` keys the hardware id with `AC_HW_KEY`
    and marks contested pairs; OriginSession 0.2.1 logs `pc contested`; the RustRCON panel stores device ids
    from the join line, links same-PC accounts, and on a match to an active ban kicks + opens a case (default),
