@@ -23,6 +23,8 @@ VirusTotal, v1.1.2:
 
 ## How to use
 
+https://github.com/user-attachments/assets/77bba586-7bcd-4218-99cc-b57cc5724826
+
 1. Run the setup, or the portable exe.
 2. Click **INSTALL** and pick a folder. The game goes into a `Rustorigin` subfolder (suggested: `C:\Rustorigin`). Closing it mid-download is fine, it resumes next time.
 3. Hit **PLAY**, or click a server card to join that server. Cards show live player counts.
