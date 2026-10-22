@@ -896,11 +896,12 @@ public class LauncherWindow : Window
                 {
                     keep.Add(Path.GetFullPath(Path.Combine(InstallDir, "RustoriginLauncher.exe")));
                     keep.Add(Path.GetFullPath(Path.Combine(InstallDir, "Uninstall.exe")));
-                    // an unfinished folder lock stays recorded: what could not be secured may outlive the uninstall
+                    // an unfinished folder lock stays recorded, a folder at that name too (FolderExposure counts
+                    // both): what could not be secured may outlive the uninstall
                     keep.Add(Path.GetFullPath(Path.Combine(InstallDir, LockIncompleteName)));
                 }
                 catch { }
-                DeleteDirContents(InstallDir, keep);
+                FolderPin.DeleteDirContents(InstallDir, keep);
                 try { if (Directory.Exists(InstallDir) && Directory.GetFileSystemEntries(InstallDir).Length == 0) Directory.Delete(InstallDir, false); } catch { }
                 // the download buffer of either route: the full zip and the delta pack
                 foreach (string name in new[] { ZipName, PatchName })
@@ -1266,32 +1267,6 @@ public class LauncherWindow : Window
              fixable ? " - accept the fix when asked, or ask an administrator." :
              " - move the game to a normal folder on an NTFS drive, or ask an administrator."), true);
         return false;
-    }
-
-    static void DeleteDirContents(string dir, ICollection<string> keep)
-    {
-        if (!Directory.Exists(dir)) return;
-        // Never follow a junction or symlink: deleting "inside" it would delete the folder it points at.
-        try { if ((File.GetAttributes(dir) & FileAttributes.ReparsePoint) != 0) return; } catch { return; }
-        foreach (string f in Directory.GetFiles(dir))
-        {
-            try
-            {
-                if (keep != null && keep.Contains(Path.GetFullPath(f))) continue;
-                try { File.SetAttributes(f, FileAttributes.Normal); } catch { }
-                File.Delete(f);
-            }
-            catch { }
-        }
-        foreach (string d in Directory.GetDirectories(dir))
-        {
-            try
-            {
-                DeleteDirContents(d, keep);
-                if (Directory.GetFileSystemEntries(d).Length == 0) Directory.Delete(d, false);
-            }
-            catch { }
-        }
     }
 
     // ---------- native window plumbing ----------

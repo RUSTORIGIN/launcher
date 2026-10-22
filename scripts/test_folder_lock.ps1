@@ -76,6 +76,15 @@ try {
     Check "no record (and no planted folder) left"          (-not (Test-Path "$dir\.rustorigin-lock-incomplete"))
     Check "link inside it removed, its target kept and unchanged" ((Test-Path "$root\canary\keep.txt") -and $canary -eq (Sddl "$root\canary"))
 
+    # ---- a planted folder made undeletable with read-only entries is still removed ----
+    $dir = "$root\rosquat\Rustorigin"
+    New-Item -ItemType Directory -Force "$dir\.rustorigin-lock-incomplete\sub" | Out-Null
+    Set-Content "$dir\.rustorigin-lock-incomplete\sub\x.txt" 'x'
+    attrib +r "$dir\.rustorigin-lock-incomplete\sub"; attrib +r "$dir\.rustorigin-lock-incomplete"
+    Expose $dir
+    Check "read-only folder at the record's name: secured, then removed (0)" ((Secure $dir) -eq 0)
+    Check "no record left"                                  (-not (Test-Path "$dir\.rustorigin-lock-incomplete"))
+
     # ---- a file another account could have left at the record's name is replaced by ours ----
     $dir = "$root\fileplant\Rustorigin"
     New-Item -ItemType Directory -Force $dir | Out-Null
