@@ -62,6 +62,21 @@ try {
     [FolderPin]::DeleteTree("$root\tree")
     Check "DeleteTree removed the tree (read-only file included)" (-not (Test-Path "$root\tree"))
     Check "DeleteTree left a junction's target alone" ((Get-Content "$root\canary\keep.txt") -eq 'keep')
+    # a folder swapped for a junction before DeleteTree pins it (ResetTree unpins an untrusted folder first)
+    Junction "$root\swapped" "$root\canary"
+    $err = $null
+    try { [FolderPin]::DeleteTree("$root\swapped") } catch { $err = $_.Exception.Message }
+    Check "DeleteTree refuses a junction: throws, target untouched" ($err -like '*not a plain folder*' -and (Get-Content "$root\canary\keep.txt") -eq 'keep')
+    # a folder turned into a junction while its entries are being deleted: what is reached through it is refused
+    New-Item -ItemType Directory -Force "$root\victim\sub" | Out-Null
+    Set-Content "$root\victim\sub\v.txt" 'v'; Set-Content "$root\victim\f.txt" 'f'
+    Junction "$root\turned" "$root\victim"
+    $err = $null
+    try { [FolderPin]::DeleteTree("$root\turned\sub") } catch { $err = $_.Exception.Message }
+    Check "DeleteTree through a folder that became a junction: refused" ($err -like '*not in its folder*' -and (Test-Path "$root\victim\sub\v.txt"))
+    $err = $null
+    try { [FolderPin]::DeleteName("$root\turned\f.txt") } catch { $err = $_.Exception.Message }
+    Check "DeleteName through a folder that became a junction: refused" ($err -like '*not in its folder*' -and (Test-Path "$root\victim\f.txt"))
 
     # read-only folders and links can't be removed as they are: DeleteTree makes them writable, never their
     # targets, and removes a read-only hard link without clearing the flag its other name shares
@@ -148,7 +163,7 @@ try {
         $shared -eq (Get-Acl "$root\canary\shared.txt").Sddl -and (Get-Item "$root\canary\shared.txt").IsReadOnly)
 } finally {
     cmd /c rmdir "$root\via\Rustorigin" 2>$null; cmd /c rmdir "$root\parentlink" 2>$null
-    foreach ($l in "$root\uninstall\Rustorigin\game\out", "$root\rotree\ro\out") { if (Test-Path $l) { cmd /c rmdir "$l" 2>$null } }
+    foreach ($l in "$root\uninstall\Rustorigin\game\out", "$root\rotree\ro\out", "$root\swapped", "$root\turned") { if (Test-Path $l) { cmd /c rmdir "$l" 2>$null } }
     if (Test-Path "$root\rotarget") { attrib -r "$root\rotarget" }
     foreach ($v in "$root\canary\shared.txt", "$root\canary\target.txt", "$root\canary\rolink.txt") { if (Test-Path $v) { Set-ItemProperty $v -Name IsReadOnly -Value $false } }
     Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue

@@ -1130,7 +1130,9 @@ public class LauncherWindow : Window
                     if (link) { if (isDir) Directory.Delete(path, false); else File.Delete(path); continue; }   // removes the link, never its target
                     if (!elevated)
                     {
-                        if (isDir) Directory.Delete(path, true);
+                        // never Directory.Delete(path, true): its owner could swap a subfolder for a junction mid-walk,
+                        // and the recursive delete would empty the folder it points at. DeleteTree pins every level.
+                        if (isDir) FolderPin.DeleteTree(path);
                         else { File.SetAttributes(path, FileAttributes.Normal); File.Delete(path); }
                         continue;
                     }

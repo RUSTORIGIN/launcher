@@ -19,12 +19,12 @@ public static class FolderPin
 {
     // Read-data access is what makes the pin hold: Windows only enforces share modes against a handle that has
     // data (or delete) access, so an attributes-only handle would not stop a rename.
-    const uint FILE_READ_DATA = 0x1, FILE_READ_ATTRIBUTES = 0x80, FILE_WRITE_ATTRIBUTES = 0x100;
+    const uint FILE_READ_DATA = 0x1, FILE_READ_ATTRIBUTES = 0x80;
     const uint DELETE = 0x10000, READ_CONTROL = 0x20000, WRITE_DAC = 0x40000, WRITE_OWNER = 0x80000;
     const uint FILE_SHARE_READ = 1, FILE_SHARE_WRITE = 2, FILE_SHARE_DELETE = 4;
     const uint OPEN_EXISTING = 3;
     const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000, FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
-    const int FileBasicInfo = 0, FileAttributeTagInfo = 9, FileDispositionInfoEx = 21;
+    const int FileDispositionInfo = 4, FileAttributeTagInfo = 9, FileDispositionInfoEx = 21;
     const uint OWNER_SECURITY_INFORMATION = 1, DACL_SECURITY_INFORMATION = 4;
     // Delete the name now even if the file is open elsewhere, and even if it is read-only - without clearing
     // the read-only attribute, which a hard link shares with its other names.
@@ -36,8 +36,6 @@ public static class FolderPin
 
     [StructLayout(LayoutKind.Sequential)]
     struct FILE_ATTRIBUTE_TAG_INFO { public uint FileAttributes; public uint ReparseTag; }
-    [StructLayout(LayoutKind.Sequential)]
-    struct FILE_BASIC_INFO { public long CreationTime, LastAccessTime, LastWriteTime, ChangeTime; public uint FileAttributes; }
     // FILETIMEs as uint pairs: a long would be 8-byte aligned and shift every field after FileAttributes.
     [StructLayout(LayoutKind.Sequential)]
     struct BY_HANDLE_FILE_INFORMATION
@@ -50,16 +48,14 @@ public static class FolderPin
     static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr sa, uint disposition, uint flags, IntPtr template);
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool GetFileInformationByHandleEx(SafeFileHandle h, int infoClass, out FILE_ATTRIBUTE_TAG_INFO info, uint size);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    static extern bool GetFileInformationByHandleEx(SafeFileHandle h, int infoClass, out FILE_BASIC_INFO info, uint size);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    static extern bool SetFileInformationByHandle(SafeFileHandle h, int infoClass, ref FILE_BASIC_INFO info, uint size);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     static extern uint GetFinalPathNameByHandleW(SafeFileHandle h, StringBuilder buf, uint size, uint flags);
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool GetFileInformationByHandle(SafeFileHandle h, out BY_HANDLE_FILE_INFORMATION info);
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool SetFileInformationByHandle(SafeFileHandle h, int infoClass, ref uint info, uint size);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool SetFileInformationByHandle(SafeFileHandle h, int infoClass, ref byte info, uint size);
     // The kernel's own get/set (NtQuerySecurityObject / NtSetSecurityObject): they act on this one object only,
     // unlike SetSecurityInfo and SetNamedSecurityInfo, which also propagate to what is inside a folder.
     [DllImport("advapi32.dll", SetLastError = true)]
@@ -150,62 +146,60 @@ public static class FolderPin
         return false;
     }
 
-    // Deletes dir and everything in it without ever following a link: each entry is pinned while it is
-    // looked at (so it can't be swapped for a link meanwhile), links are removed as links, folders are emptied
-    // deepest first and then removed by name, non-recursively. Read-only entries don't stop it: folders (and
-    // junctions) are made writable first, files go with DeleteName as they are. Throws when anything can't be removed.
+    // Deletes dir and everything in it without ever following a link: each folder is pinned while it is emptied,
+    // deepest first, and every entry is checked to really be in its folder (InFolder) before it is looked into or
+    // deleted. Its owner may still have rights inside it and can turn a folder it empties into a junction, so a
+    // path's middle can't be trusted - only the pinned folders. Links are removed as links, and read-only
+    // entries (a planted tree may be made of them) go too (DeleteName). Throws when anything can't be removed.
     public static void DeleteTree(string dir)
     {
+        string full = Path.GetFullPath(dir).TrimEnd('\\');
+        string parent = Path.GetDirectoryName(full);
         bool isDir, isLink;
-        var h = Pin(dir, out isDir, out isLink);
-        if (h == null) throw new IOException(dir + " could not be opened");
-        try
+        using (var ph = parent == null ? null : Pin(parent, out isDir, out isLink))
         {
-            if (!isDir || isLink) throw new IOException(dir + " is not a plain folder");   // never empty what a link points at
-            EmptyTree(dir);
+            if (ph == null) throw new IOException(dir + ": its folder could not be opened");
+            var h = Pin(full, out isDir, out isLink);
+            if (h == null) throw new IOException(dir + " could not be opened");
+            try
+            {
+                if (!isDir || isLink) throw new IOException(dir + " is not a plain folder");   // never empty what a link points at
+                InFolder(h, ph, full);
+                EmptyTree(full, h);
+            }
+            finally { h.Dispose(); }
+            DeleteName(full, ph);
         }
-        finally { h.Dispose(); }
-        ClearReadOnly(dir);
-        Directory.Delete(dir, false);
     }
 
-    static void EmptyTree(string dir)
+    // dirHandle stays pinned while dir's entries go: no other account can rename dir or delete it, and every
+    // folder above it holds a pinned folder, so only dir itself could become a junction meanwhile - InFolder
+    // catches that on every entry.
+    static void EmptyTree(string dir, SafeFileHandle dirHandle)
     {
         foreach (string path in Directory.GetFileSystemEntries(dir))
         {
             bool isDir, isLink;
             var h = Pin(path, out isDir, out isLink);
             if (h == null) throw new IOException(path + " could not be opened");
-            try { if (isDir && !isLink) EmptyTree(path); } finally { h.Dispose(); }   // a pinned entry can't be deleted, so unpin first
-            if (isDir) { ClearReadOnly(path); Directory.Delete(path, false); }   // a link (or an emptied folder): RemoveDirectory never follows it
-            else DeleteName(path);   // only this name, read-only or not; on a link only the link goes
+            try
+            {
+                InFolder(h, dirHandle, path);
+                if (isDir && !isLink) EmptyTree(path, h);
+            }
+            finally { h.Dispose(); }   // a pinned entry can't be deleted, so unpin first
+            DeleteName(path, dirHandle);   // a file, link or emptied folder: only that name, read-only or not
         }
     }
 
-    // RemoveDirectory refuses a read-only folder - a junction too - so whoever planted a tree could otherwise make
-    // it undeletable. The attribute is cleared through a handle on the name itself (FILE_FLAG_OPEN_REPARSE_POINT),
-    // never on what a link there points at; the other attributes are kept. Folders only: a file's attributes are
-    // shared with its hard links, so files are removed with DeleteName instead.
-    static void ClearReadOnly(string path)
+    // Throws unless h is really open on path's name inside the folder `folder` is open on: when that folder was
+    // turned into a junction after it was opened, a path through it leads somewhere else, and the real paths differ.
+    static void InFolder(SafeFileHandle h, SafeFileHandle folder, string path)
     {
-        using (var h = CreateFileW(path, FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            IntPtr.Zero, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero))
-        {
-            if (h.IsInvalid) throw new IOException(path + " could not be opened (" + new Win32Exception(Marshal.GetLastWin32Error()).Message + ")");
-            uint size = (uint)Marshal.SizeOf(typeof(FILE_BASIC_INFO));
-            FILE_BASIC_INFO info;
-            if (!GetFileInformationByHandleEx(h, FileBasicInfo, out info, size))
-                throw new IOException(path + ": attributes could not be read (" + new Win32Exception(Marshal.GetLastWin32Error()).Message + ")");
-            if ((info.FileAttributes & (uint)FileAttributes.ReadOnly) == 0) return;
-            // Only the attributes that can be set; zero times leave the times unchanged, and Normal stands for "none".
-            const FileAttributes settable = FileAttributes.Hidden | FileAttributes.System | FileAttributes.Archive
-                | FileAttributes.NotContentIndexed | FileAttributes.Temporary | FileAttributes.Offline;
-            uint keep = info.FileAttributes & (uint)settable;
-            var set = new FILE_BASIC_INFO();
-            set.FileAttributes = keep == 0 ? (uint)FileAttributes.Normal : keep;
-            if (!SetFileInformationByHandle(h, FileBasicInfo, ref set, size))
-                throw new IOException(path + ": read-only could not be cleared (" + new Win32Exception(Marshal.GetLastWin32Error()).Message + ")");
-        }
+        string f = FinalPath(folder), real = FinalPath(h);
+        string want = f == null ? null : f.TrimEnd('\\') + "\\" + Path.GetFileName(path.TrimEnd('\\'));
+        if (real == null || want == null || !string.Equals(real.TrimEnd('\\'), want, StringComparison.OrdinalIgnoreCase))
+            throw new IOException(path + " is not in its folder any more (a link was put in its way)");
     }
 
     // Best effort (Uninstall): deletes what is in dir except the paths in `keep` (full paths, files or folders -
@@ -314,18 +308,35 @@ public static class FolderPin
         return acl;
     }
 
-    // Deletes the file name path - only that name: a hard link's other names and their content, attributes and
-    // permissions are left alone. Never follows a link.
+    // Deletes the name path - a file, a link or an empty folder, only that name: a hard link's other names and
+    // their content, attributes and permissions are left alone. Never follows a link, at the end of the path or
+    // in place of its folder (InFolder).
     public static void DeleteName(string path)
+    {
+        string full = Path.GetFullPath(path).TrimEnd('\\');
+        string parent = Path.GetDirectoryName(full);
+        bool isDir, isLink;
+        using (var ph = parent == null ? null : Pin(parent, out isDir, out isLink))
+        {
+            if (ph == null) throw new IOException(path + ": its folder could not be opened");
+            DeleteName(full, ph);
+        }
+    }
+
+    static void DeleteName(string path, SafeFileHandle folder)
     {
         using (var h = CreateFileW(path, DELETE | FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, IntPtr.Zero, OPEN_EXISTING,
             FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero))
         {
             if (h.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+            InFolder(h, folder, path);
             uint d = FILE_DISPOSITION_DELETE | FILE_DISPOSITION_POSIX_SEMANTICS | FILE_DISPOSITION_IGNORE_READONLY;
             if (SetFileInformationByHandle(h, FileDispositionInfoEx, ref d, 4)) return;
+            // Windows before 10 1809, or not NTFS: the older delete-on-close, on the same checked handle. It
+            // refuses a read-only name, which then stays (and fails the lock).
+            byte del = 1;
+            if (!SetFileInformationByHandle(h, FileDispositionInfo, ref del, 1)) throw new Win32Exception(Marshal.GetLastWin32Error());
         }
-        File.Delete(path);   // Windows before 10 1809, or not NTFS: a read-only name then stays (and fails the lock)
     }
 
     // The path the handle really has, "\\?\" prefix removed; null when it can't be read.
