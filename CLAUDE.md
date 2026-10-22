@@ -68,5 +68,8 @@ Releases. C# 5 / .NET Framework 4.x WPF, code-only (no XAML), compiled by Window
 ## Workflow
 - Before saying a change is done: compile (`build.bat` or `make_release.ps1`) and run the suites for the files
   you touched; UI changes: run the exe and look
+- If a change touches download, update, signature or install-folder code (`FetchVerified`, `Download*`, `ExtractZip`,
+  `ClientPatch.cs`, `UpdateParsing.cs`, `UpdateCheckWorker`/`PerformUpdate`, `SecureInstallDir`/`LockFolder`/
+  `FolderExposure`, `sign_release.ps1`): run the `security-reviewer` agent before saying it's done
 - Commit only when asked; never commit `release/`, keys, or the client zip
 - When compacting, preserve: modified files, branch/PR, test results, open decisions, and anything not yet verified
