@@ -1,6 +1,6 @@
 ---
 name: security-reviewer
-description: Deep security review of a diff against this launcher's trust model (runs on opus, so it is costly). Use ONLY when the user explicitly asks for a security review, or once before opening a pull request that touches src/, scripts/, config/ or .github/ - never after every edit. Read-only; returns ranked findings.
+description: Deep security review of a diff against this launcher's trust model (runs on opus, so it is costly). Use ONLY when the user explicitly asks for a security review; before reporting done on a change to download, update, signature or install-folder code (see CLAUDE.md Workflow); or once before opening a pull request that touches src/, scripts/, config/ or .github/ - never after every edit. Read-only; returns ranked findings.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---
