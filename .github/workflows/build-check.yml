@@ -47,3 +47,7 @@ jobs:
       - name: Test anti-cheat session protocol helpers
         shell: pwsh
         run: .\scripts\test_ac_session.ps1
+
+      - name: Test install-folder link checks (junctions)
+        shell: pwsh
+        run: .\scripts\test_folder_pin.ps1

@@ -350,7 +350,7 @@ public class LauncherWindow : Window
         // An install made by an older launcher is still open to every account: lock it (in the background -
         // re-permissioning a whole client takes a few seconds). PLAY and INSTALL check again (fail closed).
         if (installDirChosen || File.Exists(InstallMarkerPath()))
-            new Thread(() => SecureInstallDir(false)) { IsBackground = true, Name = "install-acl" }.Start();
+            new Thread(() => { if (!GameRunning()) SecureInstallDir(false); }) { IsBackground = true, Name = "install-acl" }.Start();
 
         // ---- window chrome (native Windows title bar + standard window features) ----
         Title = "Rustorigin Launcher";
@@ -1021,11 +1021,12 @@ public class LauncherWindow : Window
     }
 
     // Locks dir (see above), then everything already inside it: entries with their own permissions go back to
-    // inheriting the folder's, and entries another account owns - or links, which could point anywhere - are
+    // inheriting the folder's, and entries another account owns - or links, which could point anywhere (always removed) - are
     // not trusted. As the player they are deleted; elevated they are taken over for Administrators instead
     // (never deleted). Returns how many untrusted entries there were: AfterLock then drops the install marker,
-    // so the game must be repaired (re-extracted from a verified download) before PLAY.
-    static int LockFolder(string dir, SecurityIdentifier user, bool elevated, Action<string> log)
+    // so the game must be repaired (re-extracted from a verified download) before PLAY. `failed` counts entries
+    // that could not be handled at all (unreadable, in use): they stay as they were, so the folder is not private.
+    static int LockFolder(string dir, SecurityIdentifier user, bool elevated, Action<string> log, ref int failed)
     {
         if (elevated)
         {
@@ -1034,18 +1035,19 @@ public class LauncherWindow : Window
             { o.SetOwner(AdminsSid); Directory.SetAccessControl(dir, o); }
         }
         Directory.SetAccessControl(dir, PrivateSecurity(user));   // also re-applied to what inherits inside
-        return ResetTree(dir, user, elevated, log);
+        return ResetTree(dir, user, elevated, log, ref failed);
     }
 
-    static int ResetTree(string dir, SecurityIdentifier user, bool elevated, Action<string> log)
+    static int ResetTree(string dir, SecurityIdentifier user, bool elevated, Action<string> log, ref int failed)
     {
         int untrusted = 0;
         foreach (string path in Directory.GetFileSystemEntries(dir))
         {
+            bool isDir, link;
+            var pin = FolderPin.Pin(path, out isDir, out link);   // held open: it can't be swapped for a link meanwhile
             try
             {
-                var attr = File.GetAttributes(path);
-                bool isDir = (attr & FileAttributes.Directory) != 0, link = (attr & FileAttributes.ReparsePoint) != 0;
+                if (pin == null) throw new IOException("it could not be opened");
                 FileSystemSecurity sec = isDir ? (FileSystemSecurity)Directory.GetAccessControl(path) : File.GetAccessControl(path);
                 var owner = sec.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
                 bool trustedOwner = TrustedSid(owner, user);
@@ -1053,7 +1055,8 @@ public class LauncherWindow : Window
                 {
                     untrusted++;
                     if (log != null) log("install folder: " + (link ? "link" : "entry owned by " + SidName(owner)) + " not trusted: " + path);
-                    if (link && isDir) { Directory.Delete(path, false); continue; }   // removes the link, never its target
+                    pin.Dispose();   // a pinned entry can't be deleted, not even by us
+                    if (link) { if (isDir) Directory.Delete(path, false); else File.Delete(path); continue; }   // removes the link, never its target
                     if (!elevated)
                     {
                         if (isDir) Directory.Delete(path, true);
@@ -1069,9 +1072,10 @@ public class LauncherWindow : Window
                     if (!trustedOwner) reset.SetOwner(AdminsSid);
                     if (isDir) Directory.SetAccessControl(path, (DirectorySecurity)reset); else File.SetAccessControl(path, (FileSecurity)reset);
                 }
-                if (isDir && !link) untrusted += ResetTree(path, user, elevated, log);
+                if (isDir && !link) untrusted += ResetTree(path, user, elevated, log, ref failed);
             }
-            catch (Exception ex) { untrusted++; if (log != null) log("install folder: could not secure " + path + " (" + ex.Message + ")"); }
+            catch (Exception ex) { untrusted++; failed++; if (log != null) log("install folder: could not secure " + path + " (" + ex.Message + ")"); }
+            finally { if (pin != null) pin.Dispose(); }
         }
         return untrusted;
     }
@@ -1097,6 +1101,7 @@ public class LauncherWindow : Window
         lock (aclLock)
         {
             var me = Me();
+            if (FolderPin.UnderLink(dir)) { Log("install folder " + dir + " " + FolderPin.LinkReason + " - not used"); return FolderPin.LinkReason; }
             try
             {
                 if (!Directory.Exists(dir))
@@ -1108,29 +1113,41 @@ public class LauncherWindow : Window
                 }
             }
             catch (Exception ex) { return "could not be created (" + ex.Message + ")"; }
-            string why = FolderExposure(dir, me);
-            if (why == null) return null;
-            if (UnsafeToWipe(dir) != null) return why;   // never re-permission a folder that isn't the game's
-            try
+            string why;
+            using (var pin = FolderPin.PinFolder(dir, out why))
             {
-                var owner = Directory.GetAccessControl(dir, AccessControlSections.Owner).GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
-                if (owner == me)
-                {
-                    int untrusted = LockFolder(dir, me, false, Log);
-                    AfterLock(dir, untrusted, Log);
-                }
+                if (pin == null) { Log("install folder " + dir + " " + why + " - not used"); return why; }
+                return LockOwnFolder(dir, me);
             }
-            catch (Exception ex) { Log("install folder: lock failed (" + ex.GetType().Name + ": " + ex.Message + ")"); }
-            why = FolderExposure(dir, me);
-            Log(why == null ? "install folder locked to this user, SYSTEM and Administrators: " + dir : "install folder " + dir + " " + why);
-            return why;
         }
     }
 
-    // A folder the elevated fix may touch: not a system/user folder, and plainly a Rustorigin install.
+    // The rest of SecureInstallDir, run while the folder is pinned (FolderPin) so it can't be swapped for a link.
+    string LockOwnFolder(string dir, SecurityIdentifier me)
+    {
+        string why = FolderExposure(dir, me);
+        if (why == null) return null;
+        if (UnsafeToWipe(dir) != null) return why;   // never re-permission a folder that isn't the game's
+        int failed = 0;
+        try
+        {
+            var owner = Directory.GetAccessControl(dir, AccessControlSections.Owner).GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+            if (owner == me)
+            {
+                int untrusted = LockFolder(dir, me, false, Log, ref failed);
+                AfterLock(dir, untrusted, Log);
+            }
+        }
+        catch (Exception ex) { Log("install folder: lock failed (" + ex.GetType().Name + ": " + ex.Message + ")"); }
+        why = failed > 0 ? "has " + failed + " files that could not be secured (close the game and try again)" : FolderExposure(dir, me);
+        Log(why == null ? "install folder locked to this user, SYSTEM and Administrators: " + dir : "install folder " + dir + " " + why);
+        return why;
+    }
+
+    // A folder the elevated fix may touch: not a system/user folder, not reached through a link, and plainly a Rustorigin install.
     static bool LooksLikeInstallFolder(string dir)
     {
-        if (!Directory.Exists(dir) || UnsafeToWipe(dir) != null) return false;
+        if (!Directory.Exists(dir) || UnsafeToWipe(dir) != null || FolderPin.UnderLink(dir)) return false;
         if (string.Equals(Path.GetFileName(Path.GetFullPath(dir).TrimEnd('\\')), "Rustorigin", StringComparison.OrdinalIgnoreCase)) return true;
         foreach (string f in new[] { ".rustorigin-installed", "RustClient.exe", "RustoriginLauncher.exe" })
             if (File.Exists(Path.Combine(dir, f))) return true;
@@ -1149,10 +1166,16 @@ public class LauncherWindow : Window
                 || user.IsWellKnown(WellKnownSidType.AuthenticatedUserSid)) return 2;
             dir = Path.GetFullPath(dir).TrimEnd('\\');
             if (!LooksLikeInstallFolder(dir)) return 2;
-            if (FolderExposure(dir, user) == null) return 0;
-            int untrusted = LockFolder(dir, user, true, null);
-            AfterLock(dir, untrusted, null);
-            return FolderExposure(dir, user) == null ? 0 : 1;
+            string why;
+            using (var pin = FolderPin.PinFolder(dir, out why))
+            {
+                if (pin == null) return 2;   // a link, or not openable: never re-permission it
+                if (FolderExposure(dir, user) == null) return 0;
+                int failed = 0;
+                int untrusted = LockFolder(dir, user, true, null, ref failed);
+                AfterLock(dir, untrusted, null);
+                return failed == 0 && FolderExposure(dir, user) == null ? 0 : 1;
+            }
         }
         catch { return 1; }
     }
@@ -1164,7 +1187,8 @@ public class LauncherWindow : Window
         string dir = InstallDir;
         string why = SecureInstallDir(true);
         if (why == null) return true;
-        if (LooksLikeInstallFolder(dir) && !why.StartsWith("is on a") &&
+        bool fixable = LooksLikeInstallFolder(dir) && !why.StartsWith("is on a");
+        if (fixable &&
             Confirm("Protect the game folder",
                 "Other accounts on this PC could change the game in " + dir + " (it " + why + "). The launcher only runs and updates " +
                 "the game from a folder that just your account and administrators can change.\n\nFix it now? Windows asks for administrator permission once.",
@@ -1186,7 +1210,8 @@ public class LauncherWindow : Window
         // A fresh install can simply use another folder: forget this one so the next INSTALL asks again.
         if (!installed && !HasPartial()) { try { File.Delete(InstallDirFile()); } catch { } installDirChosen = false; }
         ShowStatus(Danger, "The game folder " + dir + " " + why + ". Other accounts could change the game there, so the launcher won't use it" +
-            (installed ? " - accept the fix when asked, or ask an administrator." : " - click Install and pick another folder."), true);
+            (!installed ? " - click Install and pick another folder." : fixable ? " - accept the fix when asked, or ask an administrator." :
+             " - move the game to a normal folder on an NTFS drive, or ask an administrator."), true);
         return false;
     }
 

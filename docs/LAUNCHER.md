@@ -274,6 +274,14 @@ owned by this user, SYSTEM or Administrators, and writable by no one else.
   over untrusted entries for Administrators instead of deleting them, and drops the marker if there were any.
   Declined or impossible (a FAT/exFAT drive, a folder that isn't an install) -> PLAY/INSTALL are refused with
   the reason; a fresh install forgets the folder so the next INSTALL asks for another.
+- **Links are never followed** (`src/FolderPin.cs`): the ACL calls find a folder by name and would follow a
+  junction or symlink, re-permissioning its target (e.g. another account's profile). So an install folder that
+  is, or sits under, a junction/symlink/mount point is refused - by `SecureInstallDir`, by `LooksLikeInstallFolder`
+  (no elevated fix is offered) and by `SecureFolderElevated`. While a folder is locked it and every entry
+  `ResetTree` touches are held open without delete sharing (`FolderPin.Pin`), so nobody can rename one or swap
+  a link in its place mid-lock; the folder's real path (`GetFinalPathNameByHandle`) must equal its configured
+  path, so a subst drive or network path is refused too. Cloud/dedup reparse points (OneDrive placeholders) are
+  not links and are allowed. Tested by `scripts\test_folder_pin.ps1`.
 - Limits: it can't tell that a file another account *modified in place* before the lock was changed (only the
   `AcClientFile` hashes and a repair can), and nothing protects against malware running as the player.
 
@@ -309,7 +317,7 @@ manifest - everything is baked in, nothing needs to sit beside it):
 .\scripts\make_release.ps1 -Version 1.0.0   # -> release\RustoriginLauncher.exe
 ```
 
-There is no `cargo` or clippy here. Four `Add-Type`-based test scripts exist:
+There is no `cargo` or clippy here. Five `Add-Type`-based test scripts exist:
 `scripts\test_updater_parsing.ps1` (compiles `src\UpdateParsing.cs`, unit-tests the self-update
 JSON/`SHA256SUMS`/version parsing), `scripts\test_a2s_parsing.ps1` (compiles `src\A2S.cs`,
 unit-tests the A2S reply parser and runs one end-to-end query against a loopback UDP responder) and
@@ -319,9 +327,11 @@ update must be refused: modified install, missing source, cancel, truncated pack
 `scripts\test_ac_session.ps1` (compiles `src\AcSession.cs`, unit-tests the anti-cheat session messages,
 HMAC signing against an independent reference vector, reply parsing, the endpoint rule, and the session
 client's loop against an in-process fake service; with `AC_TEST_URL` set it also runs the real HTTP client
-against a running `ac_session.py`).
+against a running `ac_session.py`), and `scripts\test_folder_pin.ps1` (compiles `src\FolderPin.cs`, builds
+junctions in a temp folder and checks that a linked install folder or parent is refused, a plain one is
+accepted, and a pinned folder can't be renamed).
 Two GitHub Actions workflows exist: **build-check** (`.github/workflows/build-check.yml`) compiles
-both builds **and runs all four tests** on every push/PR, and **release**
+both builds **and runs all five tests** on every push/PR, and **release**
 (`.github/workflows/release.yml`) builds and publishes on a version tag (see the release checklist).
 Do not reference commands that don't exist here. After changing `src\WpfLauncher.cs`, the fastest
 correctness check is a clean `csc` compile (as `build.bat` does).

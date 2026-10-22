@@ -20,7 +20,9 @@ Examples of in-scope issues:
 - TLS downgrade / insecure-transport fallback, or acceptance of an unverified download.
 - Path traversal ("zip slip") or writing outside the install directory during extraction, or
   while applying a client update (delta pack).
-- Local privilege escalation, arbitrary code execution, or persistence introduced by the launcher.
+- Local privilege escalation, arbitrary code execution, or persistence introduced by the launcher -
+  including making its install-folder lock (or the elevated `--secure-folder` fix) change the permissions
+  of a folder other than the game's, e.g. through a junction or symlink.
 - Handling of untrusted server/config input that leads to code execution.
 
 ## Reporting a vulnerability

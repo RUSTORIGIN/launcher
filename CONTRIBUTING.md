@@ -25,7 +25,7 @@ git checkout -b short-descriptive-name    # e.g. fix-resume-offset
 
 ### 2. Make your change and check it builds
 
-It must compile, and the four test suites must pass (CI runs both on every PR):
+It must compile, and the five test suites must pass (CI runs both on every PR):
 
 ```powershell
 .\scripts\build.bat            # quick compile check of src\WpfLauncher.cs

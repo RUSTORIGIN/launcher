@@ -11,17 +11,18 @@ Releases. C# 5 / .NET Framework 4.x WPF, code-only (no XAML), compiled by Window
 - Tests (one script = one suite; no per-case filter):
   `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_<suite>.ps1`
   suites: `updater_parsing` (UpdateParsing.cs), `a2s_parsing` (A2S.cs), `client_patch` (ClientPatch.cs + builder),
-  `ac_session` (AcSession.cs)
+  `ac_session` (AcSession.cs), `folder_pin` (FolderPin.cs: install-folder link checks)
 - Run: `release\RustoriginLauncher.exe`; add `--dev-config` to use a `launcher.cfg` next to the exe
 - Installers: `scripts\build_installer_exe.ps1 -Version x.y.z` (NSIS 3.12), `scripts\build_msi.ps1` (WiX 5.0.2, never v6+)
-- No linter/formatter exists. CI (`.github/workflows/build-check.yml`) = release build + the 4 suites on PowerShell 7
+- No linter/formatter exists. CI (`.github/workflows/build-check.yml`) = release build + the 5 suites on PowerShell 7
 
 ## Architecture
 - `src/WpfLauncher.cs` (~4k lines): `App.Main`, `Assets`, `LauncherWindow` = UI, config, downloader, install,
   play, self-update. Grep method names (`DownloadWorker`, `FetchVerified`, `ApplyConfig`, `RefreshState`,
   `SecureInstallDir`, `UpdateCheckWorker`, `Play`) instead of reading it whole
 - Pure, WPF-free, unit-tested: `UpdateParsing.cs` (release JSON, SHA256SUMS, signature), `A2S.cs` (server status),
-  `ClientPatch.cs` (delta pack: recipe, Stage, Commit), `AcSession.cs` (anti-cheat session protocol + client)
+  `ClientPatch.cs` (delta pack: recipe, Stage, Commit), `AcSession.cs` (anti-cheat session protocol + client),
+  `FolderPin.cs` (install-folder link checks)
 - `DiscordRpc.cs`: Rich Presence over the local named pipe
 - `config/launcher.cfg`: host config, embedded into the exe (the trust anchor). `prefs.cfg`: per-user `Prefs`
 - `scripts/`: build, package client, make delta pack, sign release, tests; `scripts/installer/`: NSIS + WiX
