@@ -6,12 +6,16 @@ paths:
   - "scripts/new_signing_key.ps1"
   - "scripts/package_client.ps1"
   - "config/launcher.cfg"
+  - "config/piece-hashes.txt"
+  - "scripts/make_piece_hashes.ps1"
 ---
 # Release chain
 
 - Order matters (docs/LAUNCHER.md "Release / publish checklist"): package client -> set `DownloadUrl`, `Sha256`,
   `ClientSize` -> for a new client build also `ClientVersion`, regenerated `AcClientFile=` lines, `PatchUrl`,
   `PatchSha256`, `PatchSize`, `PatchProbe` -> PR to main -> tag `vX.Y.Z` -> CI draft -> `sign_release.ps1` -> publish
+- Whenever the hosted zip or pack changes, regenerate `config/piece-hashes.txt` with `scripts\make_piece_hashes.ps1`
+  on the exact uploaded files (piece repair); its `file` lines give the exact `ClientSize` / `PatchSize`
 - Any re-package changes the hash: the zip, `Sha256`/`ClientSize` and the uploaded file move together; a new client
   build gets a new file name in `DownloadUrl` (CDN caching)
 - `UpdatePublicKey=` must be set before tagging (release.yml refuses otherwise). Never put the private key, a token

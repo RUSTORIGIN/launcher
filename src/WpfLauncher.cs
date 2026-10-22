@@ -137,6 +137,20 @@ static class Assets
         catch { }
     }
 
+    // config\piece-hashes.txt, embedded at build time (see PieceHashes in LauncherWindow).
+    public static string[] PieceHashLines()
+    {
+        try
+        {
+            using (Stream s = typeof(Assets).Assembly.GetManifestResourceStream("assets/piece-hashes.txt"))
+            {
+                if (s == null) return new string[0];
+                using (var r = new StreamReader(s)) return r.ReadToEnd().Split('\n');
+            }
+        }
+        catch { return new string[0]; }
+    }
+
     public static string[] ConfigLines()
     {
         try
@@ -1551,7 +1565,8 @@ public class LauncherWindow : Window
         row.Children.Add(installBtn);
         hero.Children.Add(row);
 
-        statusText = new TextBlock { Text = "", Foreground = TextMute, FontSize = 12.5, Margin = new Thickness(1, 14, 0, 0) };
+        statusText = new TextBlock { Text = "", Foreground = TextMute, FontSize = 12.5, Margin = new Thickness(1, 14, 0, 0),
+                                     TextWrapping = TextWrapping.Wrap, MaxWidth = 370, HorizontalAlignment = HorizontalAlignment.Left };
         hero.Children.Add(statusText);
 
         content.Children.Add(hero);
@@ -2649,6 +2664,7 @@ public class LauncherWindow : Window
     // set = the file was rejected.
     bool FetchVerified(ref bool cancelled, ref bool verifyFailed, ref string verifyMsg)
     {
+            pieceListWrong = false;   // per download: a verdict on the zip's list never carries over to the pack's
             // 1) size + identity of the remote file (HEAD; optional)
             long total = -1; string etag = "";
             try
@@ -2691,8 +2707,11 @@ public class LauncherWindow : Window
                         + ", but only " + Human(free) + " is free. Free up space and try again.");
             }
 
-            // 3a) parallel: several HTTP Range connections at once (needs a known size)
-            bool parallel = total > 0 && DownloadConnections > 1;
+            // 3a) parallel: several HTTP Range connections at once (needs a known size). Also used with a
+            //     single connection when the launcher knows this file's piece hashes, so a damaged piece
+            //     can be fetched again on its own.
+            string[] pieces = total > 0 ? PieceHashes(dlSha, total) : null;
+            bool parallel = total > 0 && (Connections > 1 || pieces != null);
             if (parallel)
             {
                 // a parallel partial is always preallocated to full size; otherwise its map can't be trusted
@@ -2706,8 +2725,8 @@ public class LauncherWindow : Window
                     try { File.Delete(chunksPath); } catch { }   // unreadable/foreign map: start that part clean
                 }
                 long have = DoneBytes(done, total);
-                Log("start (parallel x" + DownloadConnections + "): have=" + have + (have > 0 ? " (resuming)" : ""));
-                try { DownloadParallel(total, done, have > 0); Log("download complete: " + total + " bytes"); }
+                Log("start (parallel x" + Connections + (pieces != null ? ", piece-checked" : "") + "): have=" + have + (have > 0 ? " (resuming)" : ""));
+                try { DownloadParallel(total, done, have > 0, pieces); Log("download complete: " + total + " bytes"); }
                 catch (OperationCanceledException) { cancelled = true; Log("cancelled by user"); }
                 catch (RangeNotSupportedException)
                 {
@@ -2769,10 +2788,36 @@ public class LauncherWindow : Window
             // On cancel the .part + meta are kept, so Resume re-checks it; on mismatch they are deleted
             // so the next attempt re-downloads cleanly (a bad file is never reused).
             bool hadHash = dlSha.Length > 0;
+            if (pieceListWrong) pieces = null;   // proved wrong while downloading: don't repair from it
             string actualHash = "";
             bool integrityOk;
             try { integrityOk = VerifyDownload(partPath, out actualHash); }
             catch (OperationCanceledException) { cancelled = true; integrityOk = false; }
+
+            // Repair: the file got damaged on this PC (antivirus, unstable RAM, a flaky drive...). When the
+            // launcher knows this file's piece hashes, find the damaged pieces on disk and fetch only those
+            // again - a few MB instead of the whole download. Up to 3 rounds; the full check decides.
+            for (int round = 1; !integrityOk && !cancelled && hadHash && pieces != null && round <= 3; round++)
+            {
+                try
+                {
+                    List<int> bad = FindBadPieces(total, pieces);
+                    if (bad.Count == 0) Log("repair " + round + ": every piece checks out on disk - verifying again");
+                    else
+                    {
+                        Log("repair " + round + ": " + bad.Count + " damaged piece(s) " + PieceList(bad) + " - fetching them again");
+                        var redo = new bool[pieces.Length];
+                        for (int i = 0; i < redo.Length; i++) redo[i] = true;
+                        foreach (int i in bad) redo[i] = false;
+                        SetDlLabelAsync("REPAIRING");
+                        DownloadParallel(total, redo, true, pieces);
+                    }
+                    if (pieceListWrong) pieces = null;   // the list doesn't describe this file: no further repair rounds
+                    integrityOk = VerifyDownload(partPath, out actualHash);
+                }
+                catch (OperationCanceledException) { cancelled = true; }
+                catch (RangeNotSupportedException) { Log("repair: the server ignored Range"); break; }
+            }
 
             if (cancelled) return false;   // keep .part + meta for Resume
             if (!integrityOk)
@@ -2781,9 +2826,15 @@ public class LauncherWindow : Window
                 if (hadHash)
                 {
                     // A hash was configured and the file did not match it: reject and discard,
-                    // so the next attempt re-downloads cleanly instead of reusing a bad file.
-                    verifyMsg = "Integrity check failed - the download did not match the expected SHA-256 and was rejected. Nothing was installed.";
-                    Log("INTEGRITY FAIL (mismatch): expected=" + dlSha + " actual=" + actualHash + " - discarding download");
+                    // so the next attempt re-downloads cleanly instead of reusing a bad file. The next
+                    // attempt also uses a single connection ("safe mode"), which avoids the trouble some
+                    // antivirus/network filters have with several connections at once.
+                    bool wasSafe = Prefs.GetBool("SafeDownload", false);
+                    Prefs.Set("SafeDownload", true);
+                    verifyMsg = wasSafe
+                        ? "The download keeps getting damaged on this PC - security software or an unstable drive may be interfering. Click INSTALL to try again; if it keeps failing, send launcher.log to support. Nothing was installed."
+                        : "The download got damaged on this PC and couldn't be repaired. Click INSTALL to try again (more carefully this time). Nothing was installed.";
+                    Log("INTEGRITY FAIL (mismatch): expected=" + dlSha + " actual=" + actualHash + " - discarding download; next try uses a single connection");
                     try { File.Delete(partPath); } catch { }
                     try { File.Delete(metaPath); } catch { }
                     try { File.Delete(chunksPath); } catch { }
@@ -2803,6 +2854,7 @@ public class LauncherWindow : Window
             try { File.Delete(metaPath); } catch { }
             try { File.Delete(chunksPath); } catch { }
             try { File.WriteAllText(zipPath + VerifiedExt, dlSha); } catch { }   // lets a later run trust this file without re-hashing (CachedDownloadUsable)
+            if (Prefs.GetBool("SafeDownload", false)) { Prefs.Set("SafeDownload", false); Log("safe mode off: the download verified"); }
             Log("finalized+verified " + Path.GetFileName(zipPath) + " (" + new FileInfo(zipPath).Length + " bytes)");
             return true;
     }
@@ -2868,6 +2920,92 @@ public class LauncherWindow : Window
         return b;
     }
 
+    // Connections for this download: 1 after a download failed its integrity check on this PC ("safe
+    // mode", switched off again by the next download that verifies), otherwise DownloadConnections.
+    int Connections { get { return Prefs.GetBool("SafeDownload", false) ? 1 : DownloadConnections; } }
+
+    // A piece whose bytes don't match its known SHA-256 as it arrives: fetched again on its own.
+    sealed class PieceCorruptException : Exception
+    {
+        public readonly string Actual;   // the SHA-256 the piece arrived with
+        public PieceCorruptException(int piece, string actual) : base("piece " + piece + " arrived damaged") { Actual = actual; }
+    }
+
+    // Set by DownloadParallel when the piece list doesn't describe the file being fetched (a piece arrived twice
+    // with the SAME wrong SHA-256 - real damage is random, so the server is consistently sending other bytes than
+    // the list says). Piece checks and piece repair then stop for this download, and the full SHA-256 check alone
+    // decides, as without a list - a wrong list must never block an install that would otherwise succeed.
+    volatile bool pieceListWrong;
+
+    // SHA-256 of every 32 MB piece of the file whose full SHA-256 is `fullSha` and whose size is `total`,
+    // from the list built into the launcher (config\piece-hashes.txt, made by scripts\make_piece_hashes.ps1),
+    // or null when that file isn't listed - the download then works as before.
+    static string[] PieceHashes(string fullSha, long total)
+    {
+        if (string.IsNullOrEmpty(fullSha) || total <= 0) return null;
+        string[] lines = Assets.PieceHashLines();
+        for (int i = 0; i < lines.Length; i++)
+        {
+            string[] h = lines[i].Trim().Split(' ');
+            if (h.Length != 4 || h[0] != "file") continue;
+            if (!string.Equals(h[1], fullSha, StringComparison.OrdinalIgnoreCase) || h[2] != total.ToString() || h[3] != ChunkSize.ToString()) continue;
+            int n = ChunkCount(total);
+            if (i + n >= lines.Length) return null;
+            var r = new string[n];
+            for (int k = 0; k < n; k++)
+            {
+                string x = lines[i + 1 + k].Trim().ToLowerInvariant();
+                if (x.Length != 64) return null;
+                r[k] = x;
+            }
+            return r;
+        }
+        return null;
+    }
+
+    static string Hex(byte[] b) { return BitConverter.ToString(b).Replace("-", "").ToLowerInvariant(); }
+
+    static string PieceList(List<int> bad)
+    {
+        var shown = new List<string>();
+        for (int i = 0; i < bad.Count && i < 20; i++) shown.Add(bad[i].ToString());
+        return "[" + string.Join(",", shown.ToArray()) + (bad.Count > 20 ? ",..." : "") + "]";
+    }
+
+    // Re-reads the downloaded .part piece by piece and returns the pieces whose SHA-256 is wrong.
+    List<int> FindBadPieces(long total, string[] pieces)
+    {
+        var bad = new List<int>();
+        var buf = new byte[1 << 20];
+        var sw = Stopwatch.StartNew(); long lastUi = -1000;
+        using (var fs = new FileStream(partPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 1 << 20))
+        {
+            for (int i = 0; i < pieces.Length; i++)
+            {
+                long len = ChunkLen(i, total), got = 0;
+                using (var sha = System.Security.Cryptography.SHA256.Create())
+                {
+                    while (got < len)
+                    {
+                        if (cancelRequested) throw new OperationCanceledException();
+                        int n = fs.Read(buf, 0, (int)Math.Min(buf.Length, len - got));
+                        if (n <= 0) break;
+                        sha.TransformBlock(buf, 0, n, null, 0); got += n;
+                    }
+                    sha.TransformFinalBlock(buf, 0, 0);
+                    if (got != len || Hex(sha.Hash) != pieces[i]) bad.Add(i);
+                }
+                if (sw.ElapsedMilliseconds - lastUi >= 150)
+                {
+                    lastUi = sw.ElapsedMilliseconds;
+                    double f = (double)(i + 1) / pieces.Length;
+                    Dispatcher.BeginInvoke((Action)(() => { SetInstallProgress(f); SetDlLabel("CHECKING  " + Pct(f)); }));
+                }
+            }
+        }
+        return bad;
+    }
+
     // The saved chunk map for a partial of `total` bytes, or null if missing, unreadable or for another file.
     bool[] ReadChunkMap(long total)
     {
@@ -2905,7 +3043,7 @@ public class LauncherWindow : Window
     // Downloads every chunk not yet marked done. Returns when all are done; throws
     // OperationCanceledException on pause, RangeNotSupportedException if the server answers a Range
     // request with the whole file, or a plain Exception after 3 minutes without receiving any data.
-    void DownloadParallel(long total, bool[] done, bool resumed)
+    void DownloadParallel(long total, bool[] done, bool resumed, string[] pieces)
     {
         var queue = new Queue<int>();
         for (int i = 0; i < done.Length; i++) if (!done[i]) queue.Enqueue(i);
@@ -2916,13 +3054,18 @@ public class LauncherWindow : Window
         WriteChunkMap(done, total);
 
         object gate = new object();
-        int workers = Math.Min(DownloadConnections, queue.Count);
+        int workers = Math.Min(Connections, queue.Count);
         long doneBytes = DoneBytes(done, total);
         long[] inFlight = new long[workers];                 // bytes of the chunk each worker is fetching
         var active = new List<HttpWebRequest>();
         int failures = 0;                                    // failed chunk attempts since the last success
         Exception lastError = null;
         bool stop = false, rangeIgnored = false;
+        int[] damaged = new int[done.Length];                // times each piece arrived damaged
+        string[] lastBad = new string[done.Length];          // the SHA-256 each piece last arrived damaged with
+        bool[] repeated = new bool[done.Length];             // pieces that arrived twice with the same wrong SHA-256
+        int repeatedPieces = 0;
+        Exception damagedTooOften = null;
         Exception insecure = null;
 
         var threads = new List<Thread>();
@@ -2953,18 +3096,26 @@ public class LauncherWindow : Window
                                 throw new RangeNotSupportedException();
                             using (var s = resp.GetResponseStream())
                             using (var fs = new FileStream(partPath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite, 1 << 16))
+                            using (var sha = pieces != null && !pieceListWrong ? System.Security.Cryptography.SHA256.Create() : null)
                             {
                                 fs.Seek(start, SeekOrigin.Begin);
                                 int n;
                                 while (got < len && (n = s.Read(buf, 0, (int)Math.Min(buf.Length, len - got))) > 0)
                                 {
                                     if (cancelRequested) throw new OperationCanceledException();
+                                    if (sha != null) sha.TransformBlock(buf, 0, n, null, 0);
                                     fs.Write(buf, 0, n); got += n;
                                     Interlocked.Exchange(ref inFlight[id], got);
                                 }
+                                if (got != len) throw new IOException("connection closed mid-chunk (" + got + "/" + len + " bytes)");
+                                if (sha != null)
+                                {
+                                    sha.TransformFinalBlock(buf, 0, 0);
+                                    string actual = Hex(sha.Hash);
+                                    if (actual != pieces[ci]) throw new PieceCorruptException(ci, actual);
+                                }
                             }
                         }
-                        if (got != len) throw new IOException("connection closed mid-chunk (" + got + "/" + len + " bytes)");
                         lock (gate)
                         {
                             done[ci] = true; doneBytes += len; failures = 0;
@@ -2980,6 +3131,41 @@ public class LauncherWindow : Window
                             if (cancelRequested) return;
                             if (ex is RangeNotSupportedException) { rangeIgnored = true; stop = true; return; }
                             if (ex is InsecureRedirectException) { insecure = ex; stop = true; return; }   // retrying never helps
+                            var pc = ex as PieceCorruptException;
+                            if (pc != null && pc.Actual == lastBad[ci] && !repeated[ci]) { repeated[ci] = true; repeatedPieces++; }
+                            if (pc != null && repeated[ci] && repeatedPieces >= 2)
+                            {
+                                // two different pieces each arrived twice with the same "wrong" bytes: the list is wrong,
+                                // not the download - keep the piece (fully written) and let the full SHA-256 check decide
+                                if (!pieceListWrong) Log("piece list does not match the file being downloaded (" + repeatedPieces + " pieces arrived twice with the same SHA-256) - piece checks off; the full SHA-256 check decides");
+                                pieceListWrong = true;
+                                done[ci] = true; doneBytes += len; failures = 0;
+                                try { WriteChunkMap(done, total); } catch (Exception wx) { Log("chunk map write failed: " + wx.Message); }
+                                continue;
+                            }
+                            if (pc != null)
+                            {
+                                lastBad[ci] = pc.Actual;
+                                damaged[ci]++;
+                                Log("piece " + ci + " arrived damaged (#" + damaged[ci] + ") - fetching it again");
+                                if (damaged[ci] >= 8)
+                                {
+                                    if (repeated[ci])
+                                    {
+                                        // 8 arrivals with the same wrong bytes, and no second piece to compare with (a one-piece
+                                        // file, the last piece of a resume, a single wrong list entry): only the full SHA-256
+                                        // check can tell a wrong list from a source that always sends these bytes - let it decide
+                                        Log("piece " + ci + " always arrives with the same SHA-256 - piece checks off; the full SHA-256 check decides");
+                                        pieceListWrong = true;
+                                        done[ci] = true; doneBytes += len; failures = 0;
+                                        try { WriteChunkMap(done, total); } catch (Exception wx) { Log("chunk map write failed: " + wx.Message); }
+                                        continue;
+                                    }
+                                    damagedTooOften = ex; stop = true; return;   // random damage, every time: stop (the .part is kept)
+                                }
+                                queue.Enqueue(ci);
+                                continue;                        // not a network problem: no back-off
+                            }
                             queue.Enqueue(ci);                   // fetch this chunk again later
                             failures++; lastError = ex;
                             if (failures <= 3 || failures % 10 == 0)
@@ -3025,6 +3211,11 @@ public class LauncherWindow : Window
         if (cancelRequested) throw new OperationCanceledException();
         if (insecure != null) throw insecure;
         if (rangeIgnored) throw new RangeNotSupportedException();
+        if (damagedTooOften != null)
+        {
+            Prefs.Set("SafeDownload", true);
+            throw new Exception("the download keeps getting damaged on this PC (" + damagedTooOften.Message + " 8 times) - security software or an unstable drive may be interfering. Click INSTALL to try again; if it keeps failing, send launcher.log to support.");
+        }
         foreach (bool d in done)
             if (!d) throw new Exception("Download stalled (no data for 3 minutes)" + (lastError != null ? ": " + lastError.Message : ""));
         ReportProgress(total, total, 0, resumed);

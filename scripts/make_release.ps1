@@ -34,6 +34,7 @@ $res = @("/resource:assets\1.jpg,assets/1.jpg",
          "/resource:assets\train.png,assets/train.png",
          "/resource:assets\logo.png,assets/logo.png",
          "/resource:config\launcher.cfg,assets/launcher.cfg",
+         "/resource:config\piece-hashes.txt,assets/piece-hashes.txt",
          "/resource:assets\fonts\Montserrat-Regular.ttf,assets/fonts/Montserrat-Regular.ttf",
          "/resource:assets\fonts\Montserrat-Medium.ttf,assets/fonts/Montserrat-Medium.ttf",
          "/resource:assets\fonts\Montserrat-SemiBold.ttf,assets/fonts/Montserrat-SemiBold.ttf",
@@ -55,4 +56,4 @@ New-Item -ItemType Directory -Force "$repo\release" | Out-Null
 Copy-Item "$repo\RustoriginLauncher.exe" "$repo\release\RustoriginLauncher.exe" -Force
 $exe = Get-Item "$repo\release\RustoriginLauncher.exe"
 Write-Host ("built single-file launcher: {0}  ({1:N2} MB, v{2})" -f $exe.FullName, ($exe.Length / 1MB), $Version)
-Write-Host "embedded: 3 night background screenshots, 2 server covers, logo.png, launcher.cfg, 4x Montserrat + 4x Poppins + OFL"
+Write-Host "embedded: 3 night background screenshots, 2 server covers, logo.png, launcher.cfg, piece-hashes.txt, 4x Montserrat + 4x Poppins + OFL"

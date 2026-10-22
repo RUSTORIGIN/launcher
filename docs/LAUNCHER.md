@@ -51,6 +51,17 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
   download runs (calls `CancelDownload` -> keeps the `.part`), then **RESUME** to continue via Range
   from the saved byte. One handler, `OnDownloadButton`, dispatches on `busy`; `RefreshState` sets the
   label/glyph. The **PLAY** button is hidden unless the client is installed (or our client is running).
+- **Piece repair** (`PieceHashes`, `FindBadPieces`): `config/piece-hashes.txt`, embedded in the exe (never read
+  from a file next to it), lists the SHA-256 of every 32 MB piece of the hosted zip and pack, keyed by the file's
+  full SHA-256 + size. When the file being fetched is listed, each piece is checked as it arrives and a damaged
+  one is fetched again at once (8 damaged arrivals of one piece stop the download, saying security software or the drive may be interfering;
+  two different pieces that each arrive twice with the same wrong SHA-256 - or one piece that arrives 8 times with
+  the same wrong SHA-256 - mean the list is wrong, so piece checks turn off and the full check decides). If
+  the finished file still fails its full SHA-256 check, the launcher re-reads it, finds the damaged pieces and
+  re-downloads only those, for up to 3 rounds. The full SHA-256 check is still the only thing that accepts a
+  download; the piece hashes only decide what to fetch again. A file that is not listed (or a stale list) just
+  downloads without piece repair. After a failed download the next one uses a single connection
+  (`SafeDownload` pref), until a download verifies.
 - **Cached-zip reuse (self-healing repair)**: `DownloadWorker` step 0 checks for an already-cached
   `RustClient.zip` (e.g. left when an extract was interrupted). `FetchVerified` records the hash it
   verified in a `.verified` sidecar; `CachedDownloadUsable` reuses the file only when that record
@@ -404,6 +415,12 @@ these steps move together - never upload a repackaged zip without rebuilding the
    `rclone copyto RustClient.zip r2:rustorigin/RustClient.zip --s3-no-check-bucket`).
 5. Publish `release\RustoriginLauncher.exe` (e.g. to the R2 bucket next to the client).
 
+**Whenever the hosted zip or pack changes**, also run `.\scripts\make_piece_hashes.ps1 <zip> <patchpack>` on
+the exact uploaded files before step 3. It writes `config\piece-hashes.txt` (the SHA-256 of every 32 MB
+piece), which the launcher embeds for piece repair. A stale or missing entry is harmless (that file downloads
+without piece repair), but players whose PC damages downloads then get the old fail-and-restart behaviour.
+Its `file` lines also give each file's exact size for `ClientSize=` / `PatchSize=`.
+
 **When the client build changes** (new server build), also, before step 3:
 
 - set a new `ClientVersion=` (and `Version=` / `Tagline=` if they name the build);
@@ -503,6 +520,7 @@ Two separate mechanisms - don't confuse them:
 |-----------|---------|--------|
 | `LaunchArgs` | (from cfg) | Overrides `launcher.cfg`'s `LaunchArgs` for the PLAY button (set in `prefs.cfg`). |
 | `MinimizeInGame` | `false` | Minimize the launcher while the client runs. |
+| `SafeDownload` | `false` | Set by the launcher after a download failed its integrity check: the next download uses a single connection. Cleared by the next download that verifies. |
 | `DiscordRpc` | `true` | Publish Discord Rich Presence (needs `DiscordAppId` set in `launcher.cfg`). |
 | `AcNoticeShown` | `false` | Set once the one-time anti-cheat session notice has been shown (after the first PLAY with `AcSessionUrl` set). |
 
@@ -530,7 +548,8 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 │   ├── app_icon_source.png
 │   └── fonts/               #   bundled Montserrat (4 weights) + OFL.txt
 ├── config/
-│   └── launcher.cfg         # runtime config (URL, hash, install dir, servers, branding)
+│   ├── launcher.cfg         # runtime config (URL, hash, install dir, servers, branding)
+│   └── piece-hashes.txt     # per-32 MB-piece SHA-256 of the hosted zip + pack (make_piece_hashes.ps1)
 ├── scripts/
 │   ├── build.bat            # dev compile check of WpfLauncher.cs via csc
 │   ├── make_release.ps1     # release build: stamp version, embed resources, icon+manifest
@@ -545,6 +564,7 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 │   ├── test_client_patch.ps1 # end-to-end tests for the client delta update (run in build-check CI)
 │   ├── test_ac_session.ps1  # unit tests for src/AcSession.cs, the anti-cheat session protocol (run in build-check CI)
 │   ├── make_client_filehashes.ps1 # AcClientFile= lines (size + SHA-256 of key game files) for launcher.cfg
+│   ├── make_piece_hashes.ps1 # per-piece hashes of the hosted files -> config\piece-hashes.txt (download self-repair)
 │   ├── new_signing_key.ps1  # once: the offline release signing key (prints UpdatePublicKey=)
 │   ├── sign_release.ps1     # every release: check the draft's assets, sign SHA256SUMS.txt, publish
 │   └── installer/
