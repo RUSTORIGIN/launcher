@@ -51,3 +51,7 @@ jobs:
       - name: Test install-folder link checks (junctions)
         shell: pwsh
         run: .\scripts\test_folder_pin.ps1
+
+      - name: Test install-folder lock (release exe --secure-folder)
+        shell: pwsh
+        run: .\scripts\test_folder_lock.ps1

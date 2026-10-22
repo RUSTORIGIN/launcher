@@ -38,13 +38,21 @@ public static class FolderPin
     // handle is open. Null when it can't be opened (e.g. someone else holds it open for delete).
     public static SafeFileHandle Pin(string path, out bool isDir, out bool isLink)
     {
-        isDir = false; isLink = false;
+        int error;
+        return Pin(path, out isDir, out isLink, out error);
+    }
+
+    // The same, with the Win32 error when it returns null (32/33: open in another program), read before
+    // anything else can overwrite it.
+    public static SafeFileHandle Pin(string path, out bool isDir, out bool isLink, out int error)
+    {
+        isDir = false; isLink = false; error = 0;
         var h = CreateFileW(path, FILE_READ_DATA | FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING,
             FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero);
-        if (h.IsInvalid) { h.Dispose(); return null; }
+        if (h.IsInvalid) { error = Marshal.GetLastWin32Error(); h.Dispose(); return null; }
         FILE_ATTRIBUTE_TAG_INFO info;
         if (!GetFileInformationByHandleEx(h, FileAttributeTagInfo, out info, (uint)Marshal.SizeOf(typeof(FILE_ATTRIBUTE_TAG_INFO))))
-        { h.Dispose(); return null; }
+        { error = Marshal.GetLastWin32Error(); h.Dispose(); return null; }
         isDir = (info.FileAttributes & (uint)FileAttributes.Directory) != 0;
         isLink = (info.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0 && (info.ReparseTag & NameSurrogate) != 0;
         return h;
@@ -88,6 +96,52 @@ public static class FolderPin
             catch { return true; }
         }
         return false;
+    }
+
+    // Deletes dir and everything in it without ever following a link: each entry is pinned while it is
+    // looked at (so it can't be swapped for a link meanwhile), links are removed as links, folders are emptied
+    // deepest first and then removed by name, non-recursively. Throws when anything can't be removed.
+    public static void DeleteTree(string dir)
+    {
+        bool isDir, isLink;
+        var h = Pin(dir, out isDir, out isLink);
+        if (h == null) throw new IOException(dir + " could not be opened");
+        try
+        {
+            if (!isDir || isLink) throw new IOException(dir + " is not a plain folder");   // never empty what a link points at
+            EmptyTree(dir);
+        }
+        finally { h.Dispose(); }
+        Directory.Delete(dir, false);
+    }
+
+    static void EmptyTree(string dir)
+    {
+        foreach (string path in Directory.GetFileSystemEntries(dir))
+        {
+            bool isDir, isLink;
+            var h = Pin(path, out isDir, out isLink);
+            if (h == null) throw new IOException(path + " could not be opened");
+            try { if (isDir && !isLink) EmptyTree(path); } finally { h.Dispose(); }   // a pinned entry can't be deleted, so unpin first
+            if (isDir) Directory.Delete(path, false);   // a link (or an emptied folder): RemoveDirectory never follows it
+            else { if (!isLink) File.SetAttributes(path, FileAttributes.Normal); File.Delete(path); }   // on a link only the link goes
+        }
+    }
+
+    // Writes a new file at path - never into what a link or hard link there points at: whatever file is at
+    // the name is removed first (only that name), and the file is created with CREATE_NEW, which fails if
+    // anything (even a dangling link) is at the name by then.
+    public static void WriteNewFile(string path, string text)
+    {
+        if (File.Exists(path))
+        {
+            // GetAttributes reads the name itself; clear read-only only on a real file, never through a link
+            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0) File.SetAttributes(path, FileAttributes.Normal);
+            File.Delete(path);
+        }
+        byte[] b = Encoding.UTF8.GetBytes(text);
+        using (var fs = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            fs.Write(b, 0, b.Length);
     }
 
     // The path the handle really has, "\\?\" prefix removed; null when it can't be read.

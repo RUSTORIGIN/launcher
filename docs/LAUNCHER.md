@@ -282,12 +282,28 @@ owned by this user, SYSTEM or Administrators, and writable by no one else.
   a link in its place mid-lock; the folder's real path (`GetFinalPathNameByHandle`) must equal its configured
   path, so a subst drive or network path is refused too. Cloud/dedup reparse points (OneDrive placeholders) are
   not links and are allowed. Tested by `scripts\test_folder_pin.ps1`.
+- **An entry the lock can't secure keeps the folder refused** (unreadable, or held open by another program):
+  `LockFolder` writes `.rustorigin-lock-incomplete` into the folder as soon as the folder itself is private,
+  before walking it, and removes it only once every entry was secured - so a walk that failed or was cut short
+  (launcher closed, crash) leaves it behind. While anything by that name exists, `FolderExposure` reports
+  the folder as not secured, so the next check doesn't pass just because the folder's own permissions look
+  private; the next lock walks it again. A folder planted at that name is secured by the walk like any other
+  entry and only then removed; a file planted there is replaced. Uninstall keeps the record. When the player's
+  own lock was blocked only by files open in another program, no administrator fix is offered (close the game,
+  then try again); for any other unsecured entry the fix is offered. After the elevated
+  fix, `RequirePrivateInstallDir` also requires the helper's exit code 0 (1 = entries it could not secure).
+  Tested end to end through the built exe by `scripts\test_folder_lock.ps1`.
+- Limits: setting the folder's permissions passes them on to every entry already in it, so a **hard link**
+  another account planted there before the lock (possible only to a file it may change the attributes of) gets
+  the folder's inherited permissions on the file it shares - by name, before `ResetTree` sees it. Its content is
+  never written. Applying the permissions through the pinned handle instead of by name would close this.
 - Limits: it can't tell that a file another account *modified in place* before the lock was changed (only the
   `AcClientFile` hashes and a repair can), and nothing protects against malware running as the player.
 
 Inside the install folder: `.rustorigin-installed` (the install marker: line 1 the install time,
-then `client=<ClientVersion>`) and, only while an update is being applied, `_update\` (staged
-rebuilt files + `ready` flag; removed by the commit).
+then `client=<ClientVersion>`), only while an update is being applied, `_update\` (staged
+rebuilt files + `ready` flag; removed by the commit), and, only while a folder lock is unfinished,
+`.rustorigin-lock-incomplete` (see above).
 
 Install also creates a **desktop shortcut** (`<name>.lnk` via `WScript.Shell` COM) and
 **self-copies the launcher** into the install area - see `InstallLauncherAndShortcut()`.
@@ -317,7 +333,7 @@ manifest - everything is baked in, nothing needs to sit beside it):
 .\scripts\make_release.ps1 -Version 1.0.0   # -> release\RustoriginLauncher.exe
 ```
 
-There is no `cargo` or clippy here. Five `Add-Type`-based test scripts exist:
+There is no `cargo` or clippy here. Six test scripts exist (five `Add-Type`-based, one driving the built exe):
 `scripts\test_updater_parsing.ps1` (compiles `src\UpdateParsing.cs`, unit-tests the self-update
 JSON/`SHA256SUMS`/version parsing), `scripts\test_a2s_parsing.ps1` (compiles `src\A2S.cs`,
 unit-tests the A2S reply parser and runs one end-to-end query against a loopback UDP responder) and
@@ -329,9 +345,11 @@ HMAC signing against an independent reference vector, reply parsing, the endpoin
 client's loop against an in-process fake service; with `AC_TEST_URL` set it also runs the real HTTP client
 against a running `ac_session.py`), and `scripts\test_folder_pin.ps1` (compiles `src\FolderPin.cs`, builds
 junctions in a temp folder and checks that a linked install folder or parent is refused, a plain one is
-accepted, and a pinned folder can't be renamed).
+accepted, and a pinned folder can't be renamed), and `scripts\test_folder_lock.ps1` (runs the release
+exe's `--secure-folder` helper on temp folders: links refused, an exposed folder locked, links inside removed,
+and an entry held open keeps the folder refused across runs until it can be secured).
 Two GitHub Actions workflows exist: **build-check** (`.github/workflows/build-check.yml`) compiles
-both builds **and runs all five tests** on every push/PR, and **release**
+both builds **and runs all six tests** on every push/PR, and **release**
 (`.github/workflows/release.yml`) builds and publishes on a version tag (see the release checklist).
 Do not reference commands that don't exist here. After changing `src\WpfLauncher.cs`, the fastest
 correctness check is a clean `csc` compile (as `build.bat` does).

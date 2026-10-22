@@ -896,6 +896,8 @@ public class LauncherWindow : Window
                 {
                     keep.Add(Path.GetFullPath(Path.Combine(InstallDir, "RustoriginLauncher.exe")));
                     keep.Add(Path.GetFullPath(Path.Combine(InstallDir, "Uninstall.exe")));
+                    // an unfinished folder lock stays recorded: what could not be secured may outlive the uninstall
+                    keep.Add(Path.GetFullPath(Path.Combine(InstallDir, LockIncompleteName)));
                 }
                 catch { }
                 DeleteDirContents(InstallDir, keep);
@@ -1002,10 +1004,22 @@ public class LauncherWindow : Window
                 if (TrustedSid(sid, user) || (sid != null && sid.IsWellKnown(WellKnownSidType.CreatorOwnerSid))) continue;
                 return "can be changed by " + SidName(sid);
             }
+            string record = Path.Combine(dir, LockIncompleteName);
+            if (File.Exists(record) || Directory.Exists(record)) return LockIncompleteReason;   // anything by that name, a folder too
             return null;
         }
         catch (Exception ex) { return "could not be checked (" + ex.Message + ")"; }
     }
+
+    // Left in the folder by LockFolder while entries in it could not be secured (unreadable, in use). The folder
+    // itself is private by then, so without this record the next check would pass with those entries untouched;
+    // with it, FolderExposure keeps refusing the folder until a later lock secures everything. The folder is
+    // private, so no other account can remove the record.
+    const string LockIncompleteName = ".rustorigin-lock-incomplete";
+    const string LockIncompleteReason = "has files that could not be secured";
+    // The same, when every such file was only held open by another program: the player's own lock can finish
+    // once it is closed, so no administrator fix is offered for it.
+    const string LockBusyReason = "has files open in another program (close the game, then try again)";
 
     static DirectorySecurity PrivateSecurity(SecurityIdentifier user)
     {
@@ -1026,7 +1040,8 @@ public class LauncherWindow : Window
     // (never deleted). Returns how many untrusted entries there were: AfterLock then drops the install marker,
     // so the game must be repaired (re-extracted from a verified download) before PLAY. `failed` counts entries
     // that could not be handled at all (unreadable, in use): they stay as they were, so the folder is not private.
-    static int LockFolder(string dir, SecurityIdentifier user, bool elevated, Action<string> log, ref int failed)
+    // `busy` counts the ones of those that were only open in another program.
+    static int LockFolder(string dir, SecurityIdentifier user, bool elevated, Action<string> log, ref int failed, ref int busy)
     {
         if (elevated)
         {
@@ -1035,19 +1050,48 @@ public class LauncherWindow : Window
             { o.SetOwner(AdminsSid); Directory.SetAccessControl(dir, o); }
         }
         Directory.SetAccessControl(dir, PrivateSecurity(user));   // also re-applied to what inherits inside
-        return ResetTree(dir, user, elevated, log, ref failed);
+        // The record is written before the walk, now that no other account can remove it, so a walk cut short
+        // (launcher closed, crash) leaves the folder refused too; it is removed only once everything is secured.
+        // A folder already at that name (planted before the lock) also keeps the folder refused while it exists:
+        // it is left to ResetTree like any other entry, and removed only after the walk, once nobody else can
+        // change what is inside it. Record I/O never throws: the caller must still run AfterLock.
+        string record = Path.Combine(dir, LockIncompleteName);
+        bool planted = Directory.Exists(record);
+        if (!planted)
+        {
+            // a file (or link) already at the name is replaced, never written through
+            try { FolderPin.WriteNewFile(record, "folder lock in progress or incomplete; see launcher.log\r\n"); }
+            catch (Exception ex) { failed++; if (log != null) log("install folder: lock record not written (" + ex.Message + ")"); }
+        }
+        int untrusted = ResetTree(dir, user, elevated, log, ref failed, ref busy);
+        if (planted && failed == 0)
+        {
+            try { if (Directory.Exists(record)) FolderPin.DeleteTree(record); }   // as the player ResetTree may have deleted it already
+            catch (Exception ex) { failed++; if (log != null) log("install folder: could not remove " + record + " (" + ex.Message + ")"); }
+        }
+        try
+        {
+            if (failed == 0) { if (File.Exists(record)) File.Delete(record); }
+            else if (!Directory.Exists(record)) FolderPin.WriteNewFile(record, failed + " entries could not be secured; see launcher.log\r\n");
+        }
+        catch (Exception ex) { failed++; if (log != null) log("install folder: lock record not updated (" + ex.Message + ")"); }
+        return untrusted;
     }
 
-    static int ResetTree(string dir, SecurityIdentifier user, bool elevated, Action<string> log, ref int failed)
+    static int ResetTree(string dir, SecurityIdentifier user, bool elevated, Action<string> log, ref int failed, ref int busy)
     {
         int untrusted = 0;
         foreach (string path in Directory.GetFileSystemEntries(dir))
         {
-            bool isDir, link;
-            var pin = FolderPin.Pin(path, out isDir, out link);   // held open: it can't be swapped for a link meanwhile
+            bool isDir, link; int err;
+            var pin = FolderPin.Pin(path, out isDir, out link, out err);   // held open: it can't be swapped for a link meanwhile
             try
             {
-                if (pin == null) throw new IOException("it could not be opened");
+                if (pin == null)
+                {
+                    if (err == 32 || err == 33) { busy++; throw new IOException("it is open in another program"); }   // sharing / lock violation
+                    throw new IOException("it could not be opened (" + new Win32Exception(err).Message + ")");
+                }
                 FileSystemSecurity sec = isDir ? (FileSystemSecurity)Directory.GetAccessControl(path) : File.GetAccessControl(path);
                 var owner = sec.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
                 bool trustedOwner = TrustedSid(owner, user);
@@ -1072,7 +1116,7 @@ public class LauncherWindow : Window
                     if (!trustedOwner) reset.SetOwner(AdminsSid);
                     if (isDir) Directory.SetAccessControl(path, (DirectorySecurity)reset); else File.SetAccessControl(path, (FileSecurity)reset);
                 }
-                if (isDir && !link) untrusted += ResetTree(path, user, elevated, log, ref failed);
+                if (isDir && !link) untrusted += ResetTree(path, user, elevated, log, ref failed, ref busy);
             }
             catch (Exception ex) { untrusted++; failed++; if (log != null) log("install folder: could not secure " + path + " (" + ex.Message + ")"); }
             finally { if (pin != null) pin.Dispose(); }
@@ -1128,18 +1172,18 @@ public class LauncherWindow : Window
         string why = FolderExposure(dir, me);
         if (why == null) return null;
         if (UnsafeToWipe(dir) != null) return why;   // never re-permission a folder that isn't the game's
-        int failed = 0;
+        int failed = 0, busy = 0;
         try
         {
             var owner = Directory.GetAccessControl(dir, AccessControlSections.Owner).GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
             if (owner == me)
             {
-                int untrusted = LockFolder(dir, me, false, Log, ref failed);
+                int untrusted = LockFolder(dir, me, false, Log, ref failed, ref busy);
                 AfterLock(dir, untrusted, Log);
             }
         }
         catch (Exception ex) { Log("install folder: lock failed (" + ex.GetType().Name + ": " + ex.Message + ")"); }
-        why = failed > 0 ? "has " + failed + " files that could not be secured (close the game and try again)" : FolderExposure(dir, me);
+        why = failed == 0 ? FolderExposure(dir, me) : busy == failed ? LockBusyReason : LockIncompleteReason;
         Log(why == null ? "install folder locked to this user, SYSTEM and Administrators: " + dir : "install folder " + dir + " " + why);
         return why;
     }
@@ -1171,8 +1215,8 @@ public class LauncherWindow : Window
             {
                 if (pin == null) return 2;   // a link, or not openable: never re-permission it
                 if (FolderExposure(dir, user) == null) return 0;
-                int failed = 0;
-                int untrusted = LockFolder(dir, user, true, null, ref failed);
+                int failed = 0, busy = 0;
+                int untrusted = LockFolder(dir, user, true, null, ref failed, ref busy);
                 AfterLock(dir, untrusted, null);
                 return failed == 0 && FolderExposure(dir, user) == null ? 0 : 1;
             }
@@ -1187,30 +1231,39 @@ public class LauncherWindow : Window
         string dir = InstallDir;
         string why = SecureInstallDir(true);
         if (why == null) return true;
-        bool fixable = LooksLikeInstallFolder(dir) && !why.StartsWith("is on a");
+        // Files the player's own lock found open in another program are not something the administrator fix can
+        // solve; files it could not secure for any other reason (e.g. another account's, unreadable) are.
+        bool ownBusy = why == LockBusyReason;
+        bool fixable = LooksLikeInstallFolder(dir) && !why.StartsWith("is on a") && !ownBusy;
         if (fixable &&
             Confirm("Protect the game folder",
                 "Other accounts on this PC could change the game in " + dir + " (it " + why + "). The launcher only runs and updates " +
                 "the game from a folder that just your account and administrators can change.\n\nFix it now? Windows asks for administrator permission once.",
                 "Fix it", "Cancel"))
         {
+            int exitCode = -1;
             try
             {
                 var p = Process.Start(new ProcessStartInfo(SelfPath(), "--secure-folder \"" + Path.GetFullPath(dir).TrimEnd('\\') + "\" " + Me().Value) { UseShellExecute = true, Verb = "runas" });
                 var frame = new System.Windows.Threading.DispatcherFrame();   // keep the window painting while the helper runs
                 ThreadPool.QueueUserWorkItem(delegate { try { p.WaitForExit(); } catch { } Dispatcher.BeginInvoke((Action)(() => frame.Continue = false)); });
                 System.Windows.Threading.Dispatcher.PushFrame(frame);
-                Log("install folder: elevated fix exited with " + p.ExitCode);
+                exitCode = p.ExitCode;
+                Log("install folder: elevated fix exited with " + exitCode);
             }
             catch (Exception ex) { Log("install folder: elevated fix not run (" + ex.Message + ")"); }   // e.g. the UAC prompt was declined
+            // 0 = the helper secured everything; anything else (1 = entries it could not secure, 2 = refused,
+            // -1 = not run) keeps the folder refused even when its own permissions look private now.
             why = FolderExposure(dir, Me());
+            if (why == null && exitCode != 0) why = exitCode == 1 ? LockIncompleteReason : "could not be secured by the administrator fix";
             if (why == null) { Log("install folder locked (elevated): " + dir); RefreshState(); return true; }
         }
         bool installed = IsInstalled();
         // A fresh install can simply use another folder: forget this one so the next INSTALL asks again.
         if (!installed && !HasPartial()) { try { File.Delete(InstallDirFile()); } catch { } installDirChosen = false; }
         ShowStatus(Danger, "The game folder " + dir + " " + why + ". Other accounts could change the game there, so the launcher won't use it" +
-            (!installed ? " - click Install and pick another folder." : fixable ? " - accept the fix when asked, or ask an administrator." :
+            (ownBusy ? " - launcher.log lists the files." : !installed ? " - click Install and pick another folder." :
+             fixable ? " - accept the fix when asked, or ask an administrator." :
              " - move the game to a normal folder on an NTFS drive, or ask an administrator."), true);
         return false;
     }
