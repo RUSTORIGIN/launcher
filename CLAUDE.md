@@ -40,7 +40,7 @@ Releases. C# 5 / .NET Framework 4.x WPF, code-only (no XAML), compiled by Window
 - Background work: `new Thread { IsBackground = true }`; UI only via `Dispatcher.BeginInvoke`; cooperative
   cancel via `cancelRequested`. `DispatcherTimer` handlers run on the UI thread: keep them cheap
 - Status line: `ShowStatus(brush, text, untilNextAction)` / `ClearStatus()`; never assign `statusText.Text`
-- New `launcher.cfg` key: parse in `ApplyConfig` (lowercase switch), document in `docs/LAUNCHER.md` + `README.md`.
+- New `launcher.cfg` key: parse in `ApplyConfig` (lowercase switch), document in `docs/LAUNCHER.md` (`README.md` is player-facing).
   Per-user toggles go in `Prefs`, not `launcher.cfg`
 - Testable logic goes in a WPF-free file and gets a case in its `scripts\test_*.ps1`
 - Line endings: LF, but CRLF for `*.bat` / `*.ps1` (`.gitattributes`)
