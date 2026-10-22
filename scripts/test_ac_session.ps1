@@ -95,7 +95,10 @@ public static class Harness
     }
 }
 '@
-Add-Type -TypeDefinition ((Get-Content (Join-Path $repo 'src\AcSession.cs') -Raw) + "`n" + $fake)
+# -IgnoreWarnings: Add-Type turns compiler warnings into errors, and on PowerShell 7 (.NET 8+, where CI runs
+# this) WebRequest/HttpWebRequest are marked obsolete (SYSLIB0014). The launcher itself targets .NET Framework,
+# where they are the supported HTTP client, so that warning says nothing about the code under test.
+Add-Type -IgnoreWarnings -TypeDefinition ((Get-Content (Join-Path $repo 'src\AcSession.cs') -Raw) + "`n" + $fake)
 
 $script:fail = 0
 function Check($name, $cond) { if ($cond) { Write-Host "  PASS  $name" } else { Write-Host "  FAIL  $name"; $script:fail++ } }
