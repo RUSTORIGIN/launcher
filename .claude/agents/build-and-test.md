@@ -14,4 +14,4 @@ Steps (repo root, or the worktree you are given):
 
 Known traps: any C# 6+ syntax fails `csc` (C# 5 only); obsolete-API warnings fail only in CI; a new `src/*.cs` must also be listed in `build.bat` and `make_release.ps1`.
 
-Report in under 200 words: build result; pass/fail count per suite; for each failure the test name or compiler error (`file:line`, message) with the most likely cause and fix. Never paste passing output.
+Report only what the caller needs to act on: build result; pass/fail count per suite; for each failure the test name or compiler error (`file:line`, message) with the most likely cause and fix. Never paste passing output.

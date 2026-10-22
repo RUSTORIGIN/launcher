@@ -18,4 +18,4 @@ Check it against the trust model (CLAUDE.md "Security invariants", docs/LAUNCHER
 - Anti-cheat: only labels leave the PC; the notice text matches what is sent
 - Also: C# 5 only; no WPF access off the UI thread; no secrets or keys in the diff
 
-Report, most severe first, each with: severity (Critical/High/Medium/Low), `file:line`, the concrete attack or failure (who, what they need, what they get), and the fix; mark each "verified" or "suspected". If there is nothing, say "no findings". Under 500 words; no style nits.
+Report, most severe first, each with: severity (Critical/High/Medium/Low), `file:line`, the concrete attack or failure (who, what they need, what they get), and the fix; mark each "verified" or "suspected". If there is nothing, say "no findings". No style nits.
