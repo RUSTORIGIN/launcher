@@ -12,7 +12,9 @@ All notable changes to the RustOrigin launcher are documented here. Format loose
   arrives and fetched again if it got damaged. If the finished file still fails its SHA-256 check
   (e.g. antivirus or a disk changed it afterwards), only the damaged pieces are downloaded again,
   up to 3 times. After a failure the next attempt switches to a single connection on its own, and
-  a piece that keeps arriving damaged ends with a clear antivirus-exclusion hint.
+  a piece that keeps arriving damaged ends with a clear message (security software or the drive may
+  be interfering). A piece list that doesn't match the hosted file turns piece checks off instead of
+  blocking the install.
 - Long error messages under the install button wrap instead of being cut off.
 
 ### Added

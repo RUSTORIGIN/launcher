@@ -2664,6 +2664,7 @@ public class LauncherWindow : Window
     // set = the file was rejected.
     bool FetchVerified(ref bool cancelled, ref bool verifyFailed, ref string verifyMsg)
     {
+            pieceListWrong = false;   // per download: a verdict on the zip's list never carries over to the pack's
             // 1) size + identity of the remote file (HEAD; optional)
             long total = -1; string etag = "";
             try
@@ -2787,6 +2788,7 @@ public class LauncherWindow : Window
             // On cancel the .part + meta are kept, so Resume re-checks it; on mismatch they are deleted
             // so the next attempt re-downloads cleanly (a bad file is never reused).
             bool hadHash = dlSha.Length > 0;
+            if (pieceListWrong) pieces = null;   // proved wrong while downloading: don't repair from it
             string actualHash = "";
             bool integrityOk;
             try { integrityOk = VerifyDownload(partPath, out actualHash); }
@@ -2810,6 +2812,7 @@ public class LauncherWindow : Window
                         SetDlLabelAsync("REPAIRING");
                         DownloadParallel(total, redo, true, pieces);
                     }
+                    if (pieceListWrong) pieces = null;   // the list doesn't describe this file: no further repair rounds
                     integrityOk = VerifyDownload(partPath, out actualHash);
                 }
                 catch (OperationCanceledException) { cancelled = true; }
@@ -2829,7 +2832,7 @@ public class LauncherWindow : Window
                     bool wasSafe = Prefs.GetBool("SafeDownload", false);
                     Prefs.Set("SafeDownload", true);
                     verifyMsg = wasSafe
-                        ? "The download keeps getting damaged on this PC. Add the Rustorigin folders to your antivirus exclusions, then click INSTALL. Nothing was installed."
+                        ? "The download keeps getting damaged on this PC - security software or an unstable drive may be interfering. Click INSTALL to try again; if it keeps failing, send launcher.log to support. Nothing was installed."
                         : "The download got damaged on this PC and couldn't be repaired. Click INSTALL to try again (more carefully this time). Nothing was installed.";
                     Log("INTEGRITY FAIL (mismatch): expected=" + dlSha + " actual=" + actualHash + " - discarding download; next try uses a single connection");
                     try { File.Delete(partPath); } catch { }
@@ -2924,8 +2927,15 @@ public class LauncherWindow : Window
     // A piece whose bytes don't match its known SHA-256 as it arrives: fetched again on its own.
     sealed class PieceCorruptException : Exception
     {
-        public PieceCorruptException(int piece) : base("piece " + piece + " arrived damaged") { }
+        public readonly string Actual;   // the SHA-256 the piece arrived with
+        public PieceCorruptException(int piece, string actual) : base("piece " + piece + " arrived damaged") { Actual = actual; }
     }
+
+    // Set by DownloadParallel when the piece list doesn't describe the file being fetched (a piece arrived twice
+    // with the SAME wrong SHA-256 - real damage is random, so the server is consistently sending other bytes than
+    // the list says). Piece checks and piece repair then stop for this download, and the full SHA-256 check alone
+    // decides, as without a list - a wrong list must never block an install that would otherwise succeed.
+    volatile bool pieceListWrong;
 
     // SHA-256 of every 32 MB piece of the file whose full SHA-256 is `fullSha` and whose size is `total`,
     // from the list built into the launcher (config\piece-hashes.txt, made by scripts\make_piece_hashes.ps1),
@@ -3052,6 +3062,9 @@ public class LauncherWindow : Window
         Exception lastError = null;
         bool stop = false, rangeIgnored = false;
         int[] damaged = new int[done.Length];                // times each piece arrived damaged
+        string[] lastBad = new string[done.Length];          // the SHA-256 each piece last arrived damaged with
+        bool[] repeated = new bool[done.Length];             // pieces that arrived twice with the same wrong SHA-256
+        int repeatedPieces = 0;
         Exception damagedTooOften = null;
         Exception insecure = null;
 
@@ -3083,7 +3096,7 @@ public class LauncherWindow : Window
                                 throw new RangeNotSupportedException();
                             using (var s = resp.GetResponseStream())
                             using (var fs = new FileStream(partPath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite, 1 << 16))
-                            using (var sha = pieces != null ? System.Security.Cryptography.SHA256.Create() : null)
+                            using (var sha = pieces != null && !pieceListWrong ? System.Security.Cryptography.SHA256.Create() : null)
                             {
                                 fs.Seek(start, SeekOrigin.Begin);
                                 int n;
@@ -3098,7 +3111,8 @@ public class LauncherWindow : Window
                                 if (sha != null)
                                 {
                                     sha.TransformFinalBlock(buf, 0, 0);
-                                    if (Hex(sha.Hash) != pieces[ci]) throw new PieceCorruptException(ci);
+                                    string actual = Hex(sha.Hash);
+                                    if (actual != pieces[ci]) throw new PieceCorruptException(ci, actual);
                                 }
                             }
                         }
@@ -3117,11 +3131,38 @@ public class LauncherWindow : Window
                             if (cancelRequested) return;
                             if (ex is RangeNotSupportedException) { rangeIgnored = true; stop = true; return; }
                             if (ex is InsecureRedirectException) { insecure = ex; stop = true; return; }   // retrying never helps
-                            if (ex is PieceCorruptException)
+                            var pc = ex as PieceCorruptException;
+                            if (pc != null && pc.Actual == lastBad[ci] && !repeated[ci]) { repeated[ci] = true; repeatedPieces++; }
+                            if (pc != null && repeated[ci] && repeatedPieces >= 2)
                             {
+                                // two different pieces each arrived twice with the same "wrong" bytes: the list is wrong,
+                                // not the download - keep the piece (fully written) and let the full SHA-256 check decide
+                                if (!pieceListWrong) Log("piece list does not match the file being downloaded (" + repeatedPieces + " pieces arrived twice with the same SHA-256) - piece checks off; the full SHA-256 check decides");
+                                pieceListWrong = true;
+                                done[ci] = true; doneBytes += len; failures = 0;
+                                try { WriteChunkMap(done, total); } catch (Exception wx) { Log("chunk map write failed: " + wx.Message); }
+                                continue;
+                            }
+                            if (pc != null)
+                            {
+                                lastBad[ci] = pc.Actual;
                                 damaged[ci]++;
                                 Log("piece " + ci + " arrived damaged (#" + damaged[ci] + ") - fetching it again");
-                                if (damaged[ci] >= 8) { damagedTooOften = ex; stop = true; return; }
+                                if (damaged[ci] >= 8)
+                                {
+                                    if (repeated[ci])
+                                    {
+                                        // 8 arrivals with the same wrong bytes, and no second piece to compare with (a one-piece
+                                        // file, the last piece of a resume, a single wrong list entry): only the full SHA-256
+                                        // check can tell a wrong list from a source that always sends these bytes - let it decide
+                                        Log("piece " + ci + " always arrives with the same SHA-256 - piece checks off; the full SHA-256 check decides");
+                                        pieceListWrong = true;
+                                        done[ci] = true; doneBytes += len; failures = 0;
+                                        try { WriteChunkMap(done, total); } catch (Exception wx) { Log("chunk map write failed: " + wx.Message); }
+                                        continue;
+                                    }
+                                    damagedTooOften = ex; stop = true; return;   // random damage, every time: stop (the .part is kept)
+                                }
                                 queue.Enqueue(ci);
                                 continue;                        // not a network problem: no back-off
                             }
@@ -3173,7 +3214,7 @@ public class LauncherWindow : Window
         if (damagedTooOften != null)
         {
             Prefs.Set("SafeDownload", true);
-            throw new Exception("the download keeps getting damaged on this PC (" + damagedTooOften.Message + " 8 times). Add the Rustorigin folders to your antivirus exclusions, then click INSTALL.");
+            throw new Exception("the download keeps getting damaged on this PC (" + damagedTooOften.Message + " 8 times) - security software or an unstable drive may be interfering. Click INSTALL to try again; if it keeps failing, send launcher.log to support.");
         }
         foreach (bool d in done)
             if (!d) throw new Exception("Download stalled (no data for 3 minutes)" + (lastError != null ? ": " + lastError.Message : ""));

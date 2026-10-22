@@ -7,7 +7,8 @@
 #
 # Run it on the exact files you upload, whenever the client zip or the pack changes, then rebuild the
 # launcher. A file missing from the list (or a stale list) is harmless: that download just works without
-# piece repair. Pieces must stay 32 MB to match ChunkSize in WpfLauncher.cs.
+# piece repair (a list whose hashes don't match the file is detected while downloading and turned off).
+# Pieces must stay 32 MB to match ChunkSize in WpfLauncher.cs.
 param([Parameter(Mandatory = $true, ValueFromRemainingArguments = $true)][string[]]$Files)
 $ErrorActionPreference = 'Stop'
 $repo  = Split-Path $PSScriptRoot -Parent

@@ -54,7 +54,9 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
 - **Piece repair** (`PieceHashes`, `FindBadPieces`): `config/piece-hashes.txt`, embedded in the exe (never read
   from a file next to it), lists the SHA-256 of every 32 MB piece of the hosted zip and pack, keyed by the file's
   full SHA-256 + size. When the file being fetched is listed, each piece is checked as it arrives and a damaged
-  one is fetched again at once (8 damaged arrivals of one piece stop the download with an antivirus hint). If
+  one is fetched again at once (8 damaged arrivals of one piece stop the download, saying security software or the drive may be interfering;
+  two different pieces that each arrive twice with the same wrong SHA-256 - or one piece that arrives 8 times with
+  the same wrong SHA-256 - mean the list is wrong, so piece checks turn off and the full check decides). If
   the finished file still fails its full SHA-256 check, the launcher re-reads it, finds the damaged pieces and
   re-downloads only those, for up to 3 rounds. The full SHA-256 check is still the only thing that accepts a
   download; the piece hashes only decide what to fetch again. A file that is not listed (or a stale list) just
