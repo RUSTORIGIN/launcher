@@ -25,12 +25,17 @@ git checkout -b short-descriptive-name    # e.g. fix-resume-offset
 
 ### 2. Make your change and check it builds
 
-A clean compile is the only gate (there are no automated tests):
+It must compile, and the four test suites must pass (CI runs both on every PR):
 
 ```powershell
 .\scripts\build.bat            # quick compile check of src\WpfLauncher.cs
-# or a full shippable build:
-.\scripts\make_release.ps1 -Version 0.0.0
+# or a full shippable build - pass the version already in src\WpfLauncher.cs: the script writes it into that file
+.\scripts\make_release.ps1 -Version 1.2.0
+# tests (one script per area)
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_updater_parsing.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_a2s_parsing.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_client_patch.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_ac_session.ps1
 ```
 
 If you touched the **download / verify** path, also run the integrity smoke test: with `Sha256`
