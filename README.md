@@ -1,176 +1,91 @@
-<div align="center">
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/readme/banner-dark.svg">
+    <img src="docs/readme/banner-light.svg" width="640" alt="Rustorigin Launcher. Installs the Rustorigin game client (Rust, 2021 build), keeps it updated and gets you on our servers in one click.">
+  </picture>
+</p>
 
-# Rustorigin Launcher
+<p align="center">
+  <a href="https://github.com/RUSTORIGIN/launcher/releases/latest"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/badge-release-dark.svg"><img src="docs/readme/badge-release-light.svg" height="30" alt="Latest release"></picture></a>
+  <a href="https://github.com/RUSTORIGIN/launcher/releases"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/badge-downloads-dark.svg"><img src="docs/readme/badge-downloads-light.svg" height="30" alt="Downloads"></picture></a>
+  <a href="LICENSE"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/badge-license-dark.svg"><img src="docs/readme/badge-license-light.svg" height="30" alt="License: MIT"></picture></a>
+</p>
 
-**A polished, self-contained Windows launcher for a private Rust server**. It downloads, verifies,
-and launches the game client, keeps itself up to date, and ships as a single ~4 MB `.exe` with no
-runtime or installer required.
+## Download
 
-[![Latest release](https://img.shields.io/github/v/release/RUSTORIGIN/launcher?sort=semver&color=7c3aed)](https://github.com/RUSTORIGIN/launcher/releases/latest)
-[![Build](https://img.shields.io/github/actions/workflow/status/RUSTORIGIN/launcher/build-check.yml?branch=main&label=build)](https://github.com/RUSTORIGIN/launcher/actions/workflows/build-check.yml)
-[![Downloads](https://img.shields.io/github/downloads/RUSTORIGIN/launcher/total?color=4ade80)](https://github.com/RUSTORIGIN/launcher/releases)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078d6)
+Grab `RustoriginLauncher-Setup.exe` (installer) or `RustoriginLauncher.exe` (portable, just run it) from the [latest release](https://github.com/RUSTORIGIN/launcher/releases/latest). Windows 10/11 only, no .NET download needed.
 
-![Rustorigin Launcher](docs/screenshot.png)
+VirusTotal, v1.1.2:
 
-</div>
+- `RustoriginLauncher-Setup.exe`: [1/70 engines flag it](https://www.virustotal.com/gui/file/285d15a8d6835a73f6ae34ab1ae6db23e1c76f8b7b4bb96623b22d0c58305202) (SecureAge), scanned October 2026.
+- `RustoriginLauncher.exe`: [no engine flags it](https://www.virustotal.com/gui/file/3770305fe0804a38cb1c1f50bd0210e945078ed21d139369d6258254a25343da), scanned October 2026.
+- `RustoriginLauncher-Setup.msi`: [no engine flags it](https://www.virustotal.com/gui/file/c36af52897bcec88503cfd5b7aa5f9da0c23fa2465f03d9d81949aac76dddcb5), scanned October 2026.
 
----
+## How to use
 
-## Highlights
+1. Run the setup, or the portable exe.
+2. Click **INSTALL** and pick a folder. The game goes into a `Rustorigin` subfolder (suggested: `C:\Rustorigin`). Closing it mid-download is fine, it resumes next time.
+3. Hit **PLAY**, or click a server card to join that server. Cards show live player counts.
 
-One executable, no runtime, no installer. It fetches your hosted client, **verifies it by SHA-256
-before it ever touches disk**, installs and launches it, shows live server status, and **updates
-itself**, behind a clean, custom WPF interface built entirely in code (no XAML).
+## What the launcher does
 
-- **Single self-contained exe**: code-only WPF on .NET Framework 4.x (built into Windows 10/11).
-  UI, screenshots, logo, fonts, and default config are embedded; nothing else ships.
-- **Verified, resumable downloads**: pulls your `RustClient.zip` over TLS 1.2, resumes dropped
-  transfers via HTTP Range, and **rejects any download whose SHA-256 doesn't match** before extract.
-- **One-click install & play**: downloads over parallel connections, extracts, and launches, with
-  live progress inside the install button.
-- **Small client updates**: when the server moves to a newer game build, installed players update
-  in place from a **delta pack** (only the data they don't already have - about 1.5 GB instead of
-  11 GB for Jan → Apr 2021), with every rebuilt file SHA-256-verified before it is swapped in and an
-  automatic fall-back to the full download.
-- **Live server cards**: cover-image tiles with a status dot, name, and a live player-count bar
-  (Steam A2S, refreshed ~60 s); click a card to connect.
-- **Self-update**: checks GitHub Releases on launch; when a newer, checksum-verified build exists
-  it prompts to update, then downloads (with a progress bar), verifies, swaps itself in, and restarts.
-- **Native, frameless window**: rounded, draggable anywhere, resize / maximize / Aero Snap, single
-  instance, system-tray integration (minimizes to tray while in game), Discord Rich Presence, and a
-  clean settings panel.
+<p>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/readme/flow-dark.svg">
+    <img src="docs/readme/flow-light.svg" width="529" alt="Download, verify, install, play">
+  </picture>
+</p>
 
-## Install
+This is the full list.
 
-Grab the latest [**release**](https://github.com/RUSTORIGIN/launcher/releases/latest):
+- Downloads the game (`RustClient.zip`, or a smaller update pack) over HTTPS and checks its SHA-256 before unpacking. A file that doesn't match is deleted, never installed.
+- Installs into the folder you pick and locks it so only your Windows account, SYSTEM and Administrators can write to it. Links and files owned by other accounts inside it get deleted.
+- Copies itself into the install folder and puts a shortcut on your desktop.
+- Keeps its own files in `%LOCALAPPDATA%\Rustorigin\`: the download, `launcher.log`, your settings (`prefs.cfg`) and its images and fonts.
+- Asks each server for its player count once a minute, the same Steam query the in-game server list uses.
+- Runs `RustClient.exe` from the install folder when you hit PLAY.
+- Checks GitHub Releases on every start for a newer launcher, and installs it only if its SHA-256 matches the release's `SHA256SUMS.txt`.
+- Shows "In the launcher" / "In game" on your Discord profile while Discord is open. You can turn this off in settings (gear, top right).
+- Anti-cheat session: not switched on yet. Once it is, the launcher tells you the first time you play, and while you play it sends your SteamID, the launcher version, whether the game is running, a one-way hash of your PC's Windows install id, and a short label when a known cheat tool is running or a game file was modified. It will also read one code the server sends to the game from the game's own log. No process lists, no files, no file contents. Staff use the PC hash to spot alt accounts and ban evasion. Closing the launcher mid-game will then send it to the tray, because the server can kick players without a session. Details: [docs/CLIENT_ANTICHEAT.md](docs/CLIENT_ANTICHEAT.md).
 
-| Asset | Use |
-|-------|-----|
-| **`RustoriginLauncher-Setup.exe`** | Branded installer (Start Menu + Desktop shortcuts, choose-folder page, run-on-finish). Stable name for a permanent website download link. |
-| **`RustoriginLauncher.exe`** | The single-file launcher: portable, just run it. |
-| `RustoriginLauncher-Setup.msi` | MSI installer (per-user, no admin) — a fallback if antivirus blocks the .exe. |
+It doesn't need admin rights (except the one-time folder fix below), and it doesn't touch Defender, SmartScreen, antivirus exclusions, services or browser settings.
 
-Every asset is listed in `SHA256SUMS.txt`. The exe is unsigned, so SmartScreen may warn on first
-run (*More info → Run anyway*). **Requires Windows 10/11**; no .NET download needed.
+## Common problems
 
-## Configuration
+<details>
+<summary>Windows says "Windows protected your PC".</summary>
+<br>
 
-The launcher reads a simple `Key=Value` file, `config/launcher.cfg`, embedded at build time. A
-`launcher.cfg` placed **next to the exe** overrides the defaults at runtime (handy for a test
-server). A release build only reads it when started with `--dev-config`, so a file dropped next to the
-exe (e.g. in Downloads) can't redirect the client download, the self-update or PLAY. `DownloadUrl` and
-`PatchUrl` must be `https://`. The launcher also locks the install folder so only the player's account,
-SYSTEM and Administrators can write to it, and refuses to install or play from a folder other accounts
-could change (an older per-machine install gets a one-time fix that asks for admin permission). Key settings:
+The exe isn't code-signed, so SmartScreen warns on first run. Click *More info → Run anyway*.
 
-| Key | Meaning |
-|-----|---------|
-| `DownloadUrl` | Direct link to `RustClient.zip`. **Required.** |
-| `Sha256` | Expected SHA-256 of `RustClient.zip`. **Required**: installs are blocked without it. |
-| `ClientVersion` | Id of the client build `DownloadUrl` serves (e.g. `2021-04`). Installs recording another version (or none) show **UPDATE** instead of PLAY. Blank disables update detection. |
-| `PatchUrl` / `PatchSha256` | Direct link + SHA-256 of the delta pack that upgrades the previous build in place. Optional; without it outdated installs download the full client. |
-| `PatchProbe` | `relative\path\|size` of a file in the build the pack upgrades from; the pack is only tried when it matches. |
-| `ClientSize` / `PatchSize` | Exact byte size of the zip / pack (the packaging scripts print it). Optional: a server announcing another size is refused, and the launcher never downloads more. |
-| `InstallDir` | Suggested install folder (default `C:\Rustorigin`; blank = `.\Rust`). On first INSTALL the player picks the folder (pre-selecting the launcher's drive); the game goes into a `Rustorigin` subfolder of the pick. |
-| `LaunchExe` | Client executable the Play button runs (default `RustClient.exe`). |
-| `Title` / `Tagline` / `Player` | Hero title, description line, and the displayed player name. |
-| `UpdateRepo` | `owner/repo` checked for self-updates (public repo; blank disables). |
-| `UpdatePublicKey` | Public release key (`scripts\new_signing_key.ps1`); only releases signed with it are installed. Blank = no self-update. |
-| `DiscordAppId` | Discord Application ID for Rich Presence (blank disables). |
-| `AcSessionUrl` | Launcher anti-cheat session service ([docs/CLIENT_ANTICHEAT.md](docs/CLIENT_ANTICHEAT.md)); the launcher opens a session when the game starts and heartbeats while it runs. The session carries a one-way hash of the PC's Windows install id, so staff can see several accounts playing from one PC; the server keys it with its own secret, and an account playing from the PC of an actively banned account is banned automatically ("Ban evasion"; server-side policy, see the doc). Must be `https` (plain `http` only for a local/private IP, for dev servers). Blank disables. Never blocks PLAY. The server can require the session (players without one are kicked), so while the game runs, closing the launcher sends it to the tray and it quits with the game. The launcher also reads one code the server sends to the game, from the game's own log, and echoes it back: that ties the session to this game connection. The list of tools it looks for (reported only as `tool:<number>`) comes from the server with each session, so it is not in this repo or the config. |
-| `AcClientFile` | Repeatable `path\|size\|sha256` of a game file; the session reports `client:modified:<file>` / `client:missing:<file>` when the installed file differs. Generate with `scripts\make_client_filehashes.ps1`. |
-| `Server` | Repeatable card: `Tag\|Name\|launch args\|players\|cover`. A `+connect HOST:PORT` in the args enables the live A2S count. |
-| `Social` | Repeatable link: `platform\|url` (built-in icons: `discord`, `youtube`, `tiktok`). |
+</details>
 
-See [`config/launcher.cfg`](config/launcher.cfg) for the full, commented reference.
+<details>
+<summary>My antivirus blocks the .exe.</summary>
+<br>
 
-## Hosting the client
+Use `RustoriginLauncher-Setup.msi` from the same release. It installs per-user and doesn't need admin. Hashes for every file are in `SHA256SUMS.txt`.
 
-For server owners distributing the game:
+</details>
 
-1. **Package** the client folder into `RustClient.zip` (prints its SHA-256, excludes junk):
-   ```powershell
-   .\scripts\package_client.ps1
-   ```
-2. **Upload** it somewhere serving a **direct** download link (Cloudflare R2, S3, your web server…).
-3. **Set** `DownloadUrl` and `Sha256` in `config/launcher.cfg`, then cut a release (below).
+<details>
+<summary>The button says UPDATE instead of PLAY.</summary>
+<br>
 
-**Moving to a newer client build?** Also build a delta pack so existing players don't re-download
-everything, and upload it next to the zip:
+The server moved to a newer game build. Click it: you only download what changed (about 1.5 GB instead of 11 GB), every file gets checked, and if that can't be used it falls back to the full download.
 
-```powershell
-.\scripts\make_client_patch.ps1 -OldDir <previous client> -NewDir <new client> -From 2021-01 -To 2021-04
-```
+</details>
 
-It prints the pack's SHA-256 and the `ClientVersion` / `PatchUrl` / `PatchSha256` / `PatchProbe`
-lines for `config/launcher.cfg`. The full zip must be the **new** build too: it serves new players
-and anyone the pack doesn't fit. See [docs/LAUNCHER.md](docs/LAUNCHER.md) ("Client updates (delta pack)").
+<details>
+<summary>It won't install or play from my folder.</summary>
+<br>
 
-## Releasing & self-update
+The launcher refuses a folder other accounts could change, and its message says what to do. On a new install, click **INSTALL** again and pick another folder. If the game is already in that folder, accept the one-time fix when it asks for admin permission, or move the game to a normal folder on an NTFS drive. If it says files are open in another program, close the game and try again.
 
-Push a version tag and CI does everything:
+</details>
 
-```bash
-git tag v1.1.2 && git push origin v1.1.2
-```
-
-The **Release** workflow builds the launcher, NSIS setup, and MSI; generates `SHA256SUMS.txt`;
-attests build provenance; and creates a **draft** GitHub Release. Sign and publish it from your own
-machine with the offline release key:
-
-```powershell
-.\scripts\sign_release.ps1 -Tag v1.1.2 -KeyFile <offline key> -Publish
-```
-
-Launchers only install a release whose `SHA256SUMS.txt` is signed with that key (`UpdatePublicKey=` in
-`config/launcher.cfg`, made once with `scripts\new_signing_key.ps1`); they then verify the download
-against the signed sums and self-replace. See `.github/BRANCH_PROTECTION.md` for tag and environment
-protection.
-
-## Build from source
-
-Uses the .NET Framework `csc` that ships with Windows 10/11 (no SDK or NuGet).
-
-```powershell
-.\scripts\build.bat                        # quick compile check
-.\scripts\make_release.ps1 -Version 1.1.2  # -> release\RustoriginLauncher.exe (single file)
-```
-
-Installers are optional and need WiX v5 + NSIS:
-
-```powershell
-.\scripts\build_installer_exe.ps1 -Version 1.1.2   # NSIS setup .exe
-.\scripts\build_msi.ps1 -Version 1.1.2             # MSI
-```
-
-## How it works
-
-- **One file, no dependencies.** `WpfLauncher.cs` is a single code-only WPF window (no XAML),
-  compiled directly with `csc`. Media, fonts, and `launcher.cfg` are embedded and unpacked at first
-  run to `%LOCALAPPDATA%\Rustorigin\`.
-- **Safety first.** Downloads are size/ETag-resumable and SHA-256-verified before extraction;
-  self-updates are verified against the release checksums before the exe is swapped.
-- **No servers of our own.** Live player counts come straight from Steam A2S; updates come straight
-  from GitHub Releases.
-
-```
-src/        WpfLauncher.cs (the launcher) + UpdateParsing / A2S / DiscordRpc helpers
-assets/     embedded media (screenshots, logo, covers) + bundled fonts
-config/     launcher.cfg
-scripts/    build, release, installer, and client-packaging scripts
-docs/       styling guide + notes
-.github/    CI: build-check + release workflows
-```
-
-## Contributing
-
-Contributions are welcome. `src/WpfLauncher.cs` is **code-only WPF** (no XAML), kept self-contained
-so it compiles with `csc`. Read the [**Styling Guide**](docs/STYLING.md) before changing UI. CI runs
-a compile check and parser tests on every pull request; releases are cut from version tags.
+Still stuck? Post your `%LOCALAPPDATA%\Rustorigin\launcher.log` in our [Discord](https://discord.gg/rustorigin).
 
 ## License
 
-Code is released under the [MIT License](LICENSE). Bundled fonts (Montserrat and Poppins) are under
-the SIL Open Font License; see [`assets/fonts/`](assets/fonts).
+[MIT](LICENSE). Bundled fonts (Montserrat and Poppins) are under the SIL Open Font License, see [`assets/fonts/`](assets/fonts).

@@ -496,6 +496,13 @@ generates `SHA256SUMS.txt`, and creates a **draft** GitHub Release with all arti
 .\scripts\sign_release.ps1 -Tag v1.0.0 -KeyFile <offline key> -Publish
 ```
 
+Once it is published, update the README's release and downloads badges: `docs/readme/badge-release-*.svg`
+and `docs/readme/badge-downloads-*.svg` are static images that show the version (e.g. `v1.1.2`) and the
+total download count at the time they were drawn, and nothing updates them automatically. Their text is
+outlined into paths, so it can't be edited as text: regenerate the dark and light file of each with the
+new values, at the same height (30 px) and in the same two colour themes, and land them through a pull
+request like any other change.
+
 The workflow is least-privilege: `permissions: {}` at the top, the build job (installer tooling from
 NuGet/Chocolatey, NSIS pinned to 3.12.0) can only read; only the `publish` job writes, inside the
 protected `release` environment, running nothing but GitHub's own actions and `gh`. Every action is pinned
@@ -621,7 +628,8 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 │   ├── CLIENT_ANTICHEAT.md  # launcher anti-cheat session: design, protocol v1, rollout, privacy
 │   ├── AC_MODULE_SIGNAL.md  # proposal (not built): user-mode loaded-module signal for RustClient.exe
 │   ├── README-PLAYERS.txt
-│   ├── screenshot.png       # launcher screenshot used in README
+│   ├── screenshot.png       # launcher screenshot (no longer shown in the README)
+│   ├── readme/              # README images: banner, flow strip, release/downloads/license badges (dark/light SVGs)
 │   └── brand-kit/           # design system (css, style guide, docs)
 ├── .claude/                 # Claude Code: agents/ + rules/ (shared); settings.local.json is git-ignored
 ├── .github/                 # workflows (build-check, release), PR template, rulesets (main, release tags), BRANCH_PROTECTION.md
@@ -636,7 +644,7 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 ├── SECURITY.md              # vulnerability-reporting policy (rustorigin@proton.me)
 ├── CONTRIBUTING.md          # pull-request workflow (branch -> PR -> CI -> merge)
 ├── CHANGELOG.md             # release notes
-├── README.md                # player/host-facing docs (authoritative for behavior)
+├── README.md                # player-facing page; the authoritative reference is docs/LAUNCHER.md
 └── CLAUDE.md                # Claude Code instructions (short); the reference is docs/LAUNCHER.md
 ```
 
