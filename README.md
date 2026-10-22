@@ -44,9 +44,9 @@ This is the full list.
 - Keeps its own files in `%LOCALAPPDATA%\Rustorigin\`: the download, `launcher.log`, your settings (`prefs.cfg`) and its images and fonts.
 - Asks each server for its player count once a minute, the same Steam query the in-game server list uses.
 - Runs `RustClient.exe` from the install folder when you hit PLAY.
-- Checks GitHub Releases on every start for a newer launcher, and only installs one signed with our release key. [CHECK: `UpdatePublicKey` is blank in `config/launcher.cfg`, so this is off right now]
+- Checks GitHub Releases on every start for a newer launcher, and installs it only if its SHA-256 matches the release's `SHA256SUMS.txt`.
 - Shows "In the launcher" / "In game" on your Discord profile while Discord is open. You can turn this off in settings (gear, top right).
-- Runs an anti-cheat session while you play. [CHECK: `AcSessionUrl` is blank in `config/launcher.cfg`, so this is off right now] It sends your SteamID, the launcher version, whether the game is running, a one-way hash of your PC's Windows install id, and a short label when a known cheat tool is running or a game file was modified. It also reads one code the server sends to the game from the game's own log. No process lists, no files, no file contents. Staff use the PC hash to spot alt accounts and ban evasion. Closing the launcher mid-game sends it to the tray, because the server can kick players without a session. Details: [docs/CLIENT_ANTICHEAT.md](docs/CLIENT_ANTICHEAT.md).
+- Anti-cheat session: not switched on yet. Once it is, the launcher tells you the first time you play, and while you play it sends your SteamID, the launcher version, whether the game is running, a one-way hash of your PC's Windows install id, and a short label when a known cheat tool is running or a game file was modified. It will also read one code the server sends to the game from the game's own log. No process lists, no files, no file contents. Staff use the PC hash to spot alt accounts and ban evasion. Closing the launcher mid-game will then send it to the tray, because the server can kick players without a session. Details: [docs/CLIENT_ANTICHEAT.md](docs/CLIENT_ANTICHEAT.md).
 
 It doesn't need admin rights (except the one-time folder fix below), and it doesn't touch Defender, SmartScreen, antivirus exclusions, services or browser settings.
 
@@ -80,11 +80,11 @@ The server moved to a newer game build. Click it: you only download what changed
 <summary>It won't install or play from my folder.</summary>
 <br>
 
-The launcher refuses a folder other accounts could change. Pick another folder [CHECK]. An older install made for all users gets a one-time fix that asks for admin permission.
+The launcher refuses a folder other accounts could change, and its message says what to do. On a new install, click **INSTALL** again and pick another folder. If the game is already in that folder, accept the one-time fix when it asks for admin permission, or move the game to a normal folder on an NTFS drive. If it says files are open in another program, close the game and try again.
 
 </details>
 
-Still stuck? Send staff your `%LOCALAPPDATA%\Rustorigin\launcher.log` [CHECK: where, Discord ticket?].
+Still stuck? Post your `%LOCALAPPDATA%\Rustorigin\launcher.log` in our [Discord](https://discord.gg/rustorigin).
 
 ## License
 
