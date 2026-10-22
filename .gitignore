@@ -28,6 +28,8 @@ RustClient.zip.sha256
 *.pem
 *.key
 *.pfx
+*release-key*.xml
+*signing-key*.xml
 *.p12
 *.snk
 *.env
@@ -38,3 +40,6 @@ rclone.conf
 # the manifest signing private key, if/when signing is added
 *private*key*
 signing-key*
+
+# Claude Code: .claude/agents and .claude/rules are shared; personal settings are not
+.claude/settings.local.json

@@ -3,7 +3,8 @@
 Changes to `main` go through a **pull request**. `main` is never committed to directly - it only
 changes when a PR is merged. This keeps every change reviewed and CI-checked.
 
-For architecture and build details, see [CLAUDE.md](CLAUDE.md).
+For architecture and build details, see [docs/LAUNCHER.md](docs/LAUNCHER.md); [CLAUDE.md](CLAUDE.md) has
+the short version (commands, conventions, gotchas).
 
 ## Prerequisites
 
@@ -24,12 +25,17 @@ git checkout -b short-descriptive-name    # e.g. fix-resume-offset
 
 ### 2. Make your change and check it builds
 
-A clean compile is the only gate (there are no automated tests):
+It must compile, and the four test suites must pass (CI runs both on every PR):
 
 ```powershell
 .\scripts\build.bat            # quick compile check of src\WpfLauncher.cs
-# or a full shippable build:
-.\scripts\make_release.ps1 -Version 0.0.0
+# or a full shippable build - pass the version already in src\WpfLauncher.cs: the script writes it into that file
+.\scripts\make_release.ps1 -Version 1.2.0
+# tests (one script per area)
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_updater_parsing.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_a2s_parsing.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_client_patch.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_ac_session.ps1
 ```
 
 If you touched the **download / verify** path, also run the integrity smoke test: with `Sha256`
@@ -76,7 +82,7 @@ git branch -d short-descriptive-name
 ## Releasing (maintainers)
 
 Merging to `main` publishes nothing. To ship a version, first complete the client-hash steps in the
-**Release / publish checklist** in [CLAUDE.md](CLAUDE.md) (package the client, set the matching
+**Release / publish checklist** in [docs/LAUNCHER.md](docs/LAUNCHER.md) (package the client, set the matching
 `Sha256`, upload the zip), then tag `main`:
 
 ```bash
