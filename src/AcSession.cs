@@ -509,7 +509,7 @@ public sealed class AcSessionClient
             else
             {
                 Interlocked.Increment(ref HeartbeatsRejected);
-                log("heartbeat refused (" + (reason ?? Short(r)) + ") - opening a new session");
+                log("heartbeat refused (" + Short(reason ?? r) + ") - opening a new session");   // the server's text, made one short line
                 grant = null;
                 if (!Sleep(RetryDelayMs)) return;
             }

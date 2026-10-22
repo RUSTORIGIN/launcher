@@ -86,6 +86,7 @@ Write-Host "  2) in launcher.cfg set:"
 Write-Host "       ClientVersion=$To"
 Write-Host "       PatchUrl=<that link>"
 Write-Host "       PatchSha256=$($res.PackSha256)"
+Write-Host "       PatchSize=$($res.PackBytes)"
 if ($probe) { Write-Host "       PatchProbe=$probe" }
 Write-Host "     and point DownloadUrl/Sha256 at the FULL zip of the new build (package_client.ps1 on the"
 Write-Host "     same -NewDir) - it serves new players and anyone the pack does not fit."

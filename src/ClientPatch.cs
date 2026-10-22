@@ -214,6 +214,14 @@ public static class ClientPatch
     // turns true. Staging is discarded on any failure.
     public static Recipe Stage(string packPath, string installDir, Func<bool> cancelled, Action<long, long> progress)
     {
+        return Stage(packPath, installDir, cancelled, progress, null);
+    }
+
+    // The same, also writing manifestPath: what was staged (every file's size + SHA-256, the files to delete, the
+    // version). Keep it somewhere only this user can write (%LOCALAPPDATA%): Commit with that manifest moves
+    // nothing into the install that doesn't match it, so files swapped into the staging folder are refused.
+    public static Recipe Stage(string packPath, string installDir, Func<bool> cancelled, Action<long, long> progress, string manifestPath)
+    {
         string staging = StagingPath(installDir), files = Path.Combine(staging, "files");
         DiscardStaged(installDir);
         var open = new Dictionary<int, FileStream>();
@@ -289,6 +297,7 @@ public static class ClientPatch
                 }
 
                 File.WriteAllLines(Path.Combine(staging, "delete.txt"), recipe.Deletes.ToArray());
+                if (manifestPath != null) WriteManifest(manifestPath, recipe);
                 // written last, and flushed: staging is complete and verified
                 using (var rf = new FileStream(ReadyPath(installDir), FileMode.Create, FileAccess.Write, FileShare.None))
                 {
@@ -322,9 +331,36 @@ public static class ClientPatch
     // must not be running. markerPath may be null (no marker is written).
     public static string Commit(string installDir, string markerPath)
     {
+        return Commit(installDir, markerPath, null, false);
+    }
+
+    // The same, but checked against the manifest Stage wrote (see there): every staged file must be listed with
+    // its size - and with rehash, its SHA-256, read again from disk - and the version and the files to delete
+    // come from the manifest, not from the staging folder. Use rehash whenever the staging was not made by this
+    // very process (an update resumed after a restart). A mismatch discards the staging and the manifest and
+    // throws PatchException; the installed client is not touched. manifestPath null = no check (old callers).
+    public static string Commit(string installDir, string markerPath, string manifestPath, bool rehash)
+    {
         string staging = StagingPath(installDir), files = Path.Combine(staging, "files");
         if (!HasPendingCommit(installDir)) throw new PatchException("no staged update to commit");
-        string to = File.ReadAllText(ReadyPath(installDir)).Trim();
+        string to;
+        IList<string> deletes = null;
+        if (manifestPath != null)
+        {
+            Recipe m;
+            try { m = ReadManifest(manifestPath); }
+            catch (Exception ex)
+            { DiscardStaged(installDir); throw new PatchException("no usable record of the staged update (" + ex.Message + ")"); }
+            string bad = CheckStaged(files, m, rehash);
+            if (bad != null)
+            {
+                DiscardStaged(installDir);
+                try { File.Delete(manifestPath); } catch { }
+                throw new PatchException("staged update refused: " + bad);
+            }
+            to = m.To; deletes = m.Deletes;
+        }
+        else to = File.ReadAllText(ReadyPath(installDir)).Trim();
 
         if (Directory.Exists(files))
         {
@@ -343,8 +379,9 @@ public static class ClientPatch
         }
 
         string deleteList = Path.Combine(staging, "delete.txt");
-        if (File.Exists(deleteList))
-            foreach (string rel in File.ReadAllLines(deleteList))
+        if (deletes == null && File.Exists(deleteList)) deletes = File.ReadAllLines(deleteList);
+        if (deletes != null)
+            foreach (string rel in deletes)
             {
                 if (rel.Trim().Length == 0) continue;
                 try
@@ -357,10 +394,85 @@ public static class ClientPatch
 
         if (markerPath != null) File.WriteAllText(markerPath, MarkerText(to));
         File.Delete(ReadyPath(installDir));   // the update is no longer pending
+        if (manifestPath != null) { try { File.Delete(manifestPath); } catch { } }
         // Removing what is left of staging is cosmetic: something else holding the folder open
         // (Explorer, antivirus, an indexer) must not turn a finished update into a failure.
         try { Directory.Delete(staging, true); } catch { }
         return to;
+    }
+
+    // ---------- staged-update manifest ----------
+    // rustorigin-staged-v1 / to <version> / file <size> <sha256> <path> ... / delete <path> ... / end
+    const string ManifestMagic = "rustorigin-staged-v1";
+
+    static void WriteManifest(string path, Recipe r)
+    {
+        var sb = new StringBuilder();
+        sb.Append(ManifestMagic).Append('\n').Append("to ").Append(r.To).Append('\n');
+        foreach (Target t in r.Files) sb.Append("file ").Append(t.Size).Append(' ').Append(t.Sha256).Append(' ').Append(t.Path).Append('\n');
+        foreach (string d in r.Deletes) sb.Append("delete ").Append(d).Append('\n');
+        sb.Append("end\n");
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
+        byte[] b = Encoding.UTF8.GetBytes(sb.ToString());
+        using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None)) { fs.Write(b, 0, b.Length); fs.Flush(true); }
+    }
+
+    static Recipe ReadManifest(string path)
+    {
+        var r = new Recipe(); bool ended = false;
+        string[] lines = File.ReadAllLines(path);
+        if (lines.Length == 0 || lines[0].Trim() != ManifestMagic) throw new PatchException("not a staged-update record");
+        for (int i = 1; i < lines.Length; i++)
+        {
+            string line = lines[i].TrimEnd('\r');
+            if (line.Length == 0) continue;
+            if (ended) throw new PatchException("record has content after 'end'");
+            int sp = line.IndexOf(' ');
+            string kind = sp < 0 ? line : line.Substring(0, sp), rest = sp < 0 ? "" : line.Substring(sp + 1);
+            switch (kind)
+            {
+                case "to": r.To = rest.Trim(); break;
+                case "file":
+                {
+                    string[] p = rest.Split(new[] { ' ' }, 3);
+                    if (p.Length != 3 || p[1].Length != 64) throw new PatchException("bad file line in record");
+                    r.Files.Add(new Target { Size = Num(p[0]), Sha256 = p[1].ToLowerInvariant(), Path = SafeRelPath(p[2]) });
+                    break;
+                }
+                case "delete": r.Deletes.Add(SafeRelPath(rest)); break;
+                case "end": ended = true; break;
+                default: throw new PatchException("unknown record line: " + kind);
+            }
+        }
+        if (!ended) throw new PatchException("record is truncated");
+        return r;
+    }
+
+    // First reason the staged files don't match the manifest, or null. A file already moved into place by an
+    // interrupted commit is simply no longer staged; anything staged that the manifest doesn't list is refused.
+    static string CheckStaged(string files, Recipe m, bool rehash)
+    {
+        if (!Directory.Exists(files)) return null;
+        var want = new Dictionary<string, Target>(StringComparer.OrdinalIgnoreCase);
+        foreach (Target t in m.Files) want[t.Path] = t;
+        string root = Path.GetFullPath(files);
+        foreach (string f in Directory.GetFiles(root, "*", SearchOption.AllDirectories))
+        {
+            string rel = SafeRelPath(f.Substring(root.Length + 1));
+            Target t;
+            if (!want.TryGetValue(rel, out t)) return "unexpected staged file " + rel;
+            if ((File.GetAttributes(f) & FileAttributes.ReparsePoint) != 0) return "staged file is a link: " + rel;
+            if (new FileInfo(f).Length != t.Size) return "staged " + rel + " has the wrong size";
+            if (rehash && HashFile(f) != t.Sha256) return "staged " + rel + " does not match its SHA-256";
+        }
+        return null;
+    }
+
+    static string HashFile(string path)
+    {
+        using (var sha = NewSha())
+        using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16, FileOptions.SequentialScan))
+            return Hex(sha.ComputeHash(fs));
     }
 
     // Drops an unfinished (or unwanted) staged update. The installed client is untouched.

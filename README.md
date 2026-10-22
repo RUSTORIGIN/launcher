@@ -62,7 +62,8 @@ The launcher reads a simple `Key=Value` file, `config/launcher.cfg`, embedded at
 server). A release build only reads it when started with `--dev-config`, so a file dropped next to the
 exe (e.g. in Downloads) can't redirect the client download, the self-update or PLAY. `DownloadUrl` and
 `PatchUrl` must be `https://`. The launcher also locks the install folder so only the player's account,
-SYSTEM and Administrators can write to it (other accounts on the PC can't replace the game). Key settings:
+SYSTEM and Administrators can write to it, and refuses to install or play from a folder other accounts
+could change (an older per-machine install gets a one-time fix that asks for admin permission). Key settings:
 
 | Key | Meaning |
 |-----|---------|
@@ -71,6 +72,7 @@ SYSTEM and Administrators can write to it (other accounts on the PC can't replac
 | `ClientVersion` | Id of the client build `DownloadUrl` serves (e.g. `2021-04`). Installs recording another version (or none) show **UPDATE** instead of PLAY. Blank disables update detection. |
 | `PatchUrl` / `PatchSha256` | Direct link + SHA-256 of the delta pack that upgrades the previous build in place. Optional; without it outdated installs download the full client. |
 | `PatchProbe` | `relative\path\|size` of a file in the build the pack upgrades from; the pack is only tried when it matches. |
+| `ClientSize` / `PatchSize` | Exact byte size of the zip / pack (the packaging scripts print it). Optional: a server announcing another size is refused, and the launcher never downloads more. |
 | `InstallDir` | Suggested install folder (default `C:\Rustorigin`; blank = `.\Rust`). On first INSTALL the player picks the folder (pre-selecting the launcher's drive); the game goes into a `Rustorigin` subfolder of the pick. |
 | `LaunchExe` | Client executable the Play button runs (default `RustClient.exe`). |
 | `Title` / `Tagline` / `Player` | Hero title, description line, and the displayed player name. |

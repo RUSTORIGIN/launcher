@@ -50,7 +50,9 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
 - A `launcher.cfg` placed **next to the exe** overrides the embedded defaults at runtime - in a **release
   build only when started with `--dev-config`** (`LoadConfig`; otherwise it is ignored and logged), because
   players run the exe from Downloads, where any web page can drop a file. A dev build (`build.bat`, nothing
-  embedded) always reads it. `LaunchExe` must be a relative `.exe` path inside the install folder and
+  embedded) always reads it. Even with `--dev-config`, a release build takes `AcSessionUrl` and `AcClientFile`
+  only from its embedded config, so the real launcher can't be told to vouch for modified game files.
+  `LaunchExe` must be a relative `.exe` path inside the install folder and
   `UpdateRepo` must be `owner/repo`, whatever the source.
 
 ## Download behavior (implemented)
@@ -82,6 +84,10 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
   `DownloadUrl` / `PatchUrl` must be `https://` (`IsHttpsUrl`: INSTALL refuses an http client URL, an http
   pack is skipped), and a server redirect to a non-https address fails the download at once
   (`RequireHttps` / `InsecureRedirectException`, not retried). The self-update requests get the same check.
+- **Size pin** (`ClientSize` / `PatchSize`, optional, printed by the packaging scripts): a server announcing
+  another size is refused before anything is downloaded, the single stream stops at that size, and the
+  parallel download reserves no more than it. Without a pin the server's size is still a hard stop, and the
+  free space is checked before anything is reserved (+512 MB).
 - **Integrity**: SHA-256 verification is mandatory - Install is blocked without a configured
   `Sha256`, and the finished download is verified before extraction and rejected on mismatch
   (see the security section below).
@@ -112,10 +118,16 @@ not already have.
   2. `ClientPatch.Stage` rebuilds every changed file under `<InstallDir>\_update\files`, hashing as
      it writes, and rejects the whole update unless **each file matches its SHA-256**. The installed
      client is only read, so a failed or cancelled update leaves it exactly as it was;
-  3. `ClientPatch.Commit` moves the staged files into place, deletes the files the new build
+  3. `ClientPatch.Stage` also writes a manifest of every staged file (size + SHA-256), the files to delete and
+     the version to `%LOCALAPPDATA%\Rustorigin\update-manifest.txt`, which other accounts can't write.
+     `ClientPatch.Commit(..., manifest, rehash)` moves only staged files the manifest lists with the right size
+     - and when the commit is a resumed one (after a restart: the next UPDATE click), re-hashes each one
+     first; any mismatch, unlisted file or link discards the staging and the update is staged again from the
+     kept pack. The version and delete list come from the manifest, not from the staging folder.
+  4. `ClientPatch.Commit` moves the staged files into place, deletes the files the new build
      dropped, writes the marker with the new `client=`, and only then removes the `ready` flag.
-     Commit is idempotent: a swap cut short by a crash is finished on the next launch
-     (constructor) or the next UPDATE click, and removing the leftover staging folder is
+     Commit is idempotent: a swap cut short by a crash is finished by the next UPDATE
+     click (on the download thread, after the re-hash above), and removing the leftover staging folder is
      best-effort (something holding it open cannot fail a finished update). Staged files are
      flushed to disk before `ready` is written.
 - **Fallback.** If the pack does not fit the install (a file differs from the expected build, a
@@ -225,19 +237,33 @@ dir, so no admin rights needed):
 | `RustClient.zip.verified` / `RustClient.patchpack.verified` | The SHA-256 a kept download was verified against, so a later run reuses it only for the same configured hash. |
 | `RustClient.patchpack` (+ `.part`, `.part.meta`, `.part.chunks`) | The delta pack's download buffer / verified pack, same lifecycle as the zip; deleted once the client is current. |
 | `patch-failed.txt` | SHA-256 of a delta pack that did not fit this install, so it is not downloaded again (a new pack has a new hash and gets a fresh try). |
+| `update-manifest.txt` | What a staged client update contains (sizes + SHA-256s, deletes, version), kept here - not in the install folder - so `ClientPatch.Commit` can refuse staged files someone swapped. Deleted when the update is committed. |
 | `launcher.log` | Timestamped diagnostics of every download/verify step - ask players for this when an install misbehaves. |
 | `installdir.txt` | The install folder the player picked on first INSTALL (`ChooseInstallDir`), remembered across runs; cleared by Uninstall client so a reinstall asks again. |
 | `prefs.cfg` | Per-user settings (see below). |
 
-**Install folder permissions** (`SecureInstallDir`): a folder made at a drive root inherits "Authenticated
-Users: Modify", so any account on the PC could swap the game or launcher exe. Whenever another account can
-write to it (`OthersCanWrite`), the launcher replaces its ACL with a protected one - this user, SYSTEM and
-Administrators full control, Users and OWNER RIGHTS read + execute - at the start of every
-INSTALL/UPDATE/REPAIR (`DownloadWorker`, before anything is written) and in the background on launch for an
-existing install. It then drops the `_download\*.verified` records, so a kept download is hashed again.
-Best-effort: skipped for folders `UnsafeToWipe` rejects, and a folder this user can't re-permission is left
-as is (logged). It can't undo a file another account replaced *before* the lock, and nothing protects against
-malware running as the player's own account.
+**Install folder permissions - fail closed** (`SecureInstallDir`, `RequirePrivateInstallDir`): a folder made at
+a drive root inherits "Authenticated Users: Modify", so any account on the PC could swap the game or launcher
+exe that this player - or an admin - later runs. The launcher therefore only installs, updates (incl. finishing
+a staged update) and PLAYs from a **private** install folder (`FolderExposure` returns null): on NTFS/ReFS,
+owned by this user, SYSTEM or Administrators, and writable by no one else.
+- A new install folder is **created** private (`Directory.CreateDirectory(dir, PrivateSecurity)`): this user,
+  SYSTEM and Administrators full control, Users and OWNER RIGHTS read + execute, nothing inherited.
+- A folder this user owns but others can write (an install by an older launcher) is **locked** (`LockFolder`)
+  - in the background on launch, and again at INSTALL/UPDATE/REPAIR/PLAY. `ResetTree` then walks everything
+  inside: entries with their own permissions go back to inheriting, and entries another account owns, or any
+  link/junction, are deleted (a junction is removed, never its target). If there were any, the install
+  marker is dropped, so the game must be repaired (a fresh verified extract, which replaces files rather than
+  writing into them) before PLAY. The `_download\*.verified` records are dropped too.
+- A folder an admin made (an install by the **old per-machine NSIS setup**) or another account made can't be
+  re-permissioned by the player. `RequirePrivateInstallDir` offers a one-time fix that starts the launcher
+  elevated (`--secure-folder "<dir>" <player SID>` -> `SecureFolderElevated`): it only touches a folder that
+  is exposed right now and looks like a Rustorigin install, never names Everyone/Users as the player, takes
+  over untrusted entries for Administrators instead of deleting them, and drops the marker if there were any.
+  Declined or impossible (a FAT/exFAT drive, a folder that isn't an install) -> PLAY/INSTALL are refused with
+  the reason; a fresh install forgets the folder so the next INSTALL asks for another.
+- Limits: it can't tell that a file another account *modified in place* before the lock was changed (only the
+  `AcClientFile` hashes and a repair can), and nothing protects against malware running as the player.
 
 Inside the install folder: `.rustorigin-installed` (the install marker: line 1 the install time,
 then `client=<ClientVersion>`) and, only while an update is being applied, `_update\` (staged
@@ -305,9 +331,15 @@ A single self-contained setup executable, the same *kind* electron-builder's NSI
 - **Wizard:** Welcome -> License (MIT) -> **Choose install folder** -> Install (progress) ->
   Finish (with "Launch" checkbox), plus Start Menu + Desktop shortcuts, an Add/Remove Programs
   entry, and an uninstaller.
-- **Per-machine install to `Program Files` (requires admin/UAC)** - the classic per-machine
-  installer behavior. This
-  is the one trade-off vs the launcher's usual no-admin design; use the MSI below if you want no-admin.
+- **Per-user install, no admin/UAC** (`RequestExecutionLevel user`): default
+  `%LOCALAPPDATA%\Programs\Rustorigin Launcher`, HKCU entries, this user's shortcuts - like the MSI. It used to
+  be per-machine into `C:\Rustorigin` (elevated, HKLM), which left the launcher, `Uninstall.exe` and the game
+  writable by every account on the PC: any of them could swap a file an admin later ran. The launcher's
+  one-time elevated folder fix covers installs made that way.
+- The install folder is locked to this user, SYSTEM and Administrators with `icacls` - only when the setup
+  created it or it already holds the launcher, never an unrelated folder typed on the directory page. The
+  uninstaller deletes a folder recursively only when it is named `Rustorigin` / `Rustorigin Launcher`;
+  otherwise it removes just the launcher's own files.
 - Built with **NSIS** (`scripts/installer/RustOrigin.nsi`, Modern UI 2). `build_installer_exe.ps1`
   runs `make_release.ps1` first so the setup always wraps a fresh, versioned exe.
 - **NSIS prerequisite (one-time):** `winget install NSIS.NSIS`.
@@ -413,12 +445,13 @@ Plain `Key=Value`, `#`/`;` comments. Loaded embedded-defaults-first, then overri
 | `DownloadUrl` | Direct link to `RustClient.zip`. Required. |
 | `Sha256` | Expected hex SHA-256 of `RustClient.zip`. **Required** - a mismatched download is rejected, and a blank value blocks Install entirely. Aliases: `ClientSha256`, `ExpectedSha256`. |
 | `InstallDir` | Default/suggested install path. Blank = `.\Rust` next to the launcher. Shipped as `C:\RustOrigin`. On a fresh INSTALL the player picks the folder (`ChooseInstallDir`, pre-selecting `<launcher drive>:\Rustorigin` when the launcher is on another drive); the game always goes in a `Rustorigin` subfolder of the pick, because Uninstall deletes the whole install folder. When that folder is on another drive than `%LOCALAPPDATA%`, the download buffer goes to `<InstallDir>\_download` (`SetDownloadPaths`; not on FAT32, and a partial already in `%LOCALAPPDATA%` still resumes there). |
-| `LaunchExe` | Exe the Play button runs (searched recursively inside `InstallDir`). Default `RustClient.exe`. |
+| `LaunchExe` | Exe the Play button runs: exactly `InstallDir\LaunchExe` (a relative `.exe` path, `SafeLaunchExe`) - never searched for, and never one next to the launcher. Default `RustClient.exe`. |
 | `LaunchArgs` | Optional args for the main PLAY button, e.g. `-console +connect 127.0.0.1:28015`. |
 | `ClientVersion` | Id of the client build `DownloadUrl` serves (e.g. `2021-04`), recorded in the install marker. An install recording another version - or none (installs made before 1.1) - is outdated and shows **UPDATE** instead of PLAY. Blank disables update detection. Must equal the `-To` the delta pack was built with. |
 | `PatchUrl` | Direct link to the delta pack (`scripts\make_client_patch.ps1`) that upgrades the previous build in place. Blank = outdated installs download the full client. |
 | `PatchSha256` | Expected hex SHA-256 of the delta pack. **Required** for the pack to be used; a mismatched pack is rejected and the full client is installed instead. |
 | `PatchProbe` | `relative\path\|size` of a file in the build the pack upgrades **from** (e.g. `GameAssembly.dll\|43225944`). The pack is only tried when it matches, so other builds skip straight to the full download. Blank = always try the pack. |
+| `ClientSize` / `PatchSize` | Exact byte size of the client zip / delta pack (printed by `package_client.ps1` / `make_client_patch.ps1`). Optional but recommended: a download server announcing another size is refused, and the launcher never downloads or reserves more. Must belong to the same file as `Sha256` / `PatchSha256`. |
 | `Version` | Optional label shown in the launcher. |
 | `Title` | Big hero title (default `RUSTORIGIN`). |
 | `Tagline` | Description line under the title. |
@@ -496,7 +529,7 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 │   ├── client_patch_builder.cs # the pack builder (content-defined chunking); compiled by the two scripts that use it, not part of the launcher
 │   ├── client_filter.ps1    # which client files ship - shared by package_client.ps1 and make_client_patch.ps1
 │   ├── build_msi.ps1        # build the per-user MSI installer (WiX)
-│   ├── build_installer_exe.ps1 # build the NSIS setup .exe (electron-builder style, Program Files)
+│   ├── build_installer_exe.ps1 # build the NSIS setup .exe (electron-builder style, per-user)
 │   ├── test_updater_parsing.ps1 # unit tests for src/UpdateParsing.cs (run in build-check CI)
 │   ├── test_a2s_parsing.ps1 # unit + loopback tests for src/A2S.cs live server status (run in build-check CI)
 │   ├── test_client_patch.ps1 # end-to-end tests for the client delta update (run in build-check CI)

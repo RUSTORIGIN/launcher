@@ -135,6 +135,35 @@ try {
     Check "re-commit: pending again"           ([ClientPatch]::HasPendingCommit($r2))
     Check "re-commit: finishes cleanly"        (([ClientPatch]::Commit($r2, "$r2\.rustorigin-installed") -eq '2021-04') -and -not [ClientPatch]::HasPendingCommit($r2))
 
+    # ---- staged files are checked against the manifest kept outside the install folder ----
+    $mf = "$root\manifests\ok.txt"; $v = New-Install 'manifest-ok'
+    [ClientPatch]::Stage($pack, $v, [Func[bool]]{ $false }, $null, $mf) | Out-Null
+    Check "manifest: written by stage"         (Test-Path $mf)
+    Check "manifest: verified commit applies"  (([ClientPatch]::Commit($v, "$v\.rustorigin-installed", $mf, $true) -eq '2021-04') -and -not (Test-Path $mf))
+    $vSame = $true
+    foreach ($rel in Get-ClientFiles $new) { if ((Sha (Join-Path $v $rel)) -ne (Sha (Join-Path $new $rel))) { $vSame = $false } }
+    Check "manifest: files are the new build"  ($vSame -and -not (Test-Path "$v\gone.bin"))
+
+    $mf = "$root\manifests\tampered.txt"; $t = New-Install 'manifest-tampered'
+    [ClientPatch]::Stage($pack, $t, [Func[bool]]{ $false }, $null, $mf) | Out-Null
+    $sf = "$t\_update\files\GameAssembly.dll"; $tb = [IO.File]::ReadAllBytes($sf); $tb[10] = $tb[10] -bxor 1; [IO.File]::WriteAllBytes($sf, $tb)   # same size, other bytes
+    $asmBefore = Sha "$t\GameAssembly.dll"
+    Check "tampered staging: refused"          (Throws ([PatchException]) { [ClientPatch]::Commit($t, "$t\.rustorigin-installed", $mf, $true) })
+    Check "tampered staging: install untouched" ((Sha "$t\GameAssembly.dll") -eq $asmBefore -and (Test-Path "$t\gone.bin"))
+    Check "tampered staging: discarded"        (-not [ClientPatch]::HasPendingCommit($t) -and -not (Test-Path "$t\_update"))
+
+    $mf = "$root\manifests\extra.txt"; $u = New-Install 'manifest-extra'
+    [ClientPatch]::Stage($pack, $u, [Func[bool]]{ $false }, $null, $mf) | Out-Null
+    Put "$u\_update\files\evil.dll" (Rand 10)
+    Check "unexpected staged file: refused"    (Throws ([PatchException]) { [ClientPatch]::Commit($u, "$u\.rustorigin-installed", $mf, $false) })
+    Check "unexpected staged file: not moved"  (-not (Test-Path "$u\evil.dll"))
+
+    $mf = "$root\manifests\missing.txt"; $g = New-Install 'manifest-missing'
+    [ClientPatch]::Stage($pack, $g, [Func[bool]]{ $false }, $null, $mf) | Out-Null
+    Remove-Item $mf
+    Check "missing manifest: refused"          (Throws ([PatchException]) { [ClientPatch]::Commit($g, "$g\.rustorigin-installed", $mf, $true) })
+    Check "missing manifest: staging discarded" (-not [ClientPatch]::HasPendingCommit($g))
+
     # ---- a damaged pack ----
     $cut = "$root\cut.patchpack"; $pb = [IO.File]::ReadAllBytes($pack); [IO.File]::WriteAllBytes($cut, $pb[0..([int]($pb.Length / 2))])
     $d = New-Install 'damaged'
