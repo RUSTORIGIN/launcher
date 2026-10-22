@@ -26,18 +26,17 @@ public static class UpdateParsing
     }
 
     // Parse the "<hex>  <name>" line for a file out of a SHA256SUMS.txt body (lowercase hex, or null).
+    // The name must match exactly (a "*" binary-mode marker is allowed), so "evil-<name>" is not taken for <name>.
     public static string HashFromSums(string sums, string fileName)
     {
         if (sums == null) return null;
         foreach (string raw in sums.Split('\n'))
         {
-            string ln = raw.Trim();
-            if (ln.Length == 0) continue;
-            if (ln.EndsWith(fileName, StringComparison.OrdinalIgnoreCase))
-            {
-                string hash = ln.Split(new[] { ' ' }, 2)[0].Trim();
-                if (hash.Length == 64) return hash.ToLowerInvariant();
-            }
+            string[] p = raw.Trim().Split(new[] { ' ', '\t' }, 2);
+            if (p.Length != 2) continue;
+            string name = p[1].Trim().TrimStart('*');
+            if (string.Equals(name, fileName, StringComparison.OrdinalIgnoreCase) && Regex.IsMatch(p[0], "^[0-9a-fA-F]{64}$"))
+                return p[0].ToLowerInvariant();
         }
         return null;
     }

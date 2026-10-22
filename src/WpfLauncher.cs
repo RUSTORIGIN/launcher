@@ -17,6 +17,8 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
 using System.Windows.Media.Animation;
+using System.Security.AccessControl;
+using System.Security.Principal;
 
 [assembly: AssemblyTitle("Rustorigin Launcher")]
 [assembly: AssemblyProduct("Rustorigin Launcher")]
@@ -308,6 +310,9 @@ public class LauncherWindow : Window
     public LauncherWindow()
     {
         InstallDir = Path.Combine(AppDir(), "Rust");
+        // Download cache (survives launcher restarts so a partial download can resume). Set before
+        // LoadConfig so its decisions reach launcher.log.
+        cacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Rustorigin");
         LoadConfig();
         if (Servers.Count == 0)
         {
@@ -316,8 +321,6 @@ public class LauncherWindow : Window
         }
         logoBmp = LoadBitmap(Path.Combine(Assets.Dir, "logo.png")) ?? LoadBitmap(Path.Combine(AppDir(), "logo.png"));
 
-        // Download cache (survives launcher restarts so a partial download can resume).
-        cacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Rustorigin");
         try { string sfile = InstallDirFile(); if (File.Exists(sfile)) { string sv = File.ReadAllText(sfile).Trim(); if (sv.Length > 0) { InstallDir = sv; installDirChosen = true; } } } catch { }
         // A client update whose file swap was cut short (crash, power loss) is finished before anything
         // else looks at the install: its files are already rebuilt and verified, only the moves remain.
@@ -326,6 +329,10 @@ public class LauncherWindow : Window
         catch (Exception ex) { Log("pending update not applied yet: " + ex.Message); }
         SetDownloadPaths();
         if (finishedUpdate) { DeletePatchBuffer(); RemoveEmptyDownloadDir(); }
+        // An install made by an older launcher is still open to every account: lock it (in the background -
+        // re-permissioning a whole client takes a few seconds).
+        if (installDirChosen || File.Exists(InstallMarkerPath()))
+            new Thread(SecureInstallDir) { IsBackground = true, Name = "install-acl" }.Start();
 
         // ---- window chrome (native Windows title bar + standard window features) ----
         Title = "Rustorigin Launcher";
@@ -837,6 +844,13 @@ public class LauncherWindow : Window
         bool anything = IsInstalled() || IsBrokenInstall() || HasPartial();
         try { anything = anything || File.Exists(zipPath); } catch { }
         if (!anything) { Alert("Nothing to uninstall", "Nothing is installed."); return; }
+        string unsafeWhy = UnsafeToWipe(InstallDir);
+        if (unsafeWhy != null)
+        {
+            Log("uninstall refused: " + InstallDir + " - " + unsafeWhy);
+            Alert("Uninstall", "The install folder " + InstallDir + " " + unsafeWhy + ", so the launcher will not delete it. Remove the game files by hand.");
+            return;
+        }
         if (!Confirm("Uninstall client",
                 "Delete the downloaded game files (several GB)? The launcher is kept.",
                 "Uninstall", "Cancel")) return;
@@ -879,6 +893,7 @@ public class LauncherWindow : Window
             Dispatcher.BeginInvoke((Action)(() =>
             {
                 busy = false;
+                ForgetGameExe();
                 if (e2 != null) ShowStatus(Danger, "Uninstall error: " + e2, true);
                 else
                 {
@@ -895,9 +910,99 @@ public class LauncherWindow : Window
 
     // Recursively delete everything under dir, skipping the given full file paths (the launcher's own
     // files, so the client can be removed from a shared folder without touching the launcher). Best-effort per entry.
+    // Why Uninstall must not wipe dir, or null when it may. Uninstall deletes everything under the install
+    // folder, which comes from installdir.txt or launcher.cfg; a drive root, a system or profile folder, or any
+    // folder holding one of them, is never treated as "the game folder".
+    static string UnsafeToWipe(string dir)
+    {
+        string full;
+        try { full = Path.GetFullPath(dir).TrimEnd('\\'); } catch { return "is not a valid path"; }
+        if (full.Length <= 3 || string.Equals(full + "\\", Path.GetPathRoot(full), StringComparison.OrdinalIgnoreCase)) return "is a whole drive";
+        foreach (Environment.SpecialFolder sf in new[] {
+            Environment.SpecialFolder.Windows, Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86,
+            Environment.SpecialFolder.UserProfile, Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolder.ApplicationData,
+            Environment.SpecialFolder.DesktopDirectory, Environment.SpecialFolder.MyDocuments, Environment.SpecialFolder.CommonApplicationData })
+        {
+            string s;
+            try { s = Environment.GetFolderPath(sf); } catch { continue; }
+            if (string.IsNullOrEmpty(s)) continue;
+            s = s.TrimEnd('\\');
+            if (string.Equals(full, s, StringComparison.OrdinalIgnoreCase) || s.StartsWith(full + "\\", StringComparison.OrdinalIgnoreCase))
+                return "is or contains a Windows or user folder";
+        }
+        string users = Path.Combine(Path.GetPathRoot(full), "Users");
+        if (string.Equals(full, users, StringComparison.OrdinalIgnoreCase)) return "is or contains a Windows or user folder";
+        return null;
+    }
+
+    // ---------- install folder permissions ----------
+    // A folder made at the root of a drive (C:\Rustorigin) inherits "Authenticated Users: Modify", so ANY
+    // account on the PC could replace the game or launcher exe that this player - or an admin - later runs,
+    // or plant a download in its _download buffer. The install folder is therefore locked to: this user,
+    // SYSTEM and Administrators (full control), everyone else read + execute. OWNER RIGHTS is limited to
+    // read + execute too, so a file another account planted before the lock can't be reopened by its owner.
+    // Best-effort: a folder this user may not re-permission (made by an admin, a network share) is left as is.
+    static readonly object aclLock = new object();
+    const FileSystemRights WriteRights = FileSystemRights.WriteData | FileSystemRights.AppendData | FileSystemRights.WriteExtendedAttributes
+        | FileSystemRights.WriteAttributes | FileSystemRights.Delete | FileSystemRights.DeleteSubdirectoriesAndFiles
+        | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
+
+    void SecureInstallDir()
+    {
+        string dir = InstallDir;
+        lock (aclLock)
+        {
+            try
+            {
+                if (!Directory.Exists(dir) || UnsafeToWipe(dir) != null) return;
+                if (!OthersCanWrite(dir)) return;
+                var me = WindowsIdentity.GetCurrent().User;
+                var inherit = InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
+                var ds = new DirectorySecurity();
+                ds.SetAccessRuleProtection(true, false);   // drop what was inherited from the drive root
+                ds.AddAccessRule(new FileSystemAccessRule(me, FileSystemRights.FullControl, inherit, PropagationFlags.None, AccessControlType.Allow));
+                ds.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), FileSystemRights.FullControl, inherit, PropagationFlags.None, AccessControlType.Allow));
+                ds.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null), FileSystemRights.FullControl, inherit, PropagationFlags.None, AccessControlType.Allow));
+                ds.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null), FileSystemRights.ReadAndExecute, inherit, PropagationFlags.None, AccessControlType.Allow));
+                ds.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier("S-1-3-4"), FileSystemRights.ReadAndExecute, inherit, PropagationFlags.None, AccessControlType.Allow));   // OWNER RIGHTS
+                Directory.SetAccessControl(dir, ds);       // re-applied to everything already inside
+                Log("install folder locked to this user, SYSTEM and Administrators: " + dir);
+                // Files kept while others could write here are not trusted: a cached download is hashed again.
+                foreach (string name in new[] { ZipName, PatchName })
+                { try { File.Delete(Path.Combine(Path.Combine(dir, "_download"), name + VerifiedExt)); } catch { } }
+                try
+                {
+                    var owner = Directory.GetAccessControl(dir, AccessControlSections.Owner).GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+                    if (owner != null && owner != me && !owner.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid))
+                        Log("warning: the install folder is owned by another account (" + owner + "), which can still change its permissions");
+                }
+                catch { }
+            }
+            catch (Exception ex) { Log("install folder permissions left unchanged (" + ex.GetType().Name + ": " + ex.Message + ")"); }
+        }
+    }
+
+    // True when an account other than this user, SYSTEM, Administrators or CREATOR OWNER may write to dir or
+    // (through an inheritable entry) to what is inside it.
+    static bool OthersCanWrite(string dir)
+    {
+        var me = WindowsIdentity.GetCurrent().User;
+        foreach (FileSystemAccessRule r in Directory.GetAccessControl(dir, AccessControlSections.Access).GetAccessRules(true, true, typeof(SecurityIdentifier)))
+        {
+            var sid = r.IdentityReference as SecurityIdentifier;
+            if (r.AccessControlType != AccessControlType.Allow || (r.FileSystemRights & WriteRights) == 0 || sid == null) continue;
+            if (sid == me || sid.IsWellKnown(WellKnownSidType.LocalSystemSid) || sid.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid)
+                || sid.IsWellKnown(WellKnownSidType.CreatorOwnerSid)) continue;
+            return true;
+        }
+        return false;
+    }
+
     static void DeleteDirContents(string dir, ICollection<string> keep)
     {
         if (!Directory.Exists(dir)) return;
+        // Never follow a junction or symlink: deleting "inside" it would delete the folder it points at.
+        try { if ((File.GetAttributes(dir) & FileAttributes.ReparsePoint) != 0) return; } catch { return; }
         foreach (string f in Directory.GetFiles(dir))
         {
             try
@@ -1199,10 +1304,13 @@ public class LauncherWindow : Window
         return new System.Windows.Shapes.Path { Data = Geometry.Parse(d), Fill = TextDim, Stretch = Stretch.Uniform };
     }
 
+    // Only web links: ShellExecute would also run a local exe, a file: URL or any registered protocol handler.
     static void OpenUrl(string url)
     {
-        if (string.IsNullOrEmpty(url)) return;
-        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+        Uri u;
+        if (string.IsNullOrEmpty(url) || !Uri.TryCreate(url.Trim(), UriKind.Absolute, out u)
+            || (u.Scheme != Uri.UriSchemeHttps && u.Scheme != Uri.UriSchemeHttp)) return;
+        try { Process.Start(new ProcessStartInfo(u.AbsoluteUri) { UseShellExecute = true }); } catch { }
     }
 
     // ---- small helpers ----
@@ -1579,13 +1687,43 @@ public class LauncherWindow : Window
     void LoadConfig()
     {
         // embedded defaults first, then an optional launcher.cfg next to the exe overrides them
-        ApplyConfig(Assets.ConfigLines());
+        string[] embedded = Assets.ConfigLines();
+        ApplyConfig(embedded);
         try
         {
             string cfg = Path.Combine(AppDir(), "launcher.cfg");
-            if (File.Exists(cfg)) ApplyConfig(File.ReadAllLines(cfg));
+            // The embedded config is the trust anchor: it names the client URL + SHA-256, the self-update
+            // repo and the exe PLAY runs. A file next to the exe could replace all of them, and players run
+            // the launcher from their Downloads folder, where any web page can drop a "launcher.cfg". So a
+            // release build (one with an embedded config) only reads it when started with --dev-config;
+            // a dev build (scripts\build.bat, nothing embedded) still reads it as before.
+            if (File.Exists(cfg))
+            {
+                if (embedded.Length == 0 || HasArg("--dev-config")) { ApplyConfig(File.ReadAllLines(cfg)); Log("config: using " + cfg); }
+                else Log("config: ignored " + cfg + " (a release build only reads it when started with --dev-config)");
+            }
         }
         catch { }
+        // Whatever the source, PLAY must only ever run a game exe inside the install folder.
+        if (!SafeLaunchExe(LaunchExe)) { Log("config: LaunchExe '" + LaunchExe + "' ignored - it must be a plain .exe name or a path inside the install folder"); LaunchExe = "RustClient.exe"; }
+        if (UpdateRepo.Length > 0 && !System.Text.RegularExpressions.Regex.IsMatch(UpdateRepo, "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"))
+        { Log("config: UpdateRepo '" + UpdateRepo + "' ignored - expected owner/repo"); UpdateRepo = ""; }
+    }
+
+    static bool HasArg(string flag)
+    {
+        try { foreach (string a in Environment.GetCommandLineArgs()) if (string.Equals(a, flag, StringComparison.OrdinalIgnoreCase)) return true; }
+        catch { }
+        return false;
+    }
+
+    // A relative "*.exe" path with no "..", drive or root - so Path.Combine(InstallDir, it) stays inside InstallDir.
+    static bool SafeLaunchExe(string exe)
+    {
+        string p = (exe ?? "").Trim().Replace('/', '\\');
+        if (p.Length == 0 || !p.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || p.IndexOf(':') >= 0 || p.StartsWith("\\")) return false;
+        foreach (string part in p.Split('\\')) if (part.Length == 0 || part == "." || part == "..") return false;
+        return p.IndexOfAny(Path.GetInvalidPathChars()) < 0;
     }
 
     void ApplyConfig(string[] lines)
@@ -1743,7 +1881,23 @@ public class LauncherWindow : Window
         return true;
     }
 
+    // RefreshState (every 2 s, on the UI thread) asks for the game exe several times per tick, and when it
+    // is not directly in InstallDir (mid-extract, a broken install) each ask is a recursive scan of the
+    // whole folder. One answer per second is plenty; it is dropped whenever an action changes the install.
+    sealed class ExeLookup { public string Dir, Exe; public DateTime At; }
+    volatile ExeLookup exeLookup;
+    void ForgetGameExe() { exeLookup = null; }
+
     string FindGameExe()
+    {
+        var c = exeLookup;
+        if (c != null && c.Dir == InstallDir && (DateTime.UtcNow - c.At).TotalMilliseconds < 1000) return c.Exe;
+        string dir = InstallDir, exe = ScanGameExe();
+        exeLookup = new ExeLookup { Dir = dir, Exe = exe, At = DateTime.UtcNow };
+        return exe;
+    }
+
+    string ScanGameExe()
     {
         try
         {
@@ -1852,7 +2006,7 @@ public class LauncherWindow : Window
         try
         {
             string sha = NormalizeHash(PatchSha256);
-            if (PatchUrl.Length == 0 || sha.Length == 0) return false;
+            if (PatchUrl.Length == 0 || sha.Length == 0 || !IsHttpsUrl(PatchUrl)) return false;
             if (!IsInstalled() || !ClientOutdated()) return false;
             if (!ClientPatch.ProbeMatches(InstallDir, PatchProbe)) return false;
             string failed = PatchFailedFile();
@@ -2051,6 +2205,8 @@ public class LauncherWindow : Window
         if (busy) return;
         if (string.IsNullOrEmpty(DownloadUrl) || DownloadUrl.Contains("REPLACE-ME"))
         { ShowStatus(Danger, "Set DownloadUrl in launcher.cfg first.", true); return; }
+        if (!IsHttpsUrl(DownloadUrl))
+        { ShowStatus(Danger, "DownloadUrl in launcher.cfg must be an https:// link.", true); return; }
         // Verification is mandatory: refuse to download/install anything we can't check.
         if (NormalizedExpectedHash().Length == 0)
         { ShowStatus(Danger, "Set Sha256 in launcher.cfg first - downloads must be verified before install.", true); return; }
@@ -2111,6 +2267,7 @@ public class LauncherWindow : Window
 
     // Timestamped diagnostics in <cache>\launcher.log (players can send this when a download misbehaves).
     static readonly object logLock = new object();
+    static bool logSizeChecked;   // rotation is checked once per run, at the first line
     void Log(string msg)
     {
         try
@@ -2118,7 +2275,10 @@ public class LauncherWindow : Window
             lock (logLock)
             {
                 Directory.CreateDirectory(cacheDir);
-                File.AppendAllText(Path.Combine(cacheDir, "launcher.log"),
+                string path = Path.Combine(cacheDir, "launcher.log");
+                // Keep it small enough to send: past 5 MB the old log becomes launcher.log.old and a new one starts.
+                if (!logSizeChecked) { logSizeChecked = true; var fi = new FileInfo(path); if (fi.Exists && fi.Length > (5L << 20)) { string old = path + ".old"; if (File.Exists(old)) File.Delete(old); File.Move(path, old); } }
+                File.AppendAllText(path,
                     DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + "  " + msg + Environment.NewLine);
             }
         }
@@ -2140,6 +2300,7 @@ public class LauncherWindow : Window
     {
         string error = null; bool cancelled = false; bool verifyFailed = false; string verifyMsg = null;
         string errorPrefix = "Download failed: ";
+        SecureInstallDir();   // before anything is downloaded into or extracted to it
         try
         {
             // An outdated install is upgraded in place from the delta pack when it can be - a fraction
@@ -2205,6 +2366,7 @@ public class LauncherWindow : Window
         Dispatcher.BeginInvoke((Action)(() =>
         {
             busy = false; activeReq = null;
+            ForgetGameExe();      // the install just changed
             SetDownloadPaths();   // the install state may have changed which file a Resume continues
             if (verifyFailed && !cancelled) ShowStatus(Danger, verifyMsg ?? "Integrity check failed - the download was rejected. Nothing was installed.", true);
             else if (error != null && !cancelled) ShowStatus(Danger, errorPrefix + error, true);
@@ -2295,7 +2457,7 @@ public class LauncherWindow : Window
                 var h = (HttpWebRequest)WebRequest.Create(dlUrl);
                 h.Method = "HEAD"; h.Timeout = 30000; h.UserAgent = UA; h.AllowAutoRedirect = true;
                 using (var r = (HttpWebResponse)h.GetResponse())
-                { total = r.ContentLength; etag = (r.Headers["ETag"] ?? r.Headers["Last-Modified"] ?? "").Trim(); }
+                { RequireHttps(r); total = r.ContentLength; etag = (r.Headers["ETag"] ?? r.Headers["Last-Modified"] ?? "").Trim(); }
             }
             catch (Exception hx) { Log("HEAD failed (ok, will learn size from GET): " + hx.Message); }
             Log("HEAD: total=" + total + " etag=" + etag);
@@ -2370,6 +2532,7 @@ public class LauncherWindow : Window
                     {
                         if (cancelRequested) { cancelled = true; Log("cancelled by user"); break; }
                         if (IsMissingOnServer(ex)) throw new RemoteFileMissingException(dlUrl);   // retrying never helps
+                        if (ex is InsecureRedirectException) throw;
                         attempt++;
                         if (attempt > 30) throw new Exception("Gave up after 30 retries: " + ex.Message);
                         have = File.Exists(partPath) ? new FileInfo(partPath).Length : 0;
@@ -2450,6 +2613,24 @@ public class LauncherWindow : Window
         public RemoteFileMissingException(string url) : base("the download server does not have this file: " + url) { }
     }
 
+    // Downloads are https only - the URL in launcher.cfg and wherever the server redirects to. (The SHA-256
+    // already protects integrity; this keeps an observer on the network from reading or cutting the transfer.)
+    static bool IsHttpsUrl(string url)
+    {
+        Uri u;
+        return !string.IsNullOrEmpty(url) && Uri.TryCreate(url.Trim(), UriKind.Absolute, out u) && u.Scheme == Uri.UriSchemeHttps;
+    }
+
+    sealed class InsecureRedirectException : Exception
+    {
+        public InsecureRedirectException(Uri to) : base("the download server redirected to a non-https address (" + to.Scheme + "://" + to.Host + ")") { }
+    }
+
+    static void RequireHttps(WebResponse r)
+    {
+        if (r.ResponseUri != null && r.ResponseUri.Scheme != Uri.UriSchemeHttps) throw new InsecureRedirectException(r.ResponseUri);
+    }
+
     static bool IsMissingOnServer(Exception ex)
     {
         var wex = ex as WebException;
@@ -2521,6 +2702,7 @@ public class LauncherWindow : Window
         int failures = 0;                                    // failed chunk attempts since the last success
         Exception lastError = null;
         bool stop = false, rangeIgnored = false;
+        Exception insecure = null;
 
         var threads = new List<Thread>();
         for (int w = 0; w < workers; w++)
@@ -2545,6 +2727,7 @@ public class LauncherWindow : Window
                         if (cancelRequested) throw new OperationCanceledException();
                         using (var resp = (HttpWebResponse)req.GetResponse())
                         {
+                            RequireHttps(resp);
                             if (resp.StatusCode != HttpStatusCode.PartialContent || !ContentRangeStartsAt(resp, start))
                                 throw new RangeNotSupportedException();
                             using (var s = resp.GetResponseStream())
@@ -2575,6 +2758,7 @@ public class LauncherWindow : Window
                         {
                             if (cancelRequested) return;
                             if (ex is RangeNotSupportedException) { rangeIgnored = true; stop = true; return; }
+                            if (ex is InsecureRedirectException) { insecure = ex; stop = true; return; }   // retrying never helps
                             queue.Enqueue(ci);                   // fetch this chunk again later
                             failures++; lastError = ex;
                             if (failures <= 3 || failures % 10 == 0)
@@ -2618,6 +2802,7 @@ public class LauncherWindow : Window
         foreach (var t in threads) t.Join();
 
         if (cancelRequested) throw new OperationCanceledException();
+        if (insecure != null) throw insecure;
         if (rangeIgnored) throw new RangeNotSupportedException();
         foreach (bool d in done)
             if (!d) throw new Exception("Download stalled (no data for 3 minutes)" + (lastError != null ? ": " + lastError.Message : ""));
@@ -2644,6 +2829,7 @@ public class LauncherWindow : Window
 
         using (resp)
         {
+            RequireHttps(resp);
             bool partial = resp.StatusCode == HttpStatusCode.PartialContent;
             if (have > 0 && !partial) { have = 0; resumed = false; }   // server ignored Range: start over
             if (partial)
@@ -2699,11 +2885,13 @@ public class LauncherWindow : Window
             catch { }   // if the drive can't be queried, don't block the install
             long written = 0;                                   // uncompressed bytes written so far
             var sw = Stopwatch.StartNew(); long lastUi = -1000;
+            var buf = new byte[1 << 20];                        // one buffer for every entry
             foreach (var entry in archive.Entries)
             {
                 if (cancelRequested) throw new OperationCanceledException();
                 string target = Path.GetFullPath(Path.Combine(dest, entry.FullName));
-                if (!target.StartsWith(fullDest, StringComparison.OrdinalIgnoreCase)) continue;
+                // with the separator: "C:\Rustorigin2\x" must not pass as inside "C:\Rustorigin"
+                if (!target.StartsWith(fullDest.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase)) continue;
                 if (entry.FullName.EndsWith("/") || entry.FullName.EndsWith("\\") || entry.Name.Length == 0)
                 {
                     Directory.CreateDirectory(target);
@@ -2714,9 +2902,12 @@ public class LauncherWindow : Window
                 // advancing even through one large file. (File-count progress parks on big files and
                 // looks frozen, e.g. stuck at 85% while a multi-GB bundle unpacks.)
                 using (var src = entry.Open())
-                using (var dst = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
+                using (var dst = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16))
                 {
-                    var buf = new byte[1 << 20]; int n;
+                    // Reserve the whole file up front: the multi-GB bundles land in one contiguous run
+                    // instead of growing 1 MB at a time (less fragmentation, faster game loads).
+                    if (entry.Length > (1L << 20)) { try { dst.SetLength(entry.Length); } catch { } }
+                    int n;
                     while ((n = src.Read(buf, 0, buf.Length)) > 0)
                     {
                         if (cancelRequested) throw new OperationCanceledException();
@@ -2732,6 +2923,7 @@ public class LauncherWindow : Window
                             }));
                         }
                     }
+                    if (dst.Position != dst.Length) dst.SetLength(dst.Position);   // never leave a reserved tail
                 }
                 try { File.SetLastWriteTime(target, entry.LastWriteTime.LocalDateTime); } catch { }
             }
@@ -2785,7 +2977,7 @@ public class LauncherWindow : Window
         }));
 
         using (var sha = System.Security.Cryptography.SHA256.Create())
-        using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20))
+        using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16, FileOptions.SequentialScan))
         {
             var buf = new byte[1 << 20];
             int n; long done = 0; var sw = Stopwatch.StartNew(); long lastUi = -1000;
@@ -3241,7 +3433,7 @@ public class LauncherWindow : Window
             req.Accept = "application/vnd.github+json";
             using (var resp = (HttpWebResponse)req.GetResponse())
             using (var sr = new StreamReader(resp.GetResponseStream()))
-                return sr.ReadToEnd();
+            { RequireHttps(resp); return sr.ReadToEnd(); }
         }
         catch (Exception ex) { Log("GET " + url + " failed: " + ex.Message); return null; }
     }
@@ -3256,6 +3448,7 @@ public class LauncherWindow : Window
             using (var s = resp.GetResponseStream())
             using (var fs = new FileStream(dest, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
             {
+                RequireHttps(resp);
                 long total = resp.ContentLength, have = 0;
                 if (onProgress != null) onProgress(0, total);
                 byte[] buf = new byte[1 << 16];

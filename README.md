@@ -59,7 +59,10 @@ run (*More info → Run anyway*). **Requires Windows 10/11**; no .NET download n
 
 The launcher reads a simple `Key=Value` file, `config/launcher.cfg`, embedded at build time. A
 `launcher.cfg` placed **next to the exe** overrides the defaults at runtime (handy for a test
-server). Key settings:
+server). A release build only reads it when started with `--dev-config`, so a file dropped next to the
+exe (e.g. in Downloads) can't redirect the client download, the self-update or PLAY. `DownloadUrl` and
+`PatchUrl` must be `https://`. The launcher also locks the install folder so only the player's account,
+SYSTEM and Administrators can write to it (other accounts on the PC can't replace the game). Key settings:
 
 | Key | Meaning |
 |-----|---------|

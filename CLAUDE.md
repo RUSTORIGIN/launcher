@@ -47,7 +47,11 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
 - **Carousel dot indicators** at the bottom-center (`BuildSlideDots` / `UpdateSlideDots`): one dot
   per screenshot, the active one a wide accent pill; clicking a dot jumps to that slide and resets
   the auto-advance timer. Hidden when fewer than two slides load.
-- A `launcher.cfg` placed **next to the exe** overrides the embedded defaults at runtime.
+- A `launcher.cfg` placed **next to the exe** overrides the embedded defaults at runtime - in a **release
+  build only when started with `--dev-config`** (`LoadConfig`; otherwise it is ignored and logged), because
+  players run the exe from Downloads, where any web page can drop a file. A dev build (`build.bat`, nothing
+  embedded) always reads it. `LaunchExe` must be a relative `.exe` path inside the install folder and
+  `UpdateRepo` must be `owner/repo`, whatever the source.
 
 ## Download behavior (implemented)
 
@@ -75,6 +79,9 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
 - A saved partial is reused only for the **same** remote file (URL + ETag + size), so a new
   build is never stitched onto an old partial.
 - **TLS**: `ConfigureTls()` forces TLS 1.2 (and 1.3 where the OS supports it); no HTTP fallback.
+  `DownloadUrl` / `PatchUrl` must be `https://` (`IsHttpsUrl`: INSTALL refuses an http client URL, an http
+  pack is skipped), and a server redirect to a non-https address fails the download at once
+  (`RequireHttps` / `InsecureRedirectException`, not retried). The self-update requests get the same check.
 - **Integrity**: SHA-256 verification is mandatory - Install is blocked without a configured
   `Sha256`, and the finished download is verified before extraction and rejected on mismatch
   (see the security section below).
@@ -177,7 +184,7 @@ Verification is **required**, not optional:
   re-downloading. On cancel during hashing the `.part` is kept so Resume re-verifies.
 
 The expected hash is normally baked into the exe via the embedded `launcher.cfg` (the open-source
-exe is the trust anchor), and can be overridden by a `launcher.cfg` next to the exe for testing.
+exe is the trust anchor), and can be overridden by a `launcher.cfg` next to the exe for testing (release build: start it with `--dev-config`).
 
 The download path still does **NOT**:
 
@@ -221,6 +228,16 @@ dir, so no admin rights needed):
 | `launcher.log` | Timestamped diagnostics of every download/verify step - ask players for this when an install misbehaves. |
 | `installdir.txt` | The install folder the player picked on first INSTALL (`ChooseInstallDir`), remembered across runs; cleared by Uninstall client so a reinstall asks again. |
 | `prefs.cfg` | Per-user settings (see below). |
+
+**Install folder permissions** (`SecureInstallDir`): a folder made at a drive root inherits "Authenticated
+Users: Modify", so any account on the PC could swap the game or launcher exe. Whenever another account can
+write to it (`OthersCanWrite`), the launcher replaces its ACL with a protected one - this user, SYSTEM and
+Administrators full control, Users and OWNER RIGHTS read + execute - at the start of every
+INSTALL/UPDATE/REPAIR (`DownloadWorker`, before anything is written) and in the background on launch for an
+existing install. It then drops the `_download\*.verified` records, so a kept download is hashed again.
+Best-effort: skipped for folders `UnsafeToWipe` rejects, and a folder this user can't re-permission is left
+as is (logged). It can't undo a file another account replaced *before* the lock, and nothing protects against
+malware running as the player's own account.
 
 Inside the install folder: `.rustorigin-installed` (the install marker: line 1 the install time,
 then `client=<ClientVersion>`) and, only while an update is being applied, `_update\` (staged
@@ -364,7 +381,7 @@ these steps move together - never upload a repackaged zip without rebuilding the
 - run `.\scripts\make_client_patch.ps1` against the **same** new client folder the zip was made
   from, upload the `.patchpack`, and set `PatchUrl=`, `PatchSha256=` and `PatchProbe=` from its
   output. The pack only ever upgrades the *immediately previous* build; anyone else gets the zip;
-- smoke-test the update with a `launcher.cfg` next to a dev exe against a copy of the old client
+- smoke-test the update with a `launcher.cfg` next to a dev exe (or the release exe started with `--dev-config`) against a copy of the old client
   before tagging: the launcher self-update is mandatory, so a release reaches every player at once.
 
 If the uploaded zip and the embedded hash ever drift apart, players get a (correct) integrity
@@ -558,7 +575,7 @@ running the exe:
   anti-aliased, so they read very slightly harder than a layered window's.
 - **Integrity smoke test:** blank `Sha256` -> INSTALL refused; correct `Sha256` -> download -> verify
   -> extract; wrong `Sha256` -> download rejected, nothing installed. (Also in docs/IMPLEMENTATION_PLAN.md section 5.)
-- **Update smoke test** (with a `launcher.cfg` next to the exe and a copy of the previous client as
+- **Update smoke test** (with a `launcher.cfg` next to the exe - release build started with `--dev-config` - and a copy of the previous client as
   the install): UPDATE shows instead of PLAY -> the pack downloads, verifies, "UPDATING" runs to 100%
   -> PLAY appears and the marker ends with `client=<ClientVersion>`. Wrong `PatchSha256` -> the pack
   is rejected and the full download starts. A modified install file -> the log says the pack is not

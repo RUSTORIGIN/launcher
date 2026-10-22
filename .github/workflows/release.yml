@@ -34,9 +34,13 @@ jobs:
       - name: Determine version
         id: ver
         shell: pwsh
+        # Passed through env, never pasted into the script: a tag or input containing a quote would otherwise run as code.
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          $v = '${{ github.event.inputs.version }}'
-          if ([string]::IsNullOrWhiteSpace($v)) { $v = ('${{ github.ref_name }}' -replace '^v','') }
+          $v = $env:INPUT_VERSION
+          if ([string]::IsNullOrWhiteSpace($v)) { $v = ($env:REF_NAME -replace '^v','') }
           if ($v -notmatch '^\d+\.\d+\.\d+$') { $v = '0.0.0' }
           "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Building version $v"

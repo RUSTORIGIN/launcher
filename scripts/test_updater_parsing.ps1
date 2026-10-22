@@ -21,6 +21,10 @@ Check "AssetUrl SHA256SUMS.txt"   ([UpdateParsing]::AssetUrl($json,'SHA256SUMS.t
 Check "AssetUrl missing -> null"  ($null -eq [UpdateParsing]::AssetUrl($json,'nope.exe'))
 Check "HashFromSums exe"          ([UpdateParsing]::HashFromSums($sums,'RustoriginLauncher.exe') -eq '716fb0f17748da6eb90ca46c6b184dc9ad567c871008098ded0eb7579a6519d8')
 Check "HashFromSums missing null" ($null -eq [UpdateParsing]::HashFromSums($sums,'zzz.exe'))
+$lookalike = "1111111111111111111111111111111111111111111111111111111111111111  evil-RustoriginLauncher.exe`n" +
+             "716fb0f17748da6eb90ca46c6b184dc9ad567c871008098ded0eb7579a6519d8 *RustoriginLauncher.exe`r`n"
+Check "HashFromSums exact name, not a suffix" ([UpdateParsing]::HashFromSums($lookalike,'RustoriginLauncher.exe') -eq '716fb0f17748da6eb90ca46c6b184dc9ad567c871008098ded0eb7579a6519d8')
+Check "HashFromSums non-hex -> null" ($null -eq [UpdateParsing]::HashFromSums(("z" * 64) + "  RustoriginLauncher.exe",'RustoriginLauncher.exe'))
 Check "IsNewer newer -> true"     ([UpdateParsing]::IsNewer('1.0.0.0','v1.2.0'))
 Check "IsNewer equal -> false"    (-not [UpdateParsing]::IsNewer('1.2.0.0','v1.2.0'))
 Check "IsNewer older -> false"    (-not [UpdateParsing]::IsNewer('2.0.0.0','v1.9.9'))

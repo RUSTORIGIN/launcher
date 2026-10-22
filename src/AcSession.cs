@@ -532,6 +532,7 @@ public sealed class AcSessionClient
             req.UserAgent = "RustoriginLauncher";
             req.Timeout = 10000;
             req.ReadWriteTimeout = 10000;
+            req.AllowAutoRedirect = false;   // a redirect could lead off the checked endpoint (IsAllowedEndpoint), e.g. to plain http
             if (signature != null) req.Headers["X-AC-Sig"] = signature;
             byte[] data = Encoding.UTF8.GetBytes(body);
             req.ContentLength = data.Length;
