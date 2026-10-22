@@ -3359,6 +3359,8 @@ public class LauncherWindow : Window
                 () => { try { if (!proc.HasExited) return true; } catch { } return GameRunning(); },
                 m => Log("ac-session: " + m), null);
             acSession.HardwareId = AcSession.ReadHardwareId;
+            // The server sends the connected game a code; echoing it from the game's log proves this session belongs to it.
+            acSession.LinkSource = new AcGameLog(AcGameLog.DefaultPath()).Poll;
             // Evidence labels, gathered on the session thread: the game files are hashed once per launch (at the
             // first heartbeat). The tool check is done by the client itself, with the rules the server sends.
             string clientDir = null;
@@ -3395,7 +3397,7 @@ public class LauncherWindow : Window
             "match the official build; whether a program from a list the Rustorigin server provides is running (only the " +
             "number of the rule it matched is sent, never your list of programs); and an ID of this PC that stays the same " +
             "until Windows is reinstalled (a one-way hash of your Windows install ID). Like any website, the server also sees " +
-            "your IP address. No files leave your PC.\n\n" +
+            "your IP address. It also reads one code the server sends to your game from the game's own log, to show the session belongs to this game. No files leave your PC.\n\n" +
             "Staff use the PC ID to see when several accounts play from one PC, and to keep banned players from coming back " +
             "on a new account: an account playing from the PC of a banned account is banned automatically. " +
             "The server keeps the PC ID with your account for up to 180 days after you last played.\n\n" +

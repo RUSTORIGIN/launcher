@@ -181,6 +181,39 @@ who shares the victim's IP and holds a session in their name while the victim pl
 can still put their PC on that account; requiring a session (slice 7) closes most of that. The SteamID
 itself is only as trustworthy as the game server's Steam authentication.
 
+### Game link (slice 9)
+
+Binds a session to the actual game connection on the actual PC, so a session opened somewhere else - a script
+that speaks this protocol, a launcher on another PC or in a VM, a session opened in someone else's name -
+no longer counts.
+
+1. When a player joins (and every 50 s while their session is still unlinked), OriginSession picks a random
+   16-hex code, passes it to the service with the check (`GET /v1/check?...&nonce=<code>`), and then sends
+   it to that player's game as a console message: `rustorigin-link <code>`. The game writes console output
+   to its own log (`%USERPROFILE%\AppData\LocalLow\Facepunch Studios LTD\Rust\Player.log`).
+2. The launcher follows that log (`AcGameLog`: only new lines, starting over when the game rewrites the
+   file) and, as soon as a new code appears, sends a heartbeat at once with `"link":"<code>"` (inside the
+   signed body).
+3. The service marks the session `linked` when the code matches one it was given for the same SteamID + IP
+   in the last 10 minutes (single use, newest 3 kept). A new code resets the link: a link vouches for one
+   game connection, not for whatever joins next. Check replies say `"linked":1`.
+4. OriginSession: `join ... link pending`, then `link <name> [<id>] ok launcher <v> pc <id>` within ~15 s.
+   The PC id is only believed from a linked session (so nobody sharing an IP can pin their PC on another
+   account), and `Require the game link` (off by default) makes an unlinked session count as none: kicked
+   after the grace period like a missing one.
+
+What it does not do: a fake launcher that also reads `Player.log` on the same PC links too. It now has to run
+next to the real game and react per connection, which is where the bar sits.
+
+### Suspect flags (slice 9)
+
+Signs that a session was not opened by the real launcher, reported for review, never acted on. The service
+flags `no-pc` (no hardware id), `user-agent` (not `RustoriginLauncher`) and `version` (not in
+`AC_LAUNCHER_VERSIONS`, the released versions; blank = not checked) in the check reply (`"flags"`);
+OriginSession adds `unlinked` when the session still hasn't linked after the grace period and logs
+`suspect <name> [<id>] <flags>`; the RustRCON panel opens a "Possible fake launcher" case. Each sign can be
+faked by a careful script.
+
 ## Binding and abuse cases
 
 - **Sessions are keyed by (SteamID, IP), and several may exist per SteamID.** A session opened from
@@ -224,8 +257,8 @@ sent, never a hash or file contents. There are no process lists or personal file
 The session service keeps sessions in memory only and forgets them 6 hours after their last heartbeat. Its
 log carries counts only. The gate plugin's daily log records each join's status and labels with the
 player's name and SteamID, the first 16 hex characters of the hardware id, and the other accounts seen on
-the same PC, for staff review. **Those log files are not pruned yet**: add a retention limit before
-production. The RustRCON panel keeps
+the same PC, for staff review. They are kept for 30 days: a daily `rust-logprune.timer` on
+the server deletes older files (`server/linux/prune-logs.sh` in the plugins repo). The RustRCON panel keeps
 each account's keyed device ids (at most 10) for 180 days after they were last seen
 (`evasion.pcRetentionDays`), longer only on accounts with an active ban, since that is what a ban-evasion
 match is made of. Raw MachineGuids and the launcher's own hash are kept nowhere. A one-time notice in the launcher, shown after the first session-enabled PLAY, says
@@ -294,3 +327,15 @@ what is sent.
    forged names, IP-only never acting, false-alarm clearing, retention) and the real panel end to end against
    a fake RCON server in shadow, kick, ban and cleared modes; the plugin compiled with C# 6 against the dev
    server's DLLs. Not yet run on the dev server.
+9. **Game link + suspect flags** (see the two sections above). Launcher: `AcGameLog` reads the code from the
+   game's log and `AcSessionClient` echoes it at once (`link` in the heartbeat). Service: codes from the
+   check, `linked`, reset per connection, `flags`. OriginSession 0.5.1: codes at join / while unlinked,
+   PC id only from linked sessions, `Require the game link`, `suspect` lines. Panel: link lines, "Possible
+   fake launcher" cases. Tested: unit tests on all sides; live on the dev server with the real client - the
+   real launcher links within 2 s of the join (line within ~15 s) and raises no flags; a scripted session
+   that speaks the protocol but doesn't read the log stays unlinked, is flagged no-pc, user-agent, version,
+   unlinked, and with the link required is kicked at 122 s.
+
+Proposed next: a user-mode **loaded-module signal** (code injected into the game, or proxy DLLs in the game
+folder), with no driver and no admin rights. Design, false positives and privacy:
+[AC_MODULE_SIGNAL.md](AC_MODULE_SIGNAL.md). Not built.
