@@ -182,7 +182,7 @@ public static class AcSession
     public static string NewNonceHex()
     {
         var b = new byte[16];
-        using (var rng = new RNGCryptoServiceProvider()) rng.GetBytes(b);
+        using (var rng = RandomNumberGenerator.Create()) rng.GetBytes(b);   // not RNGCryptoServiceProvider: obsolete (an error) where CI runs the tests
         return ToHex(b);
     }
 
