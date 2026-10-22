@@ -148,20 +148,35 @@ not already have.
 
 ## Self-update (launcher)
 
-On launch (background thread, gated by the `AutoUpdate` pref, default on), the launcher checks
-`UpdateRepo`'s **latest GitHub Release** and compares the tag to its own version. If newer, it
-prompts, downloads the release's `RustoriginLauncher.exe`, **verifies its SHA-256 against the release's
-`SHA256SUMS.txt`**, and self-replaces (rename running exe -> `.old`, drop the new exe in, relaunch).
-A hash mismatch is rejected - it never runs an unverified replacement, same trust model as the
-client download. See `StartUpdateCheck` / `UpdateCheckWorker` in `src/WpfLauncher.cs`.
+On launch (background thread), the launcher checks `UpdateRepo`'s **latest GitHub Release** and compares
+the tag to its own version. If newer, it downloads the release's `SHA256SUMS.txt` and
+`SHA256SUMS.txt.sig` and checks the **signature** (`UpdateParsing.VerifyRelease`) against `UpdatePublicKey`
+from its embedded config - all *before* showing the player anything. Only a release that verifies brings
+up the (mandatory) update prompt; the player presses Update, the launcher downloads
+`RustoriginLauncher.exe`, checks it against the hash from the **signed** sums, and self-replaces (rename
+running exe -> `.old`, drop the new exe in, relaunch). See `UpdateCheckWorker` / `PerformUpdate` in
+`src/WpfLauncher.cs`.
 
-Notes / limits:
-- Needs a **public** repo (unauthenticated GitHub API); on a private repo the check 404s and is
-  silently skipped. `UpdateRepo=` blank also disables it.
-- If the install folder is read-only (e.g. a `Program Files` install without elevation), the swap
-  fails gracefully and opens the releases page for a manual update.
-- The `SHA256SUMS.txt` is **not signed** - whoever controls the repo's releases controls the update
-  (same caveat as the unsigned client manifest). Signing is future work.
+- **Signature:** RSA (>= 3072-bit) PKCS#1 v1.5 over SHA-256 of
+  `"rustorigin-launcher-release\n" + <tag> + "\n" + <exact bytes of SHA256SUMS.txt>`, base64 in the asset
+  `SHA256SUMS.txt.sig`. The tag is part of the message, so an old signed release can't be re-published as
+  a newer version. A missing, invalid or wrongly-keyed signature is logged and the release is **ignored**
+  (it can't block anyone behind the update prompt).
+- **Keys:** `scripts\new_signing_key.ps1 -OutFile <outside the repo>` makes the RSA-3072 key pair once; the
+  private key stays offline (locked to the maintainer's account), the printed `UpdatePublicKey=` line goes
+  into `config/launcher.cfg`. `UpdatePublicKey` is taken only from the embedded config (like the anti-cheat
+  keys, even with `--dev-config`). Blank = the launcher never updates itself (fail closed).
+- **Releasing:** CI only creates a **draft** (`release.yml`); `scripts\sign_release.ps1 -Tag vX.Y.Z -KeyFile
+  <key> [-Publish]` downloads the draft, checks every asset against `SHA256SUMS.txt` (and that nothing
+  unlisted is attached), signs, re-verifies with the committed public key, uploads the `.sig` and publishes.
+  `/releases/latest` never returns drafts, so players only ever see signed releases.
+- **Rotation:** a lost key means no more updates (players reinstall a launcher with a new key); a leaked
+  key means shipping a launcher with a new key, signed with the old one, at once.
+- Needs a **public** repo (unauthenticated GitHub API); on a private repo the check 404s and is silently
+  skipped. `UpdateRepo=` blank also disables it.
+- If the install folder is read-only, the swap fails gracefully and opens the releases page.
+- Launchers before this change verify only the (unsigned) `SHA256SUMS.txt`; they still update normally
+  to a signed release and are protected from then on.
 
 ## Discord Rich Presence
 
@@ -419,16 +434,25 @@ these steps move together - never upload a repackaged zip without rebuilding the
 If the uploaded zip and the embedded hash ever drift apart, players get a (correct) integrity
 rejection and cannot install - re-run from step 1.
 
-**Automated launcher release (GitHub Actions).** `.github/workflows/release.yml` builds and
-publishes the launcher on a version tag:
+**Automated launcher release (GitHub Actions).** `.github/workflows/release.yml` builds the launcher
+on a version tag and creates a **draft** release; you sign and publish it from your own machine:
 
 ```bash
 git tag v1.0.0 && git push origin v1.0.0
 ```
 
 That builds `RustoriginLauncher.exe`, the NSIS setup `.exe`, and the MSI from the **committed**
-`config/launcher.cfg`, generates `SHA256SUMS.txt`, and creates a GitHub Release with all
-artifacts attached. **It does not touch the game client** (that 9 GB zip is never in CI), so
+`config/launcher.cfg` (it refuses to build a release whose config has no valid `UpdatePublicKey`),
+generates `SHA256SUMS.txt`, and creates a **draft** GitHub Release with all artifacts attached. Then:
+
+```powershell
+.\scripts\sign_release.ps1 -Tag v1.0.0 -KeyFile <offline key> -Publish
+```
+
+The workflow is least-privilege: `permissions: {}` at the top, the build job (installer tooling from
+NuGet/Chocolatey, NSIS pinned to 3.12.0) can only read; only the `publish` job writes, inside the
+protected `release` environment, running nothing but GitHub's own actions and `gh`. Every action is pinned
+to a commit SHA. Tag + environment protection: `.github/BRANCH_PROTECTION.md`. **It does not touch the game client** (that 9 GB zip is never in CI), so
 steps 1-2 and 4 above (package the client, set the matching `Sha256`, upload the zip to R2)
 are still done by hand *before* tagging - otherwise the released launcher embeds a hash for a
 zip nobody is hosting. Only tag once `config/launcher.cfg` holds the hash of the zip you uploaded.
@@ -456,6 +480,7 @@ Plain `Key=Value`, `#`/`;` comments. Loaded embedded-defaults-first, then overri
 | `Title` | Big hero title (default `RUSTORIGIN`). |
 | `Tagline` | Description line under the title. |
 | `Player` | Parsed into `PlayerName` but currently **not displayed** (the user pill was removed). Kept for compatibility / future use. |
+| `UpdatePublicKey` | `rsa:<modulus>:<exponent>` printed by `scripts\new_signing_key.ps1`: the release key a self-update's `SHA256SUMS.txt` must be signed with. Embedded config only. Blank = no self-update (and `release.yml` refuses to build a release). |
 | `UpdateRepo` | `owner/repo` checked for launcher self-updates via GitHub Releases (public repos only). Blank disables. Default `RUSTORIGIN/launcher`. |
 | `DiscordAppId` | Discord application id enabling **Rich Presence** (`src/DiscordRpc.cs`) - shows "RUSTORIGIN - In the launcher / In game" on the player's Discord. Blank disables. |
 | `DiscordLargeImage` | Optional Rich Presence art-asset key (uploaded in the Discord app) shown as the large image. |
@@ -492,7 +517,6 @@ Two separate mechanisms - don't confuse them:
 |-----------|---------|--------|
 | `LaunchArgs` | (from cfg) | Overrides `launcher.cfg`'s `LaunchArgs` for the PLAY button (set in `prefs.cfg`). |
 | `MinimizeInGame` | `false` | Minimize the launcher while the client runs. |
-| `AutoUpdate` | `true` | Check `UpdateRepo`'s GitHub Releases on launch and offer a verified self-update. |
 | `DiscordRpc` | `true` | Publish Discord Rich Presence (needs `DiscordAppId` set in `launcher.cfg`). |
 | `AcNoticeShown` | `false` | Set once the one-time anti-cheat session notice has been shown (after the first PLAY with `AcSessionUrl` set). |
 
@@ -535,6 +559,8 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 │   ├── test_client_patch.ps1 # end-to-end tests for the client delta update (run in build-check CI)
 │   ├── test_ac_session.ps1  # unit tests for src/AcSession.cs, the anti-cheat session protocol (run in build-check CI)
 │   ├── make_client_filehashes.ps1 # AcClientFile= lines (size + SHA-256 of key game files) for launcher.cfg
+│   ├── new_signing_key.ps1  # once: the offline release signing key (prints UpdatePublicKey=)
+│   ├── sign_release.ps1     # every release: check the draft's assets, sign SHA256SUMS.txt, publish
 │   └── installer/
 │       ├── RustOrigin.wxs   # WiX source for the MSI (WixUI_InstallDir wizard)
 │       ├── RustOrigin.nsi   # NSIS source for the setup .exe (MUI2 wizard)
@@ -545,7 +571,7 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 │   ├── README-PLAYERS.txt
 │   ├── screenshot.png       # launcher screenshot used in README
 │   └── brand-kit/           # design system (css, style guide, docs)
-├── .github/                 # workflows (build-check, release), PR template, ruleset, BRANCH_PROTECTION.md
+├── .github/                 # workflows (build-check, release), PR template, rulesets (main, release tags), BRANCH_PROTECTION.md
 ├── discord/                 # discord assets
 ├── .superdesign/            # design canvas scratch (HTML mockups)
 ├── release/                 # built RustoriginLauncher.exe output (git-ignored)

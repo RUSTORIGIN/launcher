@@ -52,4 +52,58 @@ public static class UpdateParsing
     }
 
     static Version Norm(Version v) { return new Version(v.Major, v.Minor, v.Build < 0 ? 0 : v.Build); }
+
+    // ---------- release signature ----------
+    // A release's SHA256SUMS.txt only proves the exe matches the sums file next to it - whoever can publish a
+    // release controls both. So the sums file is also SIGNED, offline, with the maintainer's RSA key
+    // (scripts\sign_release.ps1), and the launcher only takes an update whose signature verifies against the
+    // public key embedded in it (UpdatePublicKey= in its embedded launcher.cfg). The signed message binds
+    // the release tag too, so an old signed release can't be re-published under a newer version:
+    //   "rustorigin-launcher-release\n" + tag + "\n" + <exact bytes of SHA256SUMS.txt>
+    // Signature: RSA (>= 3072-bit key) PKCS#1 v1.5 over SHA-256, base64, in the asset SHA256SUMS.txt.sig.
+    public const string SignatureAsset = "SHA256SUMS.txt.sig";
+    public const int MinKeyBits = 3072;
+
+    public static byte[] SignedMessage(string tag, byte[] sums)
+    {
+        byte[] head = System.Text.Encoding.UTF8.GetBytes("rustorigin-launcher-release\n" + (tag ?? "") + "\n");
+        var msg = new byte[head.Length + (sums == null ? 0 : sums.Length)];
+        Buffer.BlockCopy(head, 0, msg, 0, head.Length);
+        if (sums != null) Buffer.BlockCopy(sums, 0, msg, head.Length, sums.Length);
+        return msg;
+    }
+
+    // "rsa:<base64 modulus>:<base64 exponent>" (what scripts\new_signing_key.ps1 prints), or null when malformed
+    // or shorter than MinKeyBits.
+    public static System.Security.Cryptography.RSAParameters? ParsePublicKey(string key)
+    {
+        try
+        {
+            string[] p = (key ?? "").Trim().Split(':');
+            if (p.Length != 3 || p[0] != "rsa") return null;
+            byte[] mod = Convert.FromBase64String(p[1]), exp = Convert.FromBase64String(p[2]);
+            if (mod.Length * 8 < MinKeyBits || exp.Length == 0 || exp.Length > 8) return null;
+            return new System.Security.Cryptography.RSAParameters { Modulus = mod, Exponent = exp };
+        }
+        catch { return null; }
+    }
+
+    // True only when sigBase64 is a valid signature by publicKey over SignedMessage(tag, sums). Never throws.
+    public static bool VerifyRelease(string publicKey, string tag, byte[] sums, string sigBase64)
+    {
+        try
+        {
+            var k = ParsePublicKey(publicKey);
+            if (k == null || string.IsNullOrEmpty(tag) || sums == null || sums.Length == 0 || string.IsNullOrEmpty(sigBase64)) return false;
+            byte[] sig = Convert.FromBase64String(sigBase64.Trim());
+            if (sig.Length != k.Value.Modulus.Length) return false;
+            using (var rsa = System.Security.Cryptography.RSA.Create())
+            {
+                rsa.ImportParameters(k.Value);
+                return rsa.VerifyData(SignedMessage(tag, sums), sig,
+                    System.Security.Cryptography.HashAlgorithmName.SHA256, System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+            }
+        }
+        catch { return false; }
+    }
 }

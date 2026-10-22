@@ -180,6 +180,7 @@ public class LauncherWindow : Window
     string PatchProbe  = "";     // "relative\path|size" of a file in the build the pack upgrades FROM; the pack is only tried when it matches.
     string Version     = "";
     string UpdateRepo  = "RUSTORIGIN/launcher";   // owner/repo checked for launcher self-updates (GitHub Releases). Empty disables.
+    string UpdatePublicKey = "";  // "rsa:<modulus>:<exponent>": the key a release's SHA256SUMS.txt must be signed with (UpdateParsing.VerifyRelease). Empty = no self-update.
     string DiscordAppId = "";        // Discord application id for Rich Presence. Empty disables.
     string DiscordLargeImage = "";   // Rich Presence art-asset key uploaded in the Discord app.
     string DiscordButtonLabel = "";  // Rich Presence button label (e.g. "Play on Rustorigin").
@@ -1934,6 +1935,7 @@ public class LauncherWindow : Window
                 {
                     case "downloadurl": DownloadUrl = v; break;
                     case "updaterepo":  UpdateRepo = v; break;
+                    case "updatepublickey": if (overridesRelease) { acIgnored = true; break; } UpdatePublicKey = v; break;   // like the anti-cheat keys: embedded only
                     case "discordappid":     DiscordAppId = v; break;
                     case "discordlargeimage": DiscordLargeImage = v; break;
                     case "discordbuttonlabel": DiscordButtonLabel = v; break;
@@ -1985,7 +1987,7 @@ public class LauncherWindow : Window
             }
         }
         catch { }
-        if (acIgnored) Log("config: AcSessionUrl / AcClientFile in launcher.cfg ignored - a release build only takes them from its embedded config");
+        if (acIgnored) Log("config: AcSessionUrl / AcClientFile / UpdatePublicKey in launcher.cfg ignored - a release build only takes them from its embedded config");
     }
 
     bool installDirChosen;   // the player picked (or we remembered) an install folder in installdir.txt
@@ -3526,6 +3528,8 @@ public class LauncherWindow : Window
     {
         System.Version current;
         if (!System.Version.TryParse(AppVer(), out current) || current.Major == 0) return;   // skip dev/0.0.0 builds
+        // Fail closed: without the release key nothing can be verified, so nothing is installed.
+        if (UpdateParsing.ParsePublicKey(UpdatePublicKey) == null) { Log("update check skipped: no valid UpdatePublicKey in the embedded config"); return; }
 
         string json = HttpGetString("https://api.github.com/repos/" + repo + "/releases/latest");
         if (json == null) return;   // private/unreleased/offline - silently skip
@@ -3535,16 +3539,27 @@ public class LauncherWindow : Window
 
         string exeUrl  = UpdateParsing.AssetUrl(json, "RustoriginLauncher.exe");
         string sumsUrl = UpdateParsing.AssetUrl(json, "SHA256SUMS.txt");
-        if (exeUrl == null || sumsUrl == null) { Log("update: release " + tag + " missing RustoriginLauncher.exe or SHA256SUMS.txt asset"); return; }
-        Log("update available: v" + current + " -> " + tag);
+        string sigUrl  = UpdateParsing.AssetUrl(json, UpdateParsing.SignatureAsset);
+        if (exeUrl == null || sumsUrl == null || sigUrl == null) { Log("update: release " + tag + " is missing RustoriginLauncher.exe, SHA256SUMS.txt or " + UpdateParsing.SignatureAsset + " - ignored"); return; }
+
+        // The signature is checked here, before the player is told anything: a release that isn't signed by the
+        // release key is ignored (logged) and the launcher keeps working - it can't block anyone behind the
+        // "Update required" screen.
+        byte[] sums = HttpGetBytes(sumsUrl, 64 << 10), sig = HttpGetBytes(sigUrl, 8 << 10);
+        if (sums == null || sig == null) return;
+        if (!UpdateParsing.VerifyRelease(UpdatePublicKey, tag, sums, System.Text.Encoding.ASCII.GetString(sig)))
+        { Log("update REJECTED: the signature of release " + tag + " does not verify against the release key - ignored"); return; }
+        string expected = UpdateParsing.HashFromSums(System.Text.Encoding.UTF8.GetString(sums), "RustoriginLauncher.exe");
+        if (expected == null) { Log("update: signed SHA256SUMS.txt of " + tag + " has no RustoriginLauncher.exe line - ignored"); return; }
+        Log("update available: v" + current + " -> " + tag + " (signature verified)");
 
         // Update available: show the prompt. It does NOT auto-download - the player presses Update.
-        pendingRepo = repo; pendingExeUrl = exeUrl; pendingSumsUrl = sumsUrl; pendingTag = tag;
+        pendingRepo = repo; pendingExeUrl = exeUrl; pendingExpectedHash = expected; pendingTag = tag;
         ShowUpdateGate("Version " + tag + " is available (you have v" + current + "). Press Update to install it - the launcher will verify and restart.");
     }
 
     Grid updateGate; TextBlock updateGateMsg; Border updateGateFill, updateGateBar, updateGateUpdateBtn; const double UpdateBarW = 260;
-    string pendingRepo, pendingExeUrl, pendingSumsUrl, pendingTag;
+    string pendingRepo, pendingExeUrl, pendingExpectedHash, pendingTag;   // pendingExpectedHash: from the verified, signed sums
     bool applyingUpdate;   // set while the self-update closes this process; the new version is already starting
 
     // Blocking update prompt shown when a newer release is available. It does NOT auto-download - the
@@ -3591,8 +3606,7 @@ public class LauncherWindow : Window
     // Download + SHA-256-verify + swap the new build, then restart. Runs on a background thread.
     void PerformUpdate()
     {
-        string repo = pendingRepo, exeUrl = pendingExeUrl, sumsUrl = pendingSumsUrl, tag = pendingTag;
-        string expected = UpdateParsing.HashFromSums(HttpGetString(sumsUrl), "RustoriginLauncher.exe");
+        string repo = pendingRepo, exeUrl = pendingExeUrl, expected = pendingExpectedHash, tag = pendingTag;
         if (expected == null) { GateFail(repo, "Could not read the update checksum."); return; }
 
         string self = SelfPath();
@@ -3670,6 +3684,30 @@ public class LauncherWindow : Window
             using (var resp = (HttpWebResponse)req.GetResponse())
             using (var sr = new StreamReader(resp.GetResponseStream()))
             { RequireHttps(resp); return sr.ReadToEnd(); }
+        }
+        catch (Exception ex) { Log("GET " + url + " failed: " + ex.Message); return null; }
+    }
+
+    // A small file (the signed sums, the signature), at most maxBytes; null on any error or when it is bigger.
+    byte[] HttpGetBytes(string url, int maxBytes)
+    {
+        try
+        {
+            var req = (HttpWebRequest)WebRequest.Create(url);
+            req.UserAgent = UA; req.Timeout = 20000; req.ReadWriteTimeout = 20000; req.AllowAutoRedirect = true;
+            using (var resp = (HttpWebResponse)req.GetResponse())
+            using (var s = resp.GetResponseStream())
+            using (var ms = new MemoryStream())
+            {
+                RequireHttps(resp);
+                var buf = new byte[8192]; int n;
+                while ((n = s.Read(buf, 0, buf.Length)) > 0)
+                {
+                    if (ms.Length + n > maxBytes) throw new InvalidDataException("larger than " + maxBytes + " bytes");
+                    ms.Write(buf, 0, n);
+                }
+                return ms.ToArray();
+            }
         }
         catch (Exception ex) { Log("GET " + url + " failed: " + ex.Message); return null; }
     }

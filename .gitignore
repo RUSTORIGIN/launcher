@@ -28,6 +28,8 @@ RustClient.zip.sha256
 *.pem
 *.key
 *.pfx
+*release-key*.xml
+*signing-key*.xml
 *.p12
 *.snk
 *.env

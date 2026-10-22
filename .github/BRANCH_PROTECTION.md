@@ -34,3 +34,42 @@ gh api -X POST repos/RUSTORIGIN/launcher/rulesets --input .github/rulesets/prote
   `compile` (or `Build check / compile`) is the selected required check - adjust the ruleset if the
   displayed name differs.
 - After enabling, the flow is: branch -> push -> open PR -> CI runs -> merge when green.
+
+# Release protection: who can ship a launcher to every player
+
+The launcher updates itself on every player's PC, so **whoever can publish a release reaches every
+player**. Three layers, from cheapest to strongest:
+
+1. **Tag ruleset** (`rulesets/protect-release-tags.json`): only repository **admins** may create, move or
+   delete a `v*` tag - the tag push is what starts the release workflow. A collaborator, a write-scoped
+   token or a deploy key can no longer start a release. Apply it like the branch ruleset:
+
+   ```bash
+   gh api -X POST repos/RUSTORIGIN/launcher/rulesets --input .github/rulesets/protect-release-tags.json
+   ```
+
+2. **`release` environment** (the workflow's `publish` job, the only job with write access): Repo ->
+   Settings -> Environments -> *New environment* `release` ->
+   - *Required reviewers*: you (the job then waits for your approval before it creates the draft),
+   - *Deployment branches and tags*: *Selected* -> add the tag rule `v*`.
+
+   The job runs only GitHub's own actions (pinned by commit SHA) and the preinstalled `gh` CLI; the
+   build job, which runs third-party installer tooling, can only read the repo.
+
+3. **Release signature** (the one that does not depend on GitHub at all): CI only ever creates a
+   **draft**. Launchers install only a release whose `SHA256SUMS.txt` is signed with the offline release
+   key (`UpdatePublicKey=` in `config/launcher.cfg`), so a compromised workflow, action, token or GitHub
+   account can at most produce an unsigned draft that no launcher installs. On your own machine:
+
+   ```powershell
+   .\scripts\new_signing_key.ps1 -OutFile D:\offline\rustorigin-release-key.xml   # once; commit the printed UpdatePublicKey= line
+   .\scripts\sign_release.ps1 -Tag v1.3.0 -KeyFile D:\offline\rustorigin-release-key.xml -Publish   # every release
+   ```
+
+   `sign_release.ps1` checks every draft asset against `SHA256SUMS.txt` (and that nothing unlisted is
+   attached) and checks its signature with the committed public key before uploading anything.
+
+Caveats: the same plan/visibility limit applies - on GitHub Free, rulesets and required reviewers on
+environments only work on **public** repositories. The signature (layer 3) works on any plan. Keep admin
+access to the few people who release, and keep their tokens fine-grained and short-lived: an admin's token
+bypasses layer 1.
