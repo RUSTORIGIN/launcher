@@ -19,6 +19,7 @@ using System.Windows.Interop;
 using System.Windows.Media.Animation;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using Microsoft.Win32.SafeHandles;
 
 [assembly: AssemblyTitle("Rustorigin Launcher")]
 [assembly: AssemblyProduct("Rustorigin Launcher")]
@@ -1035,36 +1036,46 @@ public class LauncherWindow : Window
         return ds;
     }
 
-    // Locks dir (see above), then everything already inside it: entries with their own permissions go back to
-    // inheriting the folder's, and entries another account owns - or links, which could point anywhere (always removed) - are
-    // not trusted. As the player they are deleted; elevated they are taken over for Administrators instead
-    // (never deleted). Returns how many untrusted entries there were: AfterLock then drops the install marker,
-    // so the game must be repaired (re-extracted from a verified download) before PLAY. `failed` counts entries
-    // that could not be handled at all (unreadable, in use): they stay as they were, so the folder is not private.
-    // `busy` counts the ones of those that were only open in another program.
-    static int LockFolder(string dir, SecurityIdentifier user, bool elevated, Action<string> log, ref int failed, ref int busy)
+    // Locks dir (see above), then everything already inside it: every entry gets the permissions it inherits
+    // from the folder (its own are dropped), and entries another account owns - or links, which could point
+    // anywhere (always removed), or files with more than one name (a hard link: the file may be another one
+    // outside the folder, so it is never re-permissioned, only that name removed) - are not trusted. As the player
+    // they are deleted; elevated they are taken over for Administrators instead (hard links and links removed).
+    // Returns how many untrusted entries there were: AfterLock then drops the install marker, so the game must be
+    // repaired (re-extracted from a verified download) before PLAY. `failed` counts entries that could not be
+    // handled at all (unreadable, in use): they stay as they were, so the folder is not private. `busy` counts
+    // the ones of those that were only open in another program. pin is dir pinned by FolderPin.PinFolder:
+    // permissions are set through it and through each entry's own pin, one at a time, never by name.
+    static int LockFolder(string dir, SafeFileHandle pin, SecurityIdentifier user, bool elevated, Action<string> log, ref int failed, ref int busy)
     {
-        if (elevated)
-        {
-            var o = Directory.GetAccessControl(dir, AccessControlSections.Owner);
-            if (!TrustedSid(o.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier, user))
-            { o.SetOwner(AdminsSid); Directory.SetAccessControl(dir, o); }
-        }
-        Directory.SetAccessControl(dir, PrivateSecurity(user));   // also re-applied to what inherits inside
-        // The record is written before the walk, now that no other account can remove it, so a walk cut short
-        // (launcher closed, crash) leaves the folder refused too; it is removed only once everything is secured.
-        // A folder already at that name (planted before the lock) also keeps the folder refused while it exists:
-        // it is left to ResetTree like any other entry, and removed only after the walk, once nobody else can
-        // change what is inside it. Record I/O never throws: the caller must still run AfterLock.
+        var owner = FolderPin.GetSecurity(pin).Owner;
+        var acl = new RawSecurityDescriptor(PrivateSecurity(user).GetSecurityDescriptorBinaryForm(), 0).DiscretionaryAcl;
+        // The record keeps the folder refused until the walk below secures everything: what is inside keeps its
+        // old permissions until ResetTree reaches it, so a walk cut short (launcher closed, crash) must leave the
+        // folder refused. It is written before the folder is locked - so there is never a moment where the folder
+        // looks private without it (a failure here throws, leaving the folder as it was: exposed) - and checked
+        // again after, as another account could remove or swap it until then. A folder already at that name
+        // (planted before the lock) also keeps the folder refused while it exists: it is left to ResetTree like
+        // any other entry, and removed only after the walk, once nobody else can change what is inside it.
+        // A file (or link) already at the name is replaced, never written through.
         string record = Path.Combine(dir, LockIncompleteName);
+        const string recordText = "folder lock in progress or incomplete; see launcher.log\r\n";
+        if (!Directory.Exists(record)) FolderPin.WriteNewFile(record, recordText);
+        // this folder only: what is inside keeps its permissions until ResetTree reaches it
+        FolderPin.SetSecurity(pin, elevated && !TrustedSid(owner, user) ? AdminsSid : null, acl, true);
         bool planted = Directory.Exists(record);
-        if (!planted)
+        if (!planted && !FolderPin.IsPlainFile(record))
         {
-            // a file (or link) already at the name is replaced, never written through
-            try { FolderPin.WriteNewFile(record, "folder lock in progress or incomplete; see launcher.log\r\n"); }
-            catch (Exception ex) { failed++; if (log != null) log("install folder: lock record not written (" + ex.Message + ")"); }
+            // Record I/O from here on never throws: the caller must still run AfterLock.
+            try { FolderPin.WriteNewFile(record, recordText); }
+            catch (Exception ex)
+            {
+                failed++;
+                if (log != null) log("install folder: lock record not written (" + ex.Message + ") - not walked");
+                return 0;
+            }
         }
-        int untrusted = ResetTree(dir, user, elevated, log, ref failed, ref busy);
+        int untrusted = ResetTree(dir, acl, user, elevated, log, ref failed, ref busy);
         if (planted && failed == 0)
         {
             try { if (Directory.Exists(record)) FolderPin.DeleteTree(record); }   // as the player ResetTree may have deleted it already
@@ -1079,22 +1090,37 @@ public class LauncherWindow : Window
         return untrusted;
     }
 
-    static int ResetTree(string dir, SecurityIdentifier user, bool elevated, Action<string> log, ref int failed, ref int busy)
+    // Walks dir, whose permissions (dirAcl) are already set: each entry is set to what it inherits from dir.
+    static int ResetTree(string dir, RawAcl dirAcl, SecurityIdentifier user, bool elevated, Action<string> log, ref int failed, ref int busy)
     {
         int untrusted = 0;
+        RawAcl fileAcl = FolderPin.InheritedAcl(dirAcl, false), subAcl = FolderPin.InheritedAcl(dirAcl, true);
         foreach (string path in Directory.GetFileSystemEntries(dir))
         {
-            bool isDir, link; int err;
-            var pin = FolderPin.Pin(path, out isDir, out link, out err);   // held open: it can't be swapped for a link meanwhile
+            bool isDir = false, link = false; int err = 0;
+            // Windows trims a trailing dot or space off a name it opens, so such an entry (made through a \\?\
+            // path) would be pinned as its sibling - or not at all - and keep its own permissions.
+            string name = Path.GetFileName(path);
+            bool oddName = name.EndsWith(".") || name.EndsWith(" ");
+            var pin = oddName ? null : FolderPin.PinForSecurity(path, out isDir, out link, out err);   // held open: it can't be swapped for a link meanwhile
             try
             {
+                if (oddName) throw new IOException("its name ends in a dot or space, which Windows programs can't open");
                 if (pin == null)
                 {
                     if (err == 32 || err == 33) { busy++; throw new IOException("it is open in another program"); }   // sharing / lock violation
                     throw new IOException("it could not be opened (" + new Win32Exception(err).Message + ")");
                 }
-                FileSystemSecurity sec = isDir ? (FileSystemSecurity)Directory.GetAccessControl(path) : File.GetAccessControl(path);
-                var owner = sec.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+                if (!isDir && !link && FolderPin.LinkCount(pin) > 1)
+                {
+                    untrusted++;
+                    if (log != null) log("install folder: hard link not trusted: " + path);
+                    pin.Dispose();
+                    FolderPin.DeleteName(path);   // only this name: the file it shares keeps its permissions
+                    continue;
+                }
+                var sec = FolderPin.GetSecurity(pin);
+                var owner = sec.Owner;
                 bool trustedOwner = TrustedSid(owner, user);
                 if (link || !trustedOwner)
                 {
@@ -1109,20 +1135,28 @@ public class LauncherWindow : Window
                         continue;
                     }
                 }
-                if (!trustedOwner || sec.AreAccessRulesProtected || sec.GetAccessRules(true, false, typeof(SecurityIdentifier)).Count > 0)
-                {
-                    // back to "inherit only from the locked folder" (an empty, unprotected DACL)
-                    FileSystemSecurity reset = isDir ? (FileSystemSecurity)new DirectorySecurity() : new FileSecurity();
-                    reset.SetAccessRuleProtection(false, false);
-                    if (!trustedOwner) reset.SetOwner(AdminsSid);
-                    if (isDir) Directory.SetAccessControl(path, (DirectorySecurity)reset); else File.SetAccessControl(path, (FileSecurity)reset);
-                }
-                if (isDir && !link) untrusted += ResetTree(path, user, elevated, log, ref failed, ref busy);
+                // back to "inherit only from the locked folder", set before its own entries are listed, so other
+                // accounts can't add any meanwhile
+                RawAcl want = isDir ? subAcl : fileAcl;
+                if (!trustedOwner || !SameAcl(sec, want)) FolderPin.SetSecurity(pin, trustedOwner ? null : AdminsSid, want, false);
+                if (isDir && !link) untrusted += ResetTree(path, subAcl, user, elevated, log, ref failed, ref busy);
             }
             catch (Exception ex) { untrusted++; failed++; if (log != null) log("install folder: could not secure " + path + " (" + ex.Message + ")"); }
             finally { if (pin != null) pin.Dispose(); }
         }
         return untrusted;
+    }
+
+    // True when sec already has exactly the permissions acl, inherited (not protected).
+    static bool SameAcl(RawSecurityDescriptor sec, RawAcl acl)
+    {
+        if (sec.DiscretionaryAcl == null || (sec.ControlFlags & ControlFlags.DiscretionaryAclProtected) != 0) return false;
+        if (sec.DiscretionaryAcl.BinaryLength != acl.BinaryLength) return false;
+        byte[] a = new byte[acl.BinaryLength], b = new byte[acl.BinaryLength];
+        sec.DiscretionaryAcl.GetBinaryForm(a, 0);
+        acl.GetBinaryForm(b, 0);
+        for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
+        return true;
     }
 
     // After a lock: downloads kept in the folder while it was open are hashed again, and a game that had
@@ -1162,13 +1196,13 @@ public class LauncherWindow : Window
             using (var pin = FolderPin.PinFolder(dir, out why))
             {
                 if (pin == null) { Log("install folder " + dir + " " + why + " - not used"); return why; }
-                return LockOwnFolder(dir, me);
+                return LockOwnFolder(dir, pin, me);
             }
         }
     }
 
     // The rest of SecureInstallDir, run while the folder is pinned (FolderPin) so it can't be swapped for a link.
-    string LockOwnFolder(string dir, SecurityIdentifier me)
+    string LockOwnFolder(string dir, SafeFileHandle pin, SecurityIdentifier me)
     {
         string why = FolderExposure(dir, me);
         if (why == null) return null;
@@ -1179,7 +1213,7 @@ public class LauncherWindow : Window
             var owner = Directory.GetAccessControl(dir, AccessControlSections.Owner).GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
             if (owner == me)
             {
-                int untrusted = LockFolder(dir, me, false, Log, ref failed, ref busy);
+                int untrusted = LockFolder(dir, pin, me, false, Log, ref failed, ref busy);
                 AfterLock(dir, untrusted, Log);
             }
         }
@@ -1217,7 +1251,7 @@ public class LauncherWindow : Window
                 if (pin == null) return 2;   // a link, or not openable: never re-permission it
                 if (FolderExposure(dir, user) == null) return 0;
                 int failed = 0, busy = 0;
-                int untrusted = LockFolder(dir, user, true, null, ref failed, ref busy);
+                int untrusted = LockFolder(dir, pin, user, true, null, ref failed, ref busy);
                 AfterLock(dir, untrusted, null);
                 return failed == 0 && FolderExposure(dir, user) == null ? 0 : 1;
             }

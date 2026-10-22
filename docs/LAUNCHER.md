@@ -263,15 +263,17 @@ owned by this user, SYSTEM or Administrators, and writable by no one else.
   SYSTEM and Administrators full control, Users and OWNER RIGHTS read + execute, nothing inherited.
 - A folder this user owns but others can write (an install by an older launcher) is **locked** (`LockFolder`)
   - in the background on launch, and again at INSTALL/UPDATE/REPAIR/PLAY. `ResetTree` then walks everything
-  inside: entries with their own permissions go back to inheriting, and entries another account owns, or any
-  link/junction, are deleted (a junction is removed, never its target). If there were any, the install
-  marker is dropped, so the game must be repaired (a fresh verified extract, which replaces files rather than
-  writing into them) before PLAY. The `_download\*.verified` records are dropped too.
+  inside: every entry gets what it inherits from the folder, and entries another account owns, any
+  link/junction, or a file with more than one name (a **hard link**, whose other name may be outside the
+  folder) are deleted (a junction or hard link is removed as a name, never its target). If there were any,
+  the install marker is dropped, so the game must be repaired (a fresh verified extract, which replaces files
+  rather than writing into them) before PLAY. The `_download\*.verified` records are dropped too.
 - A folder an admin made (an install by the **old per-machine NSIS setup**) or another account made can't be
   re-permissioned by the player. `RequirePrivateInstallDir` offers a one-time fix that starts the launcher
   elevated (`--secure-folder "<dir>" <player SID>` -> `SecureFolderElevated`): it only touches a folder that
   is exposed right now and looks like a Rustorigin install, never names Everyone/Users as the player, takes
-  over untrusted entries for Administrators instead of deleting them, and drops the marker if there were any.
+  over untrusted entries for Administrators instead of deleting them (links and hard links are still removed),
+  and drops the marker if there were any.
   Declined or impossible (a FAT/exFAT drive, a folder that isn't an install) -> PLAY/INSTALL are refused with
   the reason; a fresh install forgets the folder so the next INSTALL asks for another.
 - **Links are never followed** (`src/FolderPin.cs`): the ACL calls find a folder by name and would follow a
@@ -283,8 +285,9 @@ owned by this user, SYSTEM or Administrators, and writable by no one else.
   path, so a subst drive or network path is refused too. Cloud/dedup reparse points (OneDrive placeholders) are
   not links and are allowed. Tested by `scripts\test_folder_pin.ps1`.
 - **An entry the lock can't secure keeps the folder refused** (unreadable, or held open by another program):
-  `LockFolder` writes `.rustorigin-lock-incomplete` into the folder as soon as the folder itself is private,
-  before walking it, and removes it only once every entry was secured - so a walk that failed or was cut short
+  `LockFolder` writes `.rustorigin-lock-incomplete` into the folder before making the folder itself private
+  (and checks it is still a plain file of ours right after; if it can't be, nothing is walked), and removes it
+  only once every entry was secured - so a walk that failed or was cut short
   (launcher closed, crash) leaves it behind. While anything by that name exists, `FolderExposure` reports
   the folder as not secured, so the next check doesn't pass just because the folder's own permissions look
   private; the next lock walks it again. A folder planted at that name is secured by the walk like any other
@@ -293,10 +296,15 @@ owned by this user, SYSTEM or Administrators, and writable by no one else.
   then try again); for any other unsecured entry the fix is offered. After the elevated
   fix, `RequirePrivateInstallDir` also requires the helper's exit code 0 (1 = entries it could not secure).
   Tested end to end through the built exe by `scripts\test_folder_lock.ps1`.
-- Limits: setting the folder's permissions passes them on to every entry already in it, so a **hard link**
-  another account planted there before the lock (possible only to a file it may change the attributes of) gets
-  the folder's inherited permissions on the file it shares - by name, before `ResetTree` sees it. Its content is
-  never written. Applying the permissions through the pinned handle instead of by name would close this.
+- **Permissions are set one object at a time, through the pinned handles** (`FolderPin.GetSecurity`/`SetSecurity`
+  = `Get`/`SetKernelObjectSecurity`), never by name: `SetNamedSecurityInfo` (.NET `SetAccessControl`) and even
+  handle-based `SetSecurityInfo` pass a folder's new permissions on to every entry already in it, so a hard link
+  planted before the lock would hand them to the file it shares outside the folder. Instead `LockFolder` sets
+  the folder alone, and `ResetTree` sets each entry to what it inherits (`FolderPin.InheritedAcl`) before listing
+  what is inside it; a file whose link count (`FolderPin.LinkCount`) is above 1 is never re-permissioned, only
+  that name is removed (`FolderPin.DeleteName`, which leaves the other name's attributes alone too). An entry
+  whose name ends in a dot or space (only creatable through a `\\?\` path; Windows trims it when opening) can't
+  be pinned as itself, so it counts as not secured.
 - Limits: it can't tell that a file another account *modified in place* before the lock was changed (only the
   `AcClientFile` hashes and a repair can), and nothing protects against malware running as the player.
 
