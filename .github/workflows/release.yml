@@ -17,7 +17,7 @@
 #
 # It builds ONLY the ~7 MB launcher from the committed config/launcher.cfg (the multi-GB game client
 # is never in CI). The launcher embeds config/launcher.cfg's Sha256, so make sure that hash matches
-# the RustClient.zip you host - see the release checklist in CLAUDE.md.
+# the RustClient.zip you host - see the release checklist in docs/LAUNCHER.md.
 name: Release launcher
 
 on:

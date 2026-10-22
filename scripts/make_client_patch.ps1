@@ -1,7 +1,7 @@
 # Builds the client DELTA pack: what a player on the OLD client build needs to become the NEW build
 # without re-downloading the whole client. The launcher (src\ClientPatch.cs) downloads the pack,
 # SHA-256-verifies it, rebuilds the changed files from the installed ones + the pack, verifies every
-# rebuilt file, and only then swaps them in. See CLAUDE.md "Client updates (delta pack)".
+# rebuilt file, and only then swaps them in. See docs/LAUNCHER.md "Client updates (delta pack)".
 #
 # Usage (PowerShell), from the repo root:
 #   .\scripts\make_client_patch.ps1 -OldDir E:\Rustorigin -NewDir E:\RustClient-2021-04 -From 2021-01 -To 2021-04
