@@ -106,7 +106,7 @@ everything, and upload it next to the zip:
 
 It prints the pack's SHA-256 and the `ClientVersion` / `PatchUrl` / `PatchSha256` / `PatchProbe`
 lines for `config/launcher.cfg`. The full zip must be the **new** build too: it serves new players
-and anyone the pack doesn't fit. See [CLAUDE.md](CLAUDE.md) ("Client updates (delta pack)").
+and anyone the pack doesn't fit. See [docs/LAUNCHER.md](docs/LAUNCHER.md) ("Client updates (delta pack)").
 
 ## Releasing & self-update
 

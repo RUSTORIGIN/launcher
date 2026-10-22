@@ -3,7 +3,8 @@
 Changes to `main` go through a **pull request**. `main` is never committed to directly - it only
 changes when a PR is merged. This keeps every change reviewed and CI-checked.
 
-For architecture and build details, see [CLAUDE.md](CLAUDE.md).
+For architecture and build details, see [docs/LAUNCHER.md](docs/LAUNCHER.md); [CLAUDE.md](CLAUDE.md) has
+the short version (commands, conventions, gotchas).
 
 ## Prerequisites
 
@@ -76,7 +77,7 @@ git branch -d short-descriptive-name
 ## Releasing (maintainers)
 
 Merging to `main` publishes nothing. To ship a version, first complete the client-hash steps in the
-**Release / publish checklist** in [CLAUDE.md](CLAUDE.md) (package the client, set the matching
+**Release / publish checklist** in [docs/LAUNCHER.md](docs/LAUNCHER.md) (package the client, set the matching
 `Sha256`, upload the zip), then tag `main`:
 
 ```bash
