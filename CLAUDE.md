@@ -17,7 +17,7 @@ Releases. C# 5 / .NET Framework 4.x WPF, code-only (no XAML), compiled by Window
 - No linter/formatter exists. CI (`.github/workflows/build-check.yml`) = release build + the 4 suites on PowerShell 7
 
 ## Architecture
-- `src/WpfLauncher.cs` (~3.7k lines): `App.Main`, `Assets`, `LauncherWindow` = UI, config, downloader, install,
+- `src/WpfLauncher.cs` (~4k lines): `App.Main`, `Assets`, `LauncherWindow` = UI, config, downloader, install,
   play, self-update. Grep method names (`DownloadWorker`, `FetchVerified`, `ApplyConfig`, `RefreshState`,
   `SecureInstallDir`, `UpdateCheckWorker`, `Play`) instead of reading it whole
 - Pure, WPF-free, unit-tested: `UpdateParsing.cs` (release JSON, SHA256SUMS, signature), `A2S.cs` (server status),
@@ -27,7 +27,7 @@ Releases. C# 5 / .NET Framework 4.x WPF, code-only (no XAML), compiled by Window
 - `scripts/`: build, package client, make delta pack, sign release, tests; `scripts/installer/`: NSIS + WiX
 - Reference docs: `docs/LAUNCHER.md` (behavior, config keys, runtime files, release checklist),
   `docs/STYLING.md` (UI), `docs/CLIENT_ANTICHEAT.md` (session protocol)
-- `.claude/agents/` (explorer, build-and-test, security-reviewer) and `.claude/rules/` (loaded per path)
+- `.claude/agents/` (launcher-explorer, build-and-test, security-reviewer) and `.claude/rules/` (loaded per path)
 
 ## Conventions
 - C# 5 only: no `$""`, `?.`, `nameof`, `catch ... when`, `out var`, expression-bodied members, tuples
@@ -69,7 +69,8 @@ Releases. C# 5 / .NET Framework 4.x WPF, code-only (no XAML), compiled by Window
 - Before saying a change is done: compile (`build.bat` or `make_release.ps1`) and run the suites for the files
   you touched; UI changes: run the exe and look
 - If a change touches download, update, signature or install-folder code (`FetchVerified`, `Download*`, `ExtractZip`,
-  `ClientPatch.cs`, `UpdateParsing.cs`, `UpdateCheckWorker`/`PerformUpdate`, `SecureInstallDir`/`LockFolder`/
-  `FolderExposure`, `sign_release.ps1`): run the `security-reviewer` agent before saying it's done
+  `PieceHashes`/`FindBadPieces`, `ClientPatch.cs`, `UpdateParsing.cs`, `UpdateCheckWorker`/`PerformUpdate`,
+  `SecureInstallDir`/`LockFolder`/`FolderExposure`, `sign_release.ps1`): run the `security-reviewer` agent before
+  saying it's done
 - Commit only when asked; never commit `release/`, keys, or the client zip
 - When compacting, preserve: modified files, branch/PR, test results, open decisions, and anything not yet verified
