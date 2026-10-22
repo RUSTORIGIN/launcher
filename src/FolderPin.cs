@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -23,7 +24,7 @@ public static class FolderPin
     const uint FILE_SHARE_READ = 1, FILE_SHARE_WRITE = 2, FILE_SHARE_DELETE = 4;
     const uint OPEN_EXISTING = 3;
     const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000, FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
-    const int FileAttributeTagInfo = 9, FileDispositionInfoEx = 21;
+    const int FileDispositionInfo = 4, FileAttributeTagInfo = 9, FileDispositionInfoEx = 21;
     const uint OWNER_SECURITY_INFORMATION = 1, DACL_SECURITY_INFORMATION = 4;
     // Delete the name now even if the file is open elsewhere, and even if it is read-only - without clearing
     // the read-only attribute, which a hard link shares with its other names.
@@ -53,6 +54,8 @@ public static class FolderPin
     static extern bool GetFileInformationByHandle(SafeFileHandle h, out BY_HANDLE_FILE_INFORMATION info);
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool SetFileInformationByHandle(SafeFileHandle h, int infoClass, ref uint info, uint size);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool SetFileInformationByHandle(SafeFileHandle h, int infoClass, ref byte info, uint size);
     // The kernel's own get/set (NtQuerySecurityObject / NtSetSecurityObject): they act on this one object only,
     // unlike SetSecurityInfo and SetNamedSecurityInfo, which also propagate to what is inside a folder.
     [DllImport("advapi32.dll", SetLastError = true)]
@@ -143,33 +146,88 @@ public static class FolderPin
         return false;
     }
 
-    // Deletes dir and everything in it without ever following a link: each entry is pinned while it is
-    // looked at (so it can't be swapped for a link meanwhile), links are removed as links, folders are emptied
-    // deepest first and then removed by name, non-recursively. Throws when anything can't be removed.
+    // Deletes dir and everything in it without ever following a link: each folder is pinned while it is emptied,
+    // deepest first, and every entry is checked to really be in its folder (InFolder) before it is looked into or
+    // deleted. Its owner may still have rights inside it and can turn a folder it empties into a junction, so a
+    // path's middle can't be trusted - only the pinned folders. Links are removed as links, and read-only
+    // entries (a planted tree may be made of them) go too (DeleteName). Throws when anything can't be removed.
     public static void DeleteTree(string dir)
     {
+        string full = Path.GetFullPath(dir).TrimEnd('\\');
+        string parent = Path.GetDirectoryName(full);
         bool isDir, isLink;
-        var h = Pin(dir, out isDir, out isLink);
-        if (h == null) throw new IOException(dir + " could not be opened");
-        try
+        using (var ph = parent == null ? null : Pin(parent, out isDir, out isLink))
         {
-            if (!isDir || isLink) throw new IOException(dir + " is not a plain folder");   // never empty what a link points at
-            EmptyTree(dir);
+            if (ph == null) throw new IOException(dir + ": its folder could not be opened");
+            var h = Pin(full, out isDir, out isLink);
+            if (h == null) throw new IOException(dir + " could not be opened");
+            try
+            {
+                if (!isDir || isLink) throw new IOException(dir + " is not a plain folder");   // never empty what a link points at
+                InFolder(h, ph, full);
+                EmptyTree(full, h);
+            }
+            finally { h.Dispose(); }
+            DeleteName(full, ph);
         }
-        finally { h.Dispose(); }
-        Directory.Delete(dir, false);
     }
 
-    static void EmptyTree(string dir)
+    // dirHandle stays pinned while dir's entries go: no other account can rename dir or delete it, and every
+    // folder above it holds a pinned folder, so only dir itself could become a junction meanwhile - InFolder
+    // catches that on every entry.
+    static void EmptyTree(string dir, SafeFileHandle dirHandle)
     {
         foreach (string path in Directory.GetFileSystemEntries(dir))
         {
             bool isDir, isLink;
             var h = Pin(path, out isDir, out isLink);
             if (h == null) throw new IOException(path + " could not be opened");
-            try { if (isDir && !isLink) EmptyTree(path); } finally { h.Dispose(); }   // a pinned entry can't be deleted, so unpin first
-            if (isDir) Directory.Delete(path, false);   // a link (or an emptied folder): RemoveDirectory never follows it
-            else { if (!isLink) File.SetAttributes(path, FileAttributes.Normal); File.Delete(path); }   // on a link only the link goes
+            try
+            {
+                InFolder(h, dirHandle, path);
+                if (isDir && !isLink) EmptyTree(path, h);
+            }
+            finally { h.Dispose(); }   // a pinned entry can't be deleted, so unpin first
+            DeleteName(path, dirHandle);   // a file, link or emptied folder: only that name, read-only or not
+        }
+    }
+
+    // Throws unless h is really open on path's name inside the folder `folder` is open on: when that folder was
+    // turned into a junction after it was opened, a path through it leads somewhere else, and the real paths differ.
+    static void InFolder(SafeFileHandle h, SafeFileHandle folder, string path)
+    {
+        string f = FinalPath(folder), real = FinalPath(h);
+        string want = f == null ? null : f.TrimEnd('\\') + "\\" + Path.GetFileName(path.TrimEnd('\\'));
+        if (real == null || want == null || !string.Equals(real.TrimEnd('\\'), want, StringComparison.OrdinalIgnoreCase))
+            throw new IOException(path + " is not in its folder any more (a link was put in its way)");
+    }
+
+    // Best effort (Uninstall): deletes what is in dir except the paths in `keep` (full paths, files or folders -
+    // a kept folder is left whole) and leaves anything it can't delete. Never follows a junction or symlink:
+    // deleting "inside" it would delete the folder it points at.
+    public static void DeleteDirContents(string dir, ICollection<string> keep)
+    {
+        if (!Directory.Exists(dir)) return;
+        try { if ((File.GetAttributes(dir) & FileAttributes.ReparsePoint) != 0) return; } catch { return; }
+        foreach (string f in Directory.GetFiles(dir))
+        {
+            try
+            {
+                if (keep != null && keep.Contains(Path.GetFullPath(f))) continue;
+                try { File.SetAttributes(f, FileAttributes.Normal); } catch { }
+                File.Delete(f);
+            }
+            catch { }
+        }
+        foreach (string d in Directory.GetDirectories(dir))
+        {
+            try
+            {
+                if (keep != null && keep.Contains(Path.GetFullPath(d))) continue;
+                DeleteDirContents(d, keep);
+                if (Directory.GetFileSystemEntries(d).Length == 0) Directory.Delete(d, false);
+            }
+            catch { }
         }
     }
 
@@ -250,18 +308,35 @@ public static class FolderPin
         return acl;
     }
 
-    // Deletes the file name path - only that name: a hard link's other names and their content, attributes and
-    // permissions are left alone. Never follows a link.
+    // Deletes the name path - a file, a link or an empty folder, only that name: a hard link's other names and
+    // their content, attributes and permissions are left alone. Never follows a link, at the end of the path or
+    // in place of its folder (InFolder).
     public static void DeleteName(string path)
+    {
+        string full = Path.GetFullPath(path).TrimEnd('\\');
+        string parent = Path.GetDirectoryName(full);
+        bool isDir, isLink;
+        using (var ph = parent == null ? null : Pin(parent, out isDir, out isLink))
+        {
+            if (ph == null) throw new IOException(path + ": its folder could not be opened");
+            DeleteName(full, ph);
+        }
+    }
+
+    static void DeleteName(string path, SafeFileHandle folder)
     {
         using (var h = CreateFileW(path, DELETE | FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, IntPtr.Zero, OPEN_EXISTING,
             FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero))
         {
             if (h.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+            InFolder(h, folder, path);
             uint d = FILE_DISPOSITION_DELETE | FILE_DISPOSITION_POSIX_SEMANTICS | FILE_DISPOSITION_IGNORE_READONLY;
             if (SetFileInformationByHandle(h, FileDispositionInfoEx, ref d, 4)) return;
+            // Windows before 10 1809, or not NTFS: the older delete-on-close, on the same checked handle. It
+            // refuses a read-only name, which then stays (and fails the lock).
+            byte del = 1;
+            if (!SetFileInformationByHandle(h, FileDispositionInfo, ref del, 1)) throw new Win32Exception(Marshal.GetLastWin32Error());
         }
-        File.Delete(path);   // Windows before 10 1809, or not NTFS: a read-only name then stays (and fails the lock)
     }
 
     // The path the handle really has, "\\?\" prefix removed; null when it can't be read.
