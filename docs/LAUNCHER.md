@@ -305,6 +305,14 @@ owned by this user, SYSTEM or Administrators, and writable by no one else.
   that name is removed (`FolderPin.DeleteName`, which leaves the other name's attributes alone too). An entry
   whose name ends in a dot or space (only creatable through a `\\?\` path; Windows trims it when opening) can't
   be pinned as itself, so it counts as not secured.
+- **Untrusted folders are taken apart without following links** (`FolderPin.DeleteTree`): the player's own
+  lock deletes a folder another account owns (a planted `.rustorigin-lock-incomplete` folder too), and that
+  account keeps its rights inside it meanwhile - enough to empty a subfolder and turn it into a junction to one
+  of the player's folders. So every folder is pinned while it is emptied, and every entry is opened and deleted
+  only after its real path is checked to be its pinned folder's real path plus its name (`InFolder`); a recursive
+  `Directory.Delete(path, true)` would follow such a junction. Read-only entries are deleted as they are
+  (`DeleteName`, `FILE_DISPOSITION_IGNORE_READONLY`; on Windows before 10 1809 a read-only one stays, and the
+  folder stays refused). Uninstall keeps a record folder whole, like a record file.
 - Limits: it can't tell that a file another account *modified in place* before the lock was changed (only the
   `AcClientFile` hashes and a repair can), and nothing protects against malware running as the player.
 
