@@ -93,10 +93,12 @@ try {
     cmd /c mklink /H "$root\sec\d\hl.txt" "$root\canary\shared.txt" | Out-Null
     $shared = (Get-Acl "$root\canary\shared.txt").Sddl; $f = (Get-Acl "$root\sec\d\sub\f.txt").Sddl
     $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    # not necessarily $me: an administrator's new folders can belong to Administrators (CI runners, servers)
+    $owner = (Get-Acl "$root\sec\d").GetOwner([Security.Principal.SecurityIdentifier]).Value
     $h = [FolderPin]::PinForSecurity("$root\sec\d", [ref]$isDir, [ref]$isLink, [ref]$err)
     Check "PinForSecurity: plain folder" ($h -ne $null -and $isDir -and -not $isLink)
     if ($h) {
-        Check "GetSecurity reads the owner" ([FolderPin]::GetSecurity($h).Owner.Value -eq $me)
+        Check "GetSecurity reads the owner" ([FolderPin]::GetSecurity($h).Owner.Value -eq $owner)
         [FolderPin]::SetSecurity($h, $null, (Acl "D:(A;OICI;FA;;;$me)(A;OICI;FA;;;SY)"), $true)
         $h.Dispose()
     }
