@@ -31,7 +31,7 @@ try {
     # ---- an exposed folder is locked; links inside are removed, their target untouched ----
     $dir = "$root\lock\Rustorigin"
     New-Item -ItemType Directory -Force "$dir\sub", "$root\elsewhere" | Out-Null
-    Set-Content "$dir\sub\a.txt" 'x'; Set-Content "$root\elsewhere\keep.txt" 'keep'
+    Set-Content "$dir\sub\a.txt" 'x'; Set-Content "$dir\sub\b.txt" 'x'; Set-Content "$root\elsewhere\keep.txt" 'keep'
     Expose $dir
     icacls "$dir\sub\a.txt" /inheritance:d | Out-Null
     Junction "$dir\link" "$root\elsewhere"
@@ -41,6 +41,8 @@ try {
     Check "link inside removed"                             (-not (Test-Path "$dir\link"))
     Check "link target kept, permissions unchanged"         ((Test-Path "$root\elsewhere\keep.txt") -and $elsewhere -eq (Sddl "$root\elsewhere"))
     Check "entry with its own permissions inherits again"   (-not (Get-Acl "$dir\sub\a.txt").AreAccessRulesProtected)
+    # nothing is passed on by Windows any more: each entry must have been set by the walk itself
+    Check "entries inside lost what they inherited before"  (-not ((icacls "$dir\sub") + (icacls "$dir\sub\a.txt") + (icacls "$dir\sub\b.txt") -match 'S-1-5-11|Authenticated Users'))
     Check "private folder: nothing to do (0)"               ((Secure $dir) -eq 0)
 
     # ---- an entry that can't be secured keeps the folder refused, across runs ----
@@ -87,15 +89,32 @@ try {
     # ---- a hard link at the record's name: the record is never written into the file it shares ----
     $dir = "$root\hardlink\Rustorigin"
     New-Item -ItemType Directory -Force $dir | Out-Null
-    Set-Content "$root\canary\victim.txt" 'victim'
-    Expose $dir   # first: icacls would otherwise propagate onto the linked file itself
+    New-Item -ItemType Directory -Force "$dir\sub" | Out-Null
+    Set-Content "$root\canary\victim.txt" 'victim'; Set-Content "$root\canary\victim2.txt" 'victim2'
+    Set-ItemProperty "$root\canary\victim.txt", "$root\canary\victim2.txt" -Name IsReadOnly -Value $true
+    Expose $dir   # first: icacls would otherwise propagate onto the linked files themselves
     cmd /c mklink /H "$dir\.rustorigin-lock-incomplete" "$root\canary\victim.txt" | Out-Null
-    Check "hard link at the record's name: folder secured (0)" ((Secure $dir) -eq 0)
-    Check "the linked file's content unchanged"             ((Get-Content "$root\canary\victim.txt") -eq 'victim')
-    # Not checked: its inherited permissions DO change - setting the folder's permissions passes them on to every
-    # entry in it, hard links included (a known limit, see docs/LAUNCHER.md).
+    cmd /c mklink /H "$dir\sub\game.dll" "$root\canary\victim2.txt" | Out-Null
+    $victim = Sddl "$root\canary\victim.txt"; $victim2 = Sddl "$root\canary\victim2.txt"
+    Check "hard links: folder secured (0)"                  ((Secure $dir) -eq 0)
+    Check "the linked file's content, permissions and read-only flag unchanged" ((Get-Content "$root\canary\victim.txt") -eq 'victim' -and
+        $victim -eq (Sddl "$root\canary\victim.txt") -and (Get-Item "$root\canary\victim.txt").IsReadOnly)
+    Check "a hard link deeper in: removed"                  (-not (Test-Path "$dir\sub\game.dll"))
+    Check "its file's content, permissions and read-only flag unchanged" ((Get-Content "$root\canary\victim2.txt") -eq 'victim2' -and
+        $victim2 -eq (Sddl "$root\canary\victim2.txt") -and (Get-Item "$root\canary\victim2.txt").IsReadOnly)
+
+    # ---- a name Windows trims (trailing dot) can't be pinned as itself: not secured ----
+    $dir = "$root\oddname\Rustorigin"
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    Expose $dir
+    [IO.File]::WriteAllText("\\?\$dir\game.dll.", 'x')   # only a \\?\ path keeps the trailing dot
+    Check "entry named with a trailing dot created"         ((cmd /c dir /b "$dir") -contains 'game.dll.')
+    Check "trailing-dot entry: not secured (1)"             ((Secure $dir) -eq 1)
+    [IO.File]::Delete("\\?\$dir\game.dll.")
 } finally {
     foreach ($l in "$root\via\Rustorigin", "$root\parentlink", "$root\lock\Rustorigin\link") { if (Test-Path $l) { cmd /c rmdir "$l" 2>$null } }
+    foreach ($v in "$root\canary\victim.txt", "$root\canary\victim2.txt") { if (Test-Path $v) { Set-ItemProperty $v -Name IsReadOnly -Value $false } }
+    try { [IO.File]::Delete("\\?\$root\oddname\Rustorigin\game.dll.") } catch { }
     cmd /c rmdir /s /q "$root" 2>$null
 }
 if ($script:fail) { Write-Host "$script:fail folder-lock test(s) FAILED"; exit 1 }
