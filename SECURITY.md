@@ -49,6 +49,14 @@ This is a rolling community project; only the **latest release** is supported. F
 release rather than as patches to older builds. Verify a release against the published source,
 checksums, and (where available) build attestation.
 
+## Known limits
+
+- **Hard links in the install folder:** when the launcher locks an install folder other accounts could
+  change, setting the folder's permissions passes them on to every entry already in it, including a hard
+  link another account planted there before the lock. The file it shares then gets the folder's inherited
+  permissions (its content is never written). Planting one needs permission to change that file's attributes.
+  Applying the permissions through a handle instead of by name is planned; see `docs/LAUNCHER.md`.
+
 ## Verifying a download
 
 The launcher enforces integrity itself: it refuses to install unless the downloaded client's

@@ -11,10 +11,11 @@ Releases. C# 5 / .NET Framework 4.x WPF, code-only (no XAML), compiled by Window
 - Tests (one script = one suite; no per-case filter):
   `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_<suite>.ps1`
   suites: `updater_parsing` (UpdateParsing.cs), `a2s_parsing` (A2S.cs), `client_patch` (ClientPatch.cs + builder),
-  `ac_session` (AcSession.cs), `folder_pin` (FolderPin.cs: install-folder link checks)
+  `ac_session` (AcSession.cs), `folder_pin` (FolderPin.cs: install-folder link checks),
+  `folder_lock` (drives `release\RustoriginLauncher.exe --secure-folder`: build it first)
 - Run: `release\RustoriginLauncher.exe`; add `--dev-config` to use a `launcher.cfg` next to the exe
 - Installers: `scripts\build_installer_exe.ps1 -Version x.y.z` (NSIS 3.12), `scripts\build_msi.ps1` (WiX 5.0.2, never v6+)
-- No linter/formatter exists. CI (`.github/workflows/build-check.yml`) = release build + the 5 suites on PowerShell 7
+- No linter/formatter exists. CI (`.github/workflows/build-check.yml`) = release build + the 6 suites on PowerShell 7
 
 ## Architecture
 - `src/WpfLauncher.cs` (~4k lines): `App.Main`, `Assets`, `LauncherWindow` = UI, config, downloader, install,

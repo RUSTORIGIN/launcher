@@ -46,6 +46,29 @@ try {
     $h = [FolderPin]::Pin("$root\plain\Rustorigin", [ref]$isDir, [ref]$isLink)
     Check "Pin: plain folder is no link" ($h -ne $null -and $isDir -and -not $isLink)
     if ($h) { $h.Dispose() }
+    $err = 0
+    $busy = [IO.File]::Open("$root\plain\Rustorigin\busy.txt", 'Create', 'ReadWrite', 'None')
+    try {
+        $h = [FolderPin]::Pin("$root\plain\Rustorigin\busy.txt", [ref]$isDir, [ref]$isLink, [ref]$err)
+        Check "Pin: file open in another program -> null, error 32" ($h -eq $null -and $err -eq 32)
+    } finally { $busy.Dispose() }
+
+    # ---- DeleteTree: removes a tree, never what a link inside points at ----
+    New-Item -ItemType Directory -Force "$root\canary", "$root\tree\a\b" | Out-Null
+    Set-Content "$root\canary\keep.txt" 'keep'; Set-Content "$root\tree\a\b\f.txt" 'x'
+    Set-ItemProperty "$root\tree\a\b\f.txt" -Name IsReadOnly -Value $true
+    Junction "$root\tree\a\out" "$root\canary"
+    [FolderPin]::DeleteTree("$root\tree")
+    Check "DeleteTree removed the tree (read-only file included)" (-not (Test-Path "$root\tree"))
+    Check "DeleteTree left a junction's target alone" ((Get-Content "$root\canary\keep.txt") -eq 'keep')
+
+    # ---- WriteNewFile: replaces what is at the name, never writes through a hard link ----
+    Set-Content "$root\canary\target.txt" 'original'
+    cmd /c mklink /H "$root\plain\Rustorigin\rec.txt" "$root\canary\target.txt" | Out-Null
+    Check "hard link created" (Test-Path "$root\plain\Rustorigin\rec.txt")
+    [FolderPin]::WriteNewFile("$root\plain\Rustorigin\rec.txt", "ours")
+    Check "WriteNewFile wrote a new file at the name" ((Get-Content "$root\plain\Rustorigin\rec.txt") -eq 'ours')
+    Check "WriteNewFile left the hard link's other name unchanged" ((Get-Content "$root\canary\target.txt") -eq 'original')
 } finally {
     cmd /c rmdir "$root\via\Rustorigin" 2>$null; cmd /c rmdir "$root\parentlink" 2>$null
     Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
