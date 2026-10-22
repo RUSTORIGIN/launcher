@@ -2936,6 +2936,8 @@ public class LauncherWindow : Window
                 () => { try { if (!proc.HasExited) return true; } catch { } return GameRunning(); },
                 m => Log("ac-session: " + m), null);
             acSession.HardwareId = AcSession.ReadHardwareId;
+            // The server sends the connected game a code; echoing it from the game's log proves this session belongs to it.
+            acSession.LinkSource = new AcGameLog(AcGameLog.DefaultPath()).Poll;
             // Evidence labels, gathered on the session thread: the game files are hashed once per launch (at the
             // first heartbeat). The tool check is done by the client itself, with the rules the server sends.
             string clientDir = null;
@@ -2962,6 +2964,7 @@ public class LauncherWindow : Window
                         "It sends your SteamID, the launcher version, whether the game is running, whether a few key game files " +
                         "match the official build, the name of a known macro tool (such as AutoHotkey) if one is running, and an " +
                         "anonymous ID of this PC (a one-way hash of your Windows install ID). " +
+                        "It also reads one code the server sends to your game from the game's own log, to show the session belongs to this game. " +
                         "Nothing else: no list of your programs and no files.\n\n" +
                         "Staff use the PC ID to see when several accounts play from one PC, and to keep banned players from coming back " +
                         "on a new account: an account playing from the PC of a banned account is banned automatically. " +

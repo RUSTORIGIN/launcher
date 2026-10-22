@@ -106,14 +106,22 @@ public static class AcSession
     // never carries free text from the player's machine.
     public static string BuildHeartbeat(string session, long seq, long unixTime, bool gameRunning, IList<string> signals)
     {
+        return BuildHeartbeat(session, seq, unixTime, gameRunning, signals, null);
+    }
+
+    // The same, echoing a game-link code (see AcGameLog): 16 lowercase hex the server sent to this PC's game. An unusable
+    // code is left out, never sent half-formed.
+    public static string BuildHeartbeat(string session, long seq, long unixTime, bool gameRunning, IList<string> signals, string link)
+    {
         if (!IsHex(session, 32) || seq < 1) return null;
         var sb = new StringBuilder();
         sb.Append("{\"v\":").Append(ProtocolVersion)
           .Append(",\"session\":\"").Append(session.ToLowerInvariant()).Append('"')
           .Append(",\"seq\":").Append(seq.ToString(CultureInfo.InvariantCulture))
           .Append(",\"t\":").Append(unixTime.ToString(CultureInfo.InvariantCulture))
-          .Append(",\"game\":").Append(gameRunning ? 1 : 0)
-          .Append(",\"signals\":[");
+          .Append(",\"game\":").Append(gameRunning ? 1 : 0);
+        if (IsLinkCode(link)) sb.Append(",\"link\":\"").Append(link).Append('"');
+        sb.Append(",\"signals\":[");
         var clean = CleanSignals(signals);
         for (int i = 0; i < clean.Count; i++)
         {
@@ -184,6 +192,12 @@ public static class AcSession
         var b = new byte[16];
         using (var rng = new RNGCryptoServiceProvider()) rng.GetBytes(b);
         return ToHex(b);
+    }
+
+    // A game-link code: exactly 16 lowercase hex.
+    public static bool IsLinkCode(string s)
+    {
+        return s != null && Regex.IsMatch(s, "^[0-9a-f]{16}$");
     }
 
     public static bool IsHex(string s, int length)
@@ -270,6 +284,57 @@ public static class AcSession
         var sb = new StringBuilder(b.Length * 2);
         foreach (byte x in b) sb.Append(x.ToString("x2", CultureInfo.InvariantCulture));
         return sb.ToString();
+    }
+}
+
+// Follows the game's own log (Player.log) for the game-link code the server sends to the connected client: a console
+// line "rustorigin-link <16 hex>". Echoing it in a heartbeat shows the server that this session runs on the PC whose game
+// it is talking to. Only that code is taken from the log; nothing else is read into memory beyond the line search, and
+// nothing else leaves the PC. The game rewrites the file at every start, so a shorter file means "read from the start".
+public sealed class AcGameLog
+{
+    public const int MaxReadPerPoll = 4 << 20;   // bytes read per poll at most (the log can grow fast while loading)
+    static readonly Regex CodeLine = new Regex("^rustorigin-link ([0-9a-f]{16})\\s*$", RegexOptions.Multiline);
+
+    readonly string path;
+    long offset;
+    string carry = "";   // an unfinished last line, kept for the next poll
+    string latest;
+
+    public AcGameLog(string path) { this.path = path; }
+
+    // %USERPROFILE%\AppData\LocalLow\Facepunch Studios LTD\Rust\Player.log, where the Rust client writes its log.
+    public static string DefaultPath()
+    {
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return Path.Combine(Path.Combine(Path.GetDirectoryName(local), "LocalLow"), Path.Combine("Facepunch Studios LTD", Path.Combine("Rust", "Player.log")));
+    }
+
+    // The newest code seen in the log so far, or null. Never throws: a missing or locked file just finds nothing.
+    public string Poll()
+    {
+        try
+        {
+            var fi = new FileInfo(path);
+            if (!fi.Exists) return latest;
+            if (fi.Length < offset) { offset = 0; carry = ""; latest = null; }   // the game started again: a new log
+            if (fi.Length == offset) return latest;
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            {
+                fs.Seek(offset, SeekOrigin.Begin);
+                var buf = new byte[(int)Math.Min(MaxReadPerPoll, fi.Length - offset)];
+                int n = fs.Read(buf, 0, buf.Length);
+                offset += n;
+                string text = carry + Encoding.UTF8.GetString(buf, 0, n);
+                int cut = text.LastIndexOf('\n');
+                carry = cut < 0 ? text : text.Substring(cut + 1);
+                if (carry.Length > 4096) carry = "";                            // no real line is that long
+                foreach (Match m in CodeLine.Matches(cut < 0 ? "" : text.Substring(0, cut).Replace("\r", "")))
+                    latest = m.Groups[1].Value;
+            }
+        }
+        catch { }
+        return latest;
     }
 }
 
@@ -407,6 +472,10 @@ public sealed class AcSessionClient
     public Func<IEnumerable<string>> ProcessNames = AcSignals.RunningProcessNames;   // replaceable for tests
     // The PC's hardware id sent with each session request (AcSession.ReadHardwareId), read once. Null = none.
     public Func<string> HardwareId;
+    // The newest game-link code from the game's log (AcGameLog.Poll), null = none. When a new one appears the client
+    // sends a heartbeat at once instead of waiting out the interval, so the server sees the link within seconds.
+    public Func<string> LinkSource;
+    string sentLink;
     public int RetryDelayMs = 5000;      // first retry after a failed open; doubles up to MaxRetryDelayMs
     public int MaxRetryDelayMs = 60000;
     public int SecondMs = 1000;          // one second of the server's heartbeat interval (tests shorten it)
@@ -437,6 +506,29 @@ public sealed class AcSessionClient
 
     // Sleeps, or returns false at once when Stop() is called.
     bool Sleep(int ms) { return !stopped.WaitOne(Math.Max(0, ms)); }
+
+    // Like Sleep, but wakes early (true) when the game log holds a code not sent yet. False only when stopped.
+    bool SleepOrLink(int ms)
+    {
+        if (LinkSource == null) return Sleep(ms);
+        int left = Math.Max(0, ms);
+        while (left > 0)
+        {
+            int step = Math.Min(left, SecondMs);
+            if (stopped.WaitOne(step)) return false;
+            left -= step;
+            if (NewLink() != null) return true;
+        }
+        return true;
+    }
+
+    // A code from the game log that has not been sent with this session yet, or null.
+    string NewLink()
+    {
+        string code = null;
+        try { if (LinkSource != null) code = LinkSource(); } catch { }
+        return AcSession.IsLinkCode(code) && code != sentLink ? code : null;
+    }
 
     void Run()
     {
@@ -476,7 +568,7 @@ public sealed class AcSessionClient
                     retry = Math.Min(retry * 2, MaxRetryDelayMs);
                     continue;
                 }
-                seq = 0; retry = RetryDelayMs;
+                seq = 0; retry = RetryDelayMs; sentLink = null;   // a new session must link again
                 tools = AcSignals.ParseToolSpec(grant.ToolSpec);
                 Interlocked.Increment(ref Opened);
                 log("session opened, heartbeat every " + grant.Heartbeat + " s, " + tools.Count + " tool rule(s) from the server, " +
@@ -491,7 +583,9 @@ public sealed class AcSessionClient
             // Tell the player's own log what is being reported, whenever it changes.
             string joined = string.Join(",", labels);
             if (joined != lastLabels) { log(joined.Length > 0 ? "reporting: " + joined : "reporting nothing"); lastLabels = joined; }
-            string hb = AcSession.BuildHeartbeat(grant.Session, seq, AcSession.UnixNow(), gameRunning(), labels);
+            string link = NewLink();
+            if (link != null) log("game link code found - sending it with the heartbeat");
+            string hb = AcSession.BuildHeartbeat(grant.Session, seq, AcSession.UnixNow(), gameRunning(), labels, link);
             string r = post(baseUrl + "/v1/heartbeat", hb, AcSession.Sign(grant.KeyHex, hb));
             int next; string reason;
             if (r == null)
@@ -504,7 +598,8 @@ public sealed class AcSessionClient
             else if (AcSession.ParseHeartbeatReply(r, grant.Heartbeat, out next, out reason))
             {
                 Interlocked.Increment(ref HeartbeatsOk);
-                if (!Sleep(next * SecondMs)) return;
+                if (link != null) sentLink = link;
+                if (!SleepOrLink(next * SecondMs)) return;
             }
             else
             {

@@ -16,6 +16,9 @@ public sealed class FakeService
     public int SessionCalls, HeartbeatCalls, BadSignatures, FailOpens, RejectBeatNumber = -1;
     public long LastSeq;
     public string LastBody, LastOpenBody;
+    public System.Collections.Generic.List<string> Links = new System.Collections.Generic.List<string>();   // "link" codes seen
+    public System.Diagnostics.Stopwatch Clock = System.Diagnostics.Stopwatch.StartNew();
+    public long FirstLinkMs = -1;
     public int SessionCount;
     public string Tools;   // "tools" field of the session reply, or null for none
     public string Post(string url, string body, string sig)
@@ -34,6 +37,8 @@ public sealed class FakeService
             }
             HeartbeatCalls++;
             LastBody = body;
+            var lm = System.Text.RegularExpressions.Regex.Match(body, "\"link\":\"([0-9a-f]{16})\"");
+            if (lm.Success) { Links.Add(lm.Groups[1].Value); if (FirstLinkMs < 0) FirstLinkMs = Clock.ElapsedMilliseconds; }
             if (!AcSession.Verify(Key, body, sig)) { BadSignatures++; return "{\"ok\":0,\"reason\":\"bad_sig\"}"; }
             var m = System.Text.RegularExpressions.Regex.Match(body, "\"seq\":([0-9]+)");
             long seq = long.Parse(m.Groups[1].Value);
@@ -82,6 +87,18 @@ public static class Harness
     {
         var c = Make(svc, stopAfterBeats, 0);
         c.HardwareId = () => { if (throws) throw new System.InvalidOperationException("boom"); return hw; };
+        return c;
+    }
+
+    // A game-link code the test can change from PowerShell; read on the client's own thread.
+    public sealed class CodeBox { public volatile string Code; public string Get() { return Code; } }
+
+    // Like Make, with a game-link source and a real-ish second (heartbeat interval 30 x secondMs).
+    public static AcSessionClient WithLink(FakeService svc, int stopAfterBeats, CodeBox box, int secondMs)
+    {
+        var c = Make(svc, stopAfterBeats, 0);
+        c.SecondMs = secondMs;
+        c.LinkSource = box.Get;
         return c;
     }
 
@@ -291,6 +308,44 @@ try {
 } finally { Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue }
 
 # ---- optional: the real client against a running session service ----
+# ---- game link (#1): the code the server sends to the game, echoed from its log ----
+$code = '0123456789abcdef'
+Check "link: heartbeat carries the code" ([AcSession]::BuildHeartbeat($sess, 2, 5, $true, $null, $code) -eq "{`"v`":1,`"session`":`"$sess`",`"seq`":2,`"t`":5,`"game`":1,`"link`":`"$code`",`"signals`":[]}")
+Check "link: a malformed code is left out" ([AcSession]::BuildHeartbeat($sess, 2, 5, $true, $null, '0123456789ABCDEF') -notmatch 'link')
+Check "link: no code, no field" ([AcSession]::BuildHeartbeat($sess, 2, 5, $true, $null, $null) -notmatch 'link')
+
+$logFile = Join-Path ([IO.Path]::GetTempPath()) ("ac-link-" + [guid]::NewGuid().ToString('N') + ".log")
+$gl = New-Object AcGameLog $logFile
+Check "game log: missing file -> null" ($null -eq $gl.Poll())
+[IO.File]::WriteAllText($logFile, "Loading map`r`nrustorigin-link 1111111111111111`r`nsomething else`r`n")
+Check "game log: code found (CRLF lines)" ($gl.Poll() -eq '1111111111111111')
+[IO.File]::AppendAllText($logFile, "rustorigin-link 2222222222222222`n")
+Check "game log: the newest code wins" ($gl.Poll() -eq '2222222222222222')
+[IO.File]::AppendAllText($logFile, "rustorigin-link 33333333")
+Check "game log: half a line waits for its end" ($gl.Poll() -eq '2222222222222222')
+[IO.File]::AppendAllText($logFile, "33333333`n")
+Check "game log: completed line read next time" ($gl.Poll() -eq '3333333333333333')
+[IO.File]::AppendAllText($logFile, "chat: rustorigin-link 4444444444444444`nrustorigin-link 55555555555555556`n")
+Check "game log: only whole lines of the exact form count" ($gl.Poll() -eq '3333333333333333')
+[IO.File]::WriteAllText($logFile, "new game`n")
+Check "game log: a new (shorter) log starts over" ($null -eq $gl.Poll())
+$fs = New-Object IO.FileStream($logFile, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+$w = New-Object IO.StreamWriter($fs); $w.Write("rustorigin-link 6666666666666666`n"); $w.Flush()
+Check "game log: read while the game holds it open" ($gl.Poll() -eq '6666666666666666')
+$w.Dispose(); Remove-Item $logFile
+
+# the client sends a new code at once, not after the 30 s interval (here 30 x 100 ms = 3 s), and only once
+$svc = New-Object FakeService
+$box = New-Object 'Harness+CodeBox'
+$c = [Harness]::WithLink($svc, 1000000, $box, 100); $c.Start()
+Start-Sleep -Milliseconds 500
+$box.Code = 'abcdefabcdefabcd'
+$t0 = $svc.Clock.ElapsedMilliseconds
+Start-Sleep -Milliseconds 1500
+$c.Stop(); [void]$c.Wait(3000)
+Check "link: code sent within ~1 s, not after the 3 s interval" ($svc.FirstLinkMs -ge 0 -and ($svc.FirstLinkMs - $t0) -lt 1300)
+Check "link: each code sent once" ($svc.Links.Count -eq 1 -and $svc.Links[0] -eq 'abcdefabcdefabcd')
+
 if ($env:AC_TEST_URL) {
     $sid = '76561198000000042'
     $c = [Harness]::Live($env:AC_TEST_URL, $sid, 3); $c.Start()
