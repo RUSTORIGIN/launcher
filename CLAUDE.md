@@ -16,7 +16,7 @@ All three live in `src/`, each with its own `Main()` - they are *not* compiled t
 | Source | Output | Built by | Notes |
 |--------|--------|----------|-------|
 | `src/WpfLauncher.cs` | `RustoriginLauncher.exe` | `csc` via `scripts/build.bat` / `scripts/make_release.ps1` | The single shipping build. WPF, single-file, cross-fading screenshot background. Downloads + **SHA-256-verifies** + extracts + launches. |
-| `src/UpdateParsing.cs`, `src/A2S.cs`, `src/DiscordRpc.cs`, `src/ClientPatch.cs` | (compiled in) | same `csc` build | Self-update parsing, Steam A2S live status, Discord Rich Presence, and the client delta-update (pack recipe, stage, commit) helpers. |
+| `src/UpdateParsing.cs`, `src/A2S.cs`, `src/DiscordRpc.cs`, `src/ClientPatch.cs`, `src/AcSession.cs` | (compiled in) | same `csc` build | Self-update parsing, Steam A2S live status, Discord Rich Presence, the client delta-update (pack recipe, stage, commit) helpers, and the anti-cheat session protocol + background session client (started by `Play` when `AcSessionUrl` is set, see `docs/CLIENT_ANTICHEAT.md`). |
 
 Nearly all real work happens in `src/WpfLauncher.cs`. It is one self-contained code-only WPF file
 (~1800 lines): window chrome, glass UI, config parsing, and the resumable, verified
@@ -47,7 +47,13 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
 - **Carousel dot indicators** at the bottom-center (`BuildSlideDots` / `UpdateSlideDots`): one dot
   per screenshot, the active one a wide accent pill; clicking a dot jumps to that slide and resets
   the auto-advance timer. Hidden when fewer than two slides load.
-- A `launcher.cfg` placed **next to the exe** overrides the embedded defaults at runtime.
+- A `launcher.cfg` placed **next to the exe** overrides the embedded defaults at runtime - in a **release
+  build only when started with `--dev-config`** (`LoadConfig`; otherwise it is ignored and logged), because
+  players run the exe from Downloads, where any web page can drop a file. A dev build (`build.bat`, nothing
+  embedded) always reads it. Even with `--dev-config`, a release build takes `AcSessionUrl` and `AcClientFile`
+  only from its embedded config, so the real launcher can't be told to vouch for modified game files.
+  `LaunchExe` must be a relative `.exe` path inside the install folder and
+  `UpdateRepo` must be `owner/repo`, whatever the source.
 
 ## Download behavior (implemented)
 
@@ -75,6 +81,13 @@ Extract to InstallDir  ->  launch LaunchExe (RustClient.exe)
 - A saved partial is reused only for the **same** remote file (URL + ETag + size), so a new
   build is never stitched onto an old partial.
 - **TLS**: `ConfigureTls()` forces TLS 1.2 (and 1.3 where the OS supports it); no HTTP fallback.
+  `DownloadUrl` / `PatchUrl` must be `https://` (`IsHttpsUrl`: INSTALL refuses an http client URL, an http
+  pack is skipped), and a server redirect to a non-https address fails the download at once
+  (`RequireHttps` / `InsecureRedirectException`, not retried). The self-update requests get the same check.
+- **Size pin** (`ClientSize` / `PatchSize`, optional, printed by the packaging scripts): a server announcing
+  another size is refused before anything is downloaded, the single stream stops at that size, and the
+  parallel download reserves no more than it. Without a pin the server's size is still a hard stop, and the
+  free space is checked before anything is reserved (+512 MB).
 - **Integrity**: SHA-256 verification is mandatory - Install is blocked without a configured
   `Sha256`, and the finished download is verified before extraction and rejected on mismatch
   (see the security section below).
@@ -105,10 +118,16 @@ not already have.
   2. `ClientPatch.Stage` rebuilds every changed file under `<InstallDir>\_update\files`, hashing as
      it writes, and rejects the whole update unless **each file matches its SHA-256**. The installed
      client is only read, so a failed or cancelled update leaves it exactly as it was;
-  3. `ClientPatch.Commit` moves the staged files into place, deletes the files the new build
+  3. `ClientPatch.Stage` also writes a manifest of every staged file (size + SHA-256), the files to delete and
+     the version to `%LOCALAPPDATA%\Rustorigin\update-manifest.txt`, which other accounts can't write.
+     `ClientPatch.Commit(..., manifest, rehash)` moves only staged files the manifest lists with the right size
+     - and when the commit is a resumed one (after a restart: the next UPDATE click), re-hashes each one
+     first; any mismatch, unlisted file or link discards the staging and the update is staged again from the
+     kept pack. The version and delete list come from the manifest, not from the staging folder.
+  4. `ClientPatch.Commit` moves the staged files into place, deletes the files the new build
      dropped, writes the marker with the new `client=`, and only then removes the `ready` flag.
-     Commit is idempotent: a swap cut short by a crash is finished on the next launch
-     (constructor) or the next UPDATE click, and removing the leftover staging folder is
+     Commit is idempotent: a swap cut short by a crash is finished by the next UPDATE
+     click (on the download thread, after the re-hash above), and removing the leftover staging folder is
      best-effort (something holding it open cannot fail a finished update). Staged files are
      flushed to disk before `ready` is written.
 - **Fallback.** If the pack does not fit the install (a file differs from the expected build, a
@@ -129,20 +148,35 @@ not already have.
 
 ## Self-update (launcher)
 
-On launch (background thread, gated by the `AutoUpdate` pref, default on), the launcher checks
-`UpdateRepo`'s **latest GitHub Release** and compares the tag to its own version. If newer, it
-prompts, downloads the release's `RustoriginLauncher.exe`, **verifies its SHA-256 against the release's
-`SHA256SUMS.txt`**, and self-replaces (rename running exe -> `.old`, drop the new exe in, relaunch).
-A hash mismatch is rejected - it never runs an unverified replacement, same trust model as the
-client download. See `StartUpdateCheck` / `UpdateCheckWorker` in `src/WpfLauncher.cs`.
+On launch (background thread), the launcher checks `UpdateRepo`'s **latest GitHub Release** and compares
+the tag to its own version. If newer, it downloads the release's `SHA256SUMS.txt` and
+`SHA256SUMS.txt.sig` and checks the **signature** (`UpdateParsing.VerifyRelease`) against `UpdatePublicKey`
+from its embedded config - all *before* showing the player anything. Only a release that verifies brings
+up the (mandatory) update prompt; the player presses Update, the launcher downloads
+`RustoriginLauncher.exe`, checks it against the hash from the **signed** sums, and self-replaces (rename
+running exe -> `.old`, drop the new exe in, relaunch). See `UpdateCheckWorker` / `PerformUpdate` in
+`src/WpfLauncher.cs`.
 
-Notes / limits:
-- Needs a **public** repo (unauthenticated GitHub API); on a private repo the check 404s and is
-  silently skipped. `UpdateRepo=` blank also disables it.
-- If the install folder is read-only (e.g. a `Program Files` install without elevation), the swap
-  fails gracefully and opens the releases page for a manual update.
-- The `SHA256SUMS.txt` is **not signed** - whoever controls the repo's releases controls the update
-  (same caveat as the unsigned client manifest). Signing is future work.
+- **Signature:** RSA (>= 3072-bit) PKCS#1 v1.5 over SHA-256 of
+  `"rustorigin-launcher-release\n" + <tag> + "\n" + <exact bytes of SHA256SUMS.txt>`, base64 in the asset
+  `SHA256SUMS.txt.sig`. The tag is part of the message, so an old signed release can't be re-published as
+  a newer version. A missing, invalid or wrongly-keyed signature is logged and the release is **ignored**
+  (it can't block anyone behind the update prompt).
+- **Keys:** `scripts\new_signing_key.ps1 -OutFile <outside the repo>` makes the RSA-3072 key pair once; the
+  private key stays offline (locked to the maintainer's account), the printed `UpdatePublicKey=` line goes
+  into `config/launcher.cfg`. `UpdatePublicKey` is taken only from the embedded config (like the anti-cheat
+  keys, even with `--dev-config`). Blank = the launcher never updates itself (fail closed).
+- **Releasing:** CI only creates a **draft** (`release.yml`); `scripts\sign_release.ps1 -Tag vX.Y.Z -KeyFile
+  <key> [-Publish]` downloads the draft, checks every asset against `SHA256SUMS.txt` (and that nothing
+  unlisted is attached), signs, re-verifies with the committed public key, uploads the `.sig` and publishes.
+  `/releases/latest` never returns drafts, so players only ever see signed releases.
+- **Rotation:** a lost key means no more updates (players reinstall a launcher with a new key); a leaked
+  key means shipping a launcher with a new key, signed with the old one, at once.
+- Needs a **public** repo (unauthenticated GitHub API); on a private repo the check 404s and is silently
+  skipped. `UpdateRepo=` blank also disables it.
+- If the install folder is read-only, the swap fails gracefully and opens the releases page.
+- Launchers before this change verify only the (unsigned) `SHA256SUMS.txt`; they still update normally
+  to a signed release and are protected from then on.
 
 ## Discord Rich Presence
 
@@ -177,7 +211,7 @@ Verification is **required**, not optional:
   re-downloading. On cancel during hashing the `.part` is kept so Resume re-verifies.
 
 The expected hash is normally baked into the exe via the embedded `launcher.cfg` (the open-source
-exe is the trust anchor), and can be overridden by a `launcher.cfg` next to the exe for testing.
+exe is the trust anchor), and can be overridden by a `launcher.cfg` next to the exe for testing (release build: start it with `--dev-config`).
 
 The download path still does **NOT**:
 
@@ -218,9 +252,33 @@ dir, so no admin rights needed):
 | `RustClient.zip.verified` / `RustClient.patchpack.verified` | The SHA-256 a kept download was verified against, so a later run reuses it only for the same configured hash. |
 | `RustClient.patchpack` (+ `.part`, `.part.meta`, `.part.chunks`) | The delta pack's download buffer / verified pack, same lifecycle as the zip; deleted once the client is current. |
 | `patch-failed.txt` | SHA-256 of a delta pack that did not fit this install, so it is not downloaded again (a new pack has a new hash and gets a fresh try). |
+| `update-manifest.txt` | What a staged client update contains (sizes + SHA-256s, deletes, version), kept here - not in the install folder - so `ClientPatch.Commit` can refuse staged files someone swapped. Deleted when the update is committed. |
 | `launcher.log` | Timestamped diagnostics of every download/verify step - ask players for this when an install misbehaves. |
 | `installdir.txt` | The install folder the player picked on first INSTALL (`ChooseInstallDir`), remembered across runs; cleared by Uninstall client so a reinstall asks again. |
 | `prefs.cfg` | Per-user settings (see below). |
+
+**Install folder permissions - fail closed** (`SecureInstallDir`, `RequirePrivateInstallDir`): a folder made at
+a drive root inherits "Authenticated Users: Modify", so any account on the PC could swap the game or launcher
+exe that this player - or an admin - later runs. The launcher therefore only installs, updates (incl. finishing
+a staged update) and PLAYs from a **private** install folder (`FolderExposure` returns null): on NTFS/ReFS,
+owned by this user, SYSTEM or Administrators, and writable by no one else.
+- A new install folder is **created** private (`Directory.CreateDirectory(dir, PrivateSecurity)`): this user,
+  SYSTEM and Administrators full control, Users and OWNER RIGHTS read + execute, nothing inherited.
+- A folder this user owns but others can write (an install by an older launcher) is **locked** (`LockFolder`)
+  - in the background on launch, and again at INSTALL/UPDATE/REPAIR/PLAY. `ResetTree` then walks everything
+  inside: entries with their own permissions go back to inheriting, and entries another account owns, or any
+  link/junction, are deleted (a junction is removed, never its target). If there were any, the install
+  marker is dropped, so the game must be repaired (a fresh verified extract, which replaces files rather than
+  writing into them) before PLAY. The `_download\*.verified` records are dropped too.
+- A folder an admin made (an install by the **old per-machine NSIS setup**) or another account made can't be
+  re-permissioned by the player. `RequirePrivateInstallDir` offers a one-time fix that starts the launcher
+  elevated (`--secure-folder "<dir>" <player SID>` -> `SecureFolderElevated`): it only touches a folder that
+  is exposed right now and looks like a Rustorigin install, never names Everyone/Users as the player, takes
+  over untrusted entries for Administrators instead of deleting them, and drops the marker if there were any.
+  Declined or impossible (a FAT/exFAT drive, a folder that isn't an install) -> PLAY/INSTALL are refused with
+  the reason; a fresh install forgets the folder so the next INSTALL asks for another.
+- Limits: it can't tell that a file another account *modified in place* before the lock was changed (only the
+  `AcClientFile` hashes and a repair can), and nothing protects against malware running as the player.
 
 Inside the install folder: `.rustorigin-installed` (the install marker: line 1 the install time,
 then `client=<ClientVersion>`) and, only while an update is being applied, `_update\` (staged
@@ -254,15 +312,19 @@ manifest - everything is baked in, nothing needs to sit beside it):
 .\scripts\make_release.ps1 -Version 1.0.0   # -> release\RustoriginLauncher.exe
 ```
 
-There is no `cargo` or clippy here. Three `Add-Type`-based test scripts exist:
+There is no `cargo` or clippy here. Four `Add-Type`-based test scripts exist:
 `scripts\test_updater_parsing.ps1` (compiles `src\UpdateParsing.cs`, unit-tests the self-update
 JSON/`SHA256SUMS`/version parsing), `scripts\test_a2s_parsing.ps1` (compiles `src\A2S.cs`,
 unit-tests the A2S reply parser and runs one end-to-end query against a loopback UDP responder) and
 `scripts\test_client_patch.ps1` (compiles `src\ClientPatch.cs` + the pack builder, builds a pack from
 two synthetic client folders, applies it, checks the result byte-for-byte, and checks every way an
-update must be refused: modified install, missing source, cancel, truncated pack, unsafe recipe).
+update must be refused: modified install, missing source, cancel, truncated pack, unsafe recipe), and
+`scripts\test_ac_session.ps1` (compiles `src\AcSession.cs`, unit-tests the anti-cheat session messages,
+HMAC signing against an independent reference vector, reply parsing, the endpoint rule, and the session
+client's loop against an in-process fake service; with `AC_TEST_URL` set it also runs the real HTTP client
+against a running `ac_session.py`).
 Two GitHub Actions workflows exist: **build-check** (`.github/workflows/build-check.yml`) compiles
-both builds **and runs all three tests** on every push/PR, and **release**
+both builds **and runs all four tests** on every push/PR, and **release**
 (`.github/workflows/release.yml`) builds and publishes on a version tag (see the release checklist).
 Do not reference commands that don't exist here. After changing `src\WpfLauncher.cs`, the fastest
 correctness check is a clean `csc` compile (as `build.bat` does).
@@ -284,9 +346,15 @@ A single self-contained setup executable, the same *kind* electron-builder's NSI
 - **Wizard:** Welcome -> License (MIT) -> **Choose install folder** -> Install (progress) ->
   Finish (with "Launch" checkbox), plus Start Menu + Desktop shortcuts, an Add/Remove Programs
   entry, and an uninstaller.
-- **Per-machine install to `Program Files` (requires admin/UAC)** - the classic per-machine
-  installer behavior. This
-  is the one trade-off vs the launcher's usual no-admin design; use the MSI below if you want no-admin.
+- **Per-user install, no admin/UAC** (`RequestExecutionLevel user`): default
+  `%LOCALAPPDATA%\Programs\Rustorigin Launcher`, HKCU entries, this user's shortcuts - like the MSI. It used to
+  be per-machine into `C:\Rustorigin` (elevated, HKLM), which left the launcher, `Uninstall.exe` and the game
+  writable by every account on the PC: any of them could swap a file an admin later ran. The launcher's
+  one-time elevated folder fix covers installs made that way.
+- The install folder is locked to this user, SYSTEM and Administrators with `icacls` - only when the setup
+  created it or it already holds the launcher, never an unrelated folder typed on the directory page. The
+  uninstaller deletes a folder recursively only when it is named `Rustorigin` / `Rustorigin Launcher`;
+  otherwise it removes just the launcher's own files.
 - Built with **NSIS** (`scripts/installer/RustOrigin.nsi`, Modern UI 2). `build_installer_exe.ps1`
   runs `make_release.ps1` first so the setup always wraps a fresh, versioned exe.
 - **NSIS prerequisite (one-time):** `winget install NSIS.NSIS`.
@@ -353,27 +421,38 @@ these steps move together - never upload a repackaged zip without rebuilding the
 **When the client build changes** (new server build), also, before step 3:
 
 - set a new `ClientVersion=` (and `Version=` / `Tagline=` if they name the build);
+- regenerate the `AcClientFile=` lines with `.\scripts\make_client_filehashes.ps1 -ClientDir <new client>`
+  (the anti-cheat session would otherwise report every player's new game files as `client:modified`);
 - give the new zip a **new file name** in `DownloadUrl` (e.g. `RustClient-2021-04.zip`) rather than
   overwriting the old one - a CDN may keep serving the cached old file under the old name;
 - run `.\scripts\make_client_patch.ps1` against the **same** new client folder the zip was made
   from, upload the `.patchpack`, and set `PatchUrl=`, `PatchSha256=` and `PatchProbe=` from its
   output. The pack only ever upgrades the *immediately previous* build; anyone else gets the zip;
-- smoke-test the update with a `launcher.cfg` next to a dev exe against a copy of the old client
+- smoke-test the update with a `launcher.cfg` next to a dev exe (or the release exe started with `--dev-config`) against a copy of the old client
   before tagging: the launcher self-update is mandatory, so a release reaches every player at once.
 
 If the uploaded zip and the embedded hash ever drift apart, players get a (correct) integrity
 rejection and cannot install - re-run from step 1.
 
-**Automated launcher release (GitHub Actions).** `.github/workflows/release.yml` builds and
-publishes the launcher on a version tag:
+**Automated launcher release (GitHub Actions).** `.github/workflows/release.yml` builds the launcher
+on a version tag and creates a **draft** release; you sign and publish it from your own machine:
 
 ```bash
 git tag v1.0.0 && git push origin v1.0.0
 ```
 
 That builds `RustoriginLauncher.exe`, the NSIS setup `.exe`, and the MSI from the **committed**
-`config/launcher.cfg`, generates `SHA256SUMS.txt`, and creates a GitHub Release with all
-artifacts attached. **It does not touch the game client** (that 9 GB zip is never in CI), so
+`config/launcher.cfg` (it refuses to build a release whose config has no valid `UpdatePublicKey`),
+generates `SHA256SUMS.txt`, and creates a **draft** GitHub Release with all artifacts attached. Then:
+
+```powershell
+.\scripts\sign_release.ps1 -Tag v1.0.0 -KeyFile <offline key> -Publish
+```
+
+The workflow is least-privilege: `permissions: {}` at the top, the build job (installer tooling from
+NuGet/Chocolatey, NSIS pinned to 3.12.0) can only read; only the `publish` job writes, inside the
+protected `release` environment, running nothing but GitHub's own actions and `gh`. Every action is pinned
+to a commit SHA. Tag + environment protection: `.github/BRANCH_PROTECTION.md`. **It does not touch the game client** (that 9 GB zip is never in CI), so
 steps 1-2 and 4 above (package the client, set the matching `Sha256`, upload the zip to R2)
 are still done by hand *before* tagging - otherwise the released launcher embeds a hash for a
 zip nobody is hosting. Only tag once `config/launcher.cfg` holds the hash of the zip you uploaded.
@@ -390,20 +469,24 @@ Plain `Key=Value`, `#`/`;` comments. Loaded embedded-defaults-first, then overri
 | `DownloadUrl` | Direct link to `RustClient.zip`. Required. |
 | `Sha256` | Expected hex SHA-256 of `RustClient.zip`. **Required** - a mismatched download is rejected, and a blank value blocks Install entirely. Aliases: `ClientSha256`, `ExpectedSha256`. |
 | `InstallDir` | Default/suggested install path. Blank = `.\Rust` next to the launcher. Shipped as `C:\RustOrigin`. On a fresh INSTALL the player picks the folder (`ChooseInstallDir`, pre-selecting `<launcher drive>:\Rustorigin` when the launcher is on another drive); the game always goes in a `Rustorigin` subfolder of the pick, because Uninstall deletes the whole install folder. When that folder is on another drive than `%LOCALAPPDATA%`, the download buffer goes to `<InstallDir>\_download` (`SetDownloadPaths`; not on FAT32, and a partial already in `%LOCALAPPDATA%` still resumes there). |
-| `LaunchExe` | Exe the Play button runs (searched recursively inside `InstallDir`). Default `RustClient.exe`. |
+| `LaunchExe` | Exe the Play button runs: exactly `InstallDir\LaunchExe` (a relative `.exe` path, `SafeLaunchExe`) - never searched for, and never one next to the launcher. Default `RustClient.exe`. |
 | `LaunchArgs` | Optional args for the main PLAY button, e.g. `-console +connect 127.0.0.1:28015`. |
 | `ClientVersion` | Id of the client build `DownloadUrl` serves (e.g. `2021-04`), recorded in the install marker. An install recording another version - or none (installs made before 1.1) - is outdated and shows **UPDATE** instead of PLAY. Blank disables update detection. Must equal the `-To` the delta pack was built with. |
 | `PatchUrl` | Direct link to the delta pack (`scripts\make_client_patch.ps1`) that upgrades the previous build in place. Blank = outdated installs download the full client. |
 | `PatchSha256` | Expected hex SHA-256 of the delta pack. **Required** for the pack to be used; a mismatched pack is rejected and the full client is installed instead. |
 | `PatchProbe` | `relative\path\|size` of a file in the build the pack upgrades **from** (e.g. `GameAssembly.dll\|43225944`). The pack is only tried when it matches, so other builds skip straight to the full download. Blank = always try the pack. |
+| `ClientSize` / `PatchSize` | Exact byte size of the client zip / delta pack (printed by `package_client.ps1` / `make_client_patch.ps1`). Optional but recommended: a download server announcing another size is refused, and the launcher never downloads or reserves more. Must belong to the same file as `Sha256` / `PatchSha256`. |
 | `Version` | Optional label shown in the launcher. |
 | `Title` | Big hero title (default `RUSTORIGIN`). |
 | `Tagline` | Description line under the title. |
 | `Player` | Parsed into `PlayerName` but currently **not displayed** (the user pill was removed). Kept for compatibility / future use. |
+| `UpdatePublicKey` | `rsa:<modulus>:<exponent>` printed by `scripts\new_signing_key.ps1`: the release key a self-update's `SHA256SUMS.txt` must be signed with. Embedded config only. Blank = no self-update (and `release.yml` refuses to build a release). |
 | `UpdateRepo` | `owner/repo` checked for launcher self-updates via GitHub Releases (public repos only). Blank disables. Default `RUSTORIGIN/launcher`. |
 | `DiscordAppId` | Discord application id enabling **Rich Presence** (`src/DiscordRpc.cs`) - shows "RUSTORIGIN - In the launcher / In game" on the player's Discord. Blank disables. |
 | `DiscordLargeImage` | Optional Rich Presence art-asset key (uploaded in the Discord app) shown as the large image. |
 | `DiscordButtonLabel` / `DiscordButtonUrl` | Optional clickable button under the presence (Discord can't make the image itself a link). e.g. `Play on RustOrigin` -> `https://rustorigin.com`. |
+| `AcSessionUrl` | Base URL of the launcher anti-cheat session service (`docs/CLIENT_ANTICHEAT.md`). When set, `Play` starts an `AcSessionClient` (`src/AcSession.cs`) right after the game process starts: it opens a session for the SteamID logged in to Steam (registry `ActiveUser`), sending the PC's hardware id (`AcSession.ReadHardwareId`: a prefixed SHA-256 of the Windows MachineGuid; the session service re-keys it with a server-only secret, and the RustRCON panel uses it for alt-account links and its ban-evasion check, slice 8), and heartbeats until the game exits, on its own background thread, logging only to `launcher.log`. It never blocks or delays PLAY. Because the server can kick players without a session (OriginSession enforcement, slice 7), the launcher keeps it alive: closing the window while the game runs hides it to the tray and the launcher quits when the game exits (`closeAfterGame`; tray > Quit quits at once, `quitNow`), and `EnsureAcSession` (on the 2 s game timer) starts a session for a running game that has none (launcher restarted mid-game). Must be `https`; plain `http` is accepted only for a local/private IP literal (a dev server, e.g. in WSL) - anything else is ignored with a log line. Blank (the shipped default) disables it. On the first PLAY with it set, a one-time notice (shown after the game has started; pref `AcNoticeShown`) tells the player what is sent. **The tool list is deliberately not a launcher setting:** the session service sends the rules in its session reply (`"tools"`, parsed by `AcSignals.ParseToolSpec`), and the client reports only `tool:<id>` - keep it that way, so the list stays out of this public repo, the exe and players' configs. |
+| `AcClientFile` | Repeatable `relative\path\|size\|sha256` (`AcSignals.ParseClientFile`; rooted paths and `..` refused): once per launch the session hashes these game files and reports `client:modified:<file>` / `client:missing:<file>` on a mismatch. **Regenerate with `scripts\make_client_filehashes.ps1` whenever the client build changes.** A source that defines them replaces the previous list. |
 | `Server` | Repeatable, up to 6: `Server=Tag\|Name\|launch args\|players\|cover` (everything after Name optional). Rendered as a **website-style card** (`ServerTile`, matching rustorigin.com): a cover-image header (`cover` is an embedded image name e.g. `main.png`, else `server-cover.png`, else a gradient) with a **status-dot badge** (top-left) + **dark tag pills** (top-right) overlaid, then a body with a live **PLAYERS ONLINE** count + **violet progress bar**, the `Name` + a `RUSTORIGIN \| tags` subtitle, the connect address, and a violet **CONNECT** chip (or **SOON** when the card has no join target). `Tag` may be **comma/slash-separated** (e.g. `Vanilla, Main, Old Recoil`) to show several pills. Cards stack vertically; clicking a joinable card (or its CONNECT chip) launches with its args. **Live status:** when the launch args contain `+connect HOST:PORT`, the launcher queries A2S (`src/A2S.cs`) and fills the count/bar (green ONLINE / grey SOON, refreshed ~60s); a `statusUrl` (6th field) web feed is used instead when set; otherwise the static `players` text shows. A source that defines `Server=` lines replaces the previous source's list. |
 | `Social` | Repeatable: `Social=platform\|url` -> a clickable brand icon in the bar above the server cards (opens the URL in the browser). Built-in brand marks (inline vector paths in `SocialGlyph`): `discord`, `youtube`, `tiktok`; an unknown platform key is skipped. A source that defines `Social=` lines replaces the list from the previous source. |
 
@@ -434,8 +517,8 @@ Two separate mechanisms - don't confuse them:
 |-----------|---------|--------|
 | `LaunchArgs` | (from cfg) | Overrides `launcher.cfg`'s `LaunchArgs` for the PLAY button (set in `prefs.cfg`). |
 | `MinimizeInGame` | `false` | Minimize the launcher while the client runs. |
-| `AutoUpdate` | `true` | Check `UpdateRepo`'s GitHub Releases on launch and offer a verified self-update. |
 | `DiscordRpc` | `true` | Publish Discord Rich Presence (needs `DiscordAppId` set in `launcher.cfg`). |
+| `AcNoticeShown` | `false` | Set once the one-time anti-cheat session notice has been shown (after the first PLAY with `AcSessionUrl` set). |
 
 To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, and (optionally) a
 `SettingRow(...)` in `BuildSettingsOverlay` so it shows in the gear panel; users can also set it in
@@ -451,6 +534,7 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 │   ├── A2S.cs               #   Steam A2S_INFO query for live server status (tested by scripts/test_a2s_parsing.ps1)
 │   ├── DiscordRpc.cs        #   dependency-free Discord Rich Presence over the Discord IPC named pipe
 │   ├── ClientPatch.cs       #   client delta update: pack recipe, stage + verify, commit (tested by scripts/test_client_patch.ps1)
+│   ├── AcSession.cs         #   anti-cheat session protocol v1: build/sign messages, parse replies (tested by scripts/test_ac_session.ps1)
 │   ├── app.manifest         #   Win32 manifest (csc /win32manifest)
 │   └── app.ico              #   app icon
 ├── assets/                  # build-time embedded resources + icon sources
@@ -469,20 +553,25 @@ To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, an
 │   ├── client_patch_builder.cs # the pack builder (content-defined chunking); compiled by the two scripts that use it, not part of the launcher
 │   ├── client_filter.ps1    # which client files ship - shared by package_client.ps1 and make_client_patch.ps1
 │   ├── build_msi.ps1        # build the per-user MSI installer (WiX)
-│   ├── build_installer_exe.ps1 # build the NSIS setup .exe (electron-builder style, Program Files)
+│   ├── build_installer_exe.ps1 # build the NSIS setup .exe (electron-builder style, per-user)
 │   ├── test_updater_parsing.ps1 # unit tests for src/UpdateParsing.cs (run in build-check CI)
 │   ├── test_a2s_parsing.ps1 # unit + loopback tests for src/A2S.cs live server status (run in build-check CI)
 │   ├── test_client_patch.ps1 # end-to-end tests for the client delta update (run in build-check CI)
+│   ├── test_ac_session.ps1  # unit tests for src/AcSession.cs, the anti-cheat session protocol (run in build-check CI)
+│   ├── make_client_filehashes.ps1 # AcClientFile= lines (size + SHA-256 of key game files) for launcher.cfg
+│   ├── new_signing_key.ps1  # once: the offline release signing key (prints UpdatePublicKey=)
+│   ├── sign_release.ps1     # every release: check the draft's assets, sign SHA256SUMS.txt, publish
 │   └── installer/
 │       ├── RustOrigin.wxs   # WiX source for the MSI (WixUI_InstallDir wizard)
 │       ├── RustOrigin.nsi   # NSIS source for the setup .exe (MUI2 wizard)
 │       └── license.rtf      # MIT license shown on both installers' license page
 ├── docs/
 │   ├── IMPLEMENTATION_PLAN.md  # design->code status record (reconciled to current code)
+│   ├── CLIENT_ANTICHEAT.md  # launcher anti-cheat session: design, protocol v1, rollout, privacy
 │   ├── README-PLAYERS.txt
 │   ├── screenshot.png       # launcher screenshot used in README
 │   └── brand-kit/           # design system (css, style guide, docs)
-├── .github/                 # workflows (build-check, release), PR template, ruleset, BRANCH_PROTECTION.md
+├── .github/                 # workflows (build-check, release), PR template, rulesets (main, release tags), BRANCH_PROTECTION.md
 ├── discord/                 # discord assets
 ├── .superdesign/            # design canvas scratch (HTML mockups)
 ├── release/                 # built RustoriginLauncher.exe output (git-ignored)
@@ -545,7 +634,7 @@ running the exe:
   anti-aliased, so they read very slightly harder than a layered window's.
 - **Integrity smoke test:** blank `Sha256` -> INSTALL refused; correct `Sha256` -> download -> verify
   -> extract; wrong `Sha256` -> download rejected, nothing installed. (Also in docs/IMPLEMENTATION_PLAN.md section 5.)
-- **Update smoke test** (with a `launcher.cfg` next to the exe and a copy of the previous client as
+- **Update smoke test** (with a `launcher.cfg` next to the exe - release build started with `--dev-config` - and a copy of the previous client as
   the install): UPDATE shows instead of PLAY -> the pack downloads, verifies, "UPDATING" runs to 100%
   -> PLAY appears and the marker ends with `client=<ClientVersion>`. Wrong `PatchSha256` -> the pack
   is rejected and the full download starts. A modified install file -> the log says the pack is not

@@ -1,8 +1,19 @@
-# Builds and publishes the RustOrigin launcher on a version tag.
+# Builds the RustOrigin launcher on a version tag and creates a DRAFT GitHub Release.
 #
 # Trigger: push a tag like `v1.0.0`  ->  builds RustoriginLauncher.exe, the NSIS setup .exe, and the MSI,
-# generates SHA-256 checksums, (optionally) attests build provenance, and creates a GitHub Release
-# with all artifacts attached. Can also be run manually (workflow_dispatch) to just build artifacts.
+# generates SHA-256 checksums, attests build provenance (public repos), and creates a DRAFT release with all
+# artifacts attached. Can also be run manually (workflow_dispatch) to just build artifacts.
+#
+# Players' launchers only install a release whose SHA256SUMS.txt is signed with the OFFLINE release key, and
+# that key is never in CI. So after this workflow, the maintainer runs scripts\sign_release.ps1 on their own
+# machine: it checks the draft's assets against SHA256SUMS.txt, signs it, uploads SHA256SUMS.txt.sig and
+# publishes. A compromised workflow, action or token can at most produce an unsigned draft.
+#
+# Least privilege: the build job (which runs installer tooling from NuGet/Chocolatey) can only READ the repo;
+# only the small publish job, which runs nothing but GitHub's own actions and the preinstalled gh CLI, may
+# write - and only inside the protected `release` environment (see .github/BRANCH_PROTECTION.md).
+# Every action is pinned to a full commit SHA (the tag it came from is in the comment): a moved tag can't
+# change what runs here. Update a pin deliberately: gh api repos/<owner>/<action>/commits/<tag> --jq .sha
 #
 # It builds ONLY the ~7 MB launcher from the committed config/launcher.cfg (the multi-GB game client
 # is never in CI). The launcher embeds config/launcher.cfg's Sha256, so make sure that hash matches
@@ -19,30 +30,49 @@ on:
         required: false
         default: ''
 
-permissions:
-  contents: write        # create the release and upload assets
-  id-token: write        # build-provenance attestation
-  attestations: write
+permissions: {}          # nothing by default; each job asks for exactly what it needs
 
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4
+        with:
+          persist-credentials: false
 
       - name: Determine version
         id: ver
         shell: pwsh
+        # Passed through env, never pasted into the script: a tag or input containing a quote would otherwise run as code.
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          $v = '${{ github.event.inputs.version }}'
-          if ([string]::IsNullOrWhiteSpace($v)) { $v = ('${{ github.ref_name }}' -replace '^v','') }
+          $v = $env:INPUT_VERSION
+          if ([string]::IsNullOrWhiteSpace($v)) { $v = ($env:REF_NAME -replace '^v','') }
           if ($v -notmatch '^\d+\.\d+\.\d+$') { $v = '0.0.0' }
           "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Building version $v"
 
+      # A launcher released without the release key could never verify (so never install) an update again:
+      # its players would be stuck on it until they reinstall by hand. Refuse to build such a release.
+      - name: Check the release key is in the embedded config
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          Add-Type -Path src\UpdateParsing.cs
+          $line = Get-Content config\launcher.cfg | Where-Object { $_ -match '^\s*UpdatePublicKey\s*=' } | Select-Object -Last 1
+          $key = if ($line) { ($line -split '=', 2)[1].Trim() } else { '' }
+          if ($null -eq [UpdateParsing]::ParsePublicKey($key)) { throw "config/launcher.cfg has no valid UpdatePublicKey= (scripts/new_signing_key.ps1)" }
+          Write-Host "release key present"
+
       - name: Set up .NET 8 (for the WiX tool)
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9   # v4
         with:
           dotnet-version: '8.0.x'
 
@@ -53,9 +83,12 @@ jobs:
           $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
           wix extension add -g WixToolset.UI.wixext/5.0.2
 
-      - name: Install NSIS
+      - name: Install NSIS (pinned)
         shell: pwsh
-        run: choco install nsis -y --no-progress
+        run: |
+          choco install nsis --version=3.12.0 -y --no-progress
+          $v = & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" /VERSION
+          if ($v -ne 'v3.12') { throw "expected NSIS v3.12, got $v" }
 
       - name: Build launcher (RustoriginLauncher.exe)
         shell: pwsh
@@ -89,33 +122,58 @@ jobs:
           $lines | Set-Content 'release\SHA256SUMS.txt'
           $lines | Write-Host
 
-      - name: Attest build provenance
-        if: ${{ !github.event.repository.private }}
-        uses: actions/attest-build-provenance@v1
-        with:
-          subject-path: |
-            release/RustoriginLauncher.exe
-            release/RustoriginLauncher-Setup.exe
-            release/*.msi
-
       - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4
         with:
           name: rustorigin-launcher-${{ steps.ver.outputs.version }}
+          if-no-files-found: error
           path: |
             release/RustoriginLauncher.exe
             release/RustoriginLauncher-Setup.exe
-            release/*.msi
+            release/RustoriginLauncher-Setup.msi
             release/SHA256SUMS.txt
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+  # The only job that can write: attests what `build` produced and creates the DRAFT release from it.
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: release       # protect it with required reviewers (BRANCH_PROTECTION.md)
+    permissions:
+      contents: write          # create the draft release and upload assets
+      id-token: write          # build-provenance attestation
+      attestations: write
+    steps:
+      - name: Download the build
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093   # v4
         with:
-          name: Rustorigin Launcher ${{ steps.ver.outputs.version }}
-          generate_release_notes: true
-          files: |
-            release/RustoriginLauncher.exe
-            release/RustoriginLauncher-Setup.exe
-            release/*.msi
-            release/SHA256SUMS.txt
+          name: rustorigin-launcher-${{ needs.build.outputs.version }}
+          path: dist
+
+      - name: Check the files against SHA256SUMS.txt
+        working-directory: dist
+        run: |
+          ls -l
+          tr -d '\r' < SHA256SUMS.txt | sha256sum -c -        # written on Windows: CRLF
+          test "$(tr -d '\r' < SHA256SUMS.txt | grep -c .)" -eq 3
+
+      - name: Attest build provenance
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018   # v1
+        with:
+          subject-path: |
+            dist/RustoriginLauncher.exe
+            dist/RustoriginLauncher-Setup.exe
+            dist/RustoriginLauncher-Setup.msi
+
+      - name: Create the DRAFT release (sign + publish with scripts/sign_release.ps1)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          gh release create "$TAG" --draft --verify-tag --generate-notes \
+            --title "Rustorigin Launcher $VERSION" \
+            dist/RustoriginLauncher.exe dist/RustoriginLauncher-Setup.exe dist/RustoriginLauncher-Setup.msi dist/SHA256SUMS.txt
+          echo "Draft created. Next, on the maintainer's machine:  .\\scripts\\sign_release.ps1 -Tag $TAG -KeyFile <offline key> -Publish" >> "$GITHUB_STEP_SUMMARY"

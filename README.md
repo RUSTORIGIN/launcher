@@ -59,7 +59,11 @@ run (*More info → Run anyway*). **Requires Windows 10/11**; no .NET download n
 
 The launcher reads a simple `Key=Value` file, `config/launcher.cfg`, embedded at build time. A
 `launcher.cfg` placed **next to the exe** overrides the defaults at runtime (handy for a test
-server). Key settings:
+server). A release build only reads it when started with `--dev-config`, so a file dropped next to the
+exe (e.g. in Downloads) can't redirect the client download, the self-update or PLAY. `DownloadUrl` and
+`PatchUrl` must be `https://`. The launcher also locks the install folder so only the player's account,
+SYSTEM and Administrators can write to it, and refuses to install or play from a folder other accounts
+could change (an older per-machine install gets a one-time fix that asks for admin permission). Key settings:
 
 | Key | Meaning |
 |-----|---------|
@@ -68,11 +72,15 @@ server). Key settings:
 | `ClientVersion` | Id of the client build `DownloadUrl` serves (e.g. `2021-04`). Installs recording another version (or none) show **UPDATE** instead of PLAY. Blank disables update detection. |
 | `PatchUrl` / `PatchSha256` | Direct link + SHA-256 of the delta pack that upgrades the previous build in place. Optional; without it outdated installs download the full client. |
 | `PatchProbe` | `relative\path\|size` of a file in the build the pack upgrades from; the pack is only tried when it matches. |
+| `ClientSize` / `PatchSize` | Exact byte size of the zip / pack (the packaging scripts print it). Optional: a server announcing another size is refused, and the launcher never downloads more. |
 | `InstallDir` | Suggested install folder (default `C:\Rustorigin`; blank = `.\Rust`). On first INSTALL the player picks the folder (pre-selecting the launcher's drive); the game goes into a `Rustorigin` subfolder of the pick. |
 | `LaunchExe` | Client executable the Play button runs (default `RustClient.exe`). |
 | `Title` / `Tagline` / `Player` | Hero title, description line, and the displayed player name. |
 | `UpdateRepo` | `owner/repo` checked for self-updates (public repo; blank disables). |
+| `UpdatePublicKey` | Public release key (`scripts\new_signing_key.ps1`); only releases signed with it are installed. Blank = no self-update. |
 | `DiscordAppId` | Discord Application ID for Rich Presence (blank disables). |
+| `AcSessionUrl` | Launcher anti-cheat session service ([docs/CLIENT_ANTICHEAT.md](docs/CLIENT_ANTICHEAT.md)); the launcher opens a session when the game starts and heartbeats while it runs. The session carries a one-way hash of the PC's Windows install id, so staff can see several accounts playing from one PC; the server keys it with its own secret, and an account playing from the PC of an actively banned account is banned automatically ("Ban evasion"; server-side policy, see the doc). Must be `https` (plain `http` only for a local/private IP, for dev servers). Blank disables. Never blocks PLAY. The server can require the session (players without one are kicked), so while the game runs, closing the launcher sends it to the tray and it quits with the game. The list of tools it looks for (reported only as `tool:<number>`) comes from the server with each session, so it is not in this repo or the config. |
+| `AcClientFile` | Repeatable `path\|size\|sha256` of a game file; the session reports `client:modified:<file>` / `client:missing:<file>` when the installed file differs. Generate with `scripts\make_client_filehashes.ps1`. |
 | `Server` | Repeatable card: `Tag\|Name\|launch args\|players\|cover`. A `+connect HOST:PORT` in the args enables the live A2S count. |
 | `Social` | Repeatable link: `platform\|url` (built-in icons: `discord`, `youtube`, `tiktok`). |
 
@@ -109,9 +117,17 @@ git tag v1.1.2 && git push origin v1.1.2
 ```
 
 The **Release** workflow builds the launcher, NSIS setup, and MSI; generates `SHA256SUMS.txt`;
-attests build provenance; and publishes a GitHub Release. Any launcher with `UpdateRepo` pointed
-here then detects the new version, prompts to update, verifies the download against
-`SHA256SUMS.txt`, and self-replaces.
+attests build provenance; and creates a **draft** GitHub Release. Sign and publish it from your own
+machine with the offline release key:
+
+```powershell
+.\scripts\sign_release.ps1 -Tag v1.1.2 -KeyFile <offline key> -Publish
+```
+
+Launchers only install a release whose `SHA256SUMS.txt` is signed with that key (`UpdatePublicKey=` in
+`config/launcher.cfg`, made once with `scripts\new_signing_key.ps1`); they then verify the download
+against the signed sums and self-replace. See `.github/BRANCH_PROTECTION.md` for tag and environment
+protection.
 
 ## Build from source
 
