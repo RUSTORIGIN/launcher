@@ -2,8 +2,13 @@
 ; in the same style as electron-builder's NSIS output (e.g. AppName-x.y.z-x64.exe).
 ;
 ; Wizard: Welcome -> License -> Choose install folder -> Install (progress) -> Finish (run).
-; Per-machine install to C:\Rustorigin (requires admin/UAC), Start Menu + Desktop shortcuts,
-; an uninstaller, and an Add/Remove Programs entry.
+; Per-user install (no admin, no UAC) to %LOCALAPPDATA%\Programs\Rustorigin Launcher, Start Menu +
+; Desktop shortcuts, an uninstaller, and an Add/Remove Programs entry (HKCU).
+;
+; Why per-user: the launcher replaces itself on every self-update and writes the game, so its folder must
+; be writable by the player - and a folder an elevated installer made writable for the player was writable
+; for EVERY account on the PC, so any of them could swap the exe or Uninstall.exe that an admin later runs.
+; A per-user install never runs elevated, and its folder is locked to the player (icacls below).
 ;
 ; Built by scripts\build_installer_exe.ps1, which passes:
 ;   /DVERSION=x.y.z  /DVERSION4=x.y.z.0  /DREPO=<repo root>  /DOUTFILE=<output .exe path>
@@ -37,9 +42,9 @@ Name "${APPNAME}"
 !else
   OutFile "RustoriginLauncher-${VERSION}-x64.exe"
 !endif
-InstallDir "C:\Rustorigin"
-InstallDirRegKey HKLM "Software\Rustorigin\Launcher" "InstallDir"
-RequestExecutionLevel admin          ; install under C:\ -> elevation (UAC)
+InstallDir "$LOCALAPPDATA\Programs\Rustorigin Launcher"
+InstallDirRegKey HKCU "Software\Rustorigin\Launcher" "InstallDir"
+RequestExecutionLevel user           ; per-user: never elevated (see the top of this file)
 SetCompressor /SOLID lzma
 
 ; ---- installer exe file properties (Properties -> Details) ----
@@ -74,17 +79,38 @@ VIAddVersionKey "Comments"        "Installs the Rustorigin game launcher."
 
 !insertmacro MUI_LANGUAGE "English"
 
-; The installer runs elevated, so launching the app directly would run it (and the game it starts) as
-; administrator: Discord Rich Presence can't reach a non-elevated Discord, and other apps can't
-; interact with it. Explorer runs as the signed-in user, so launching through it drops elevation.
+; Started through Explorer, like a double-click, so it never inherits anything from the setup process.
 Function LaunchAsUser
   Exec '"$WINDIR\explorer.exe" "$INSTDIR\${EXENAME}"'
 FunctionEnd
 
 Section "Install"
-  SetShellVarContext all              ; per-machine: all-users Start Menu/Desktop, HKLM
+  SetShellVarContext current          ; per-user: this user's Start Menu/Desktop, HKCU
   SetRegView 64
+  ; Is this folder ours to lock? A new folder, or one that already holds the launcher - never a folder of
+  ; other things someone typed on the directory page (e.g. D:\Games).
+  StrCpy $9 "0"
+  ${IfNot} ${FileExists} "$INSTDIR\*.*"
+    StrCpy $9 "1"
+  ${ElseIf} ${FileExists} "$INSTDIR\${EXENAME}"
+    StrCpy $9 "1"
+  ${EndIf}
   SetOutPath "$INSTDIR"
+  ${If} $9 == "1"
+    ; Only this user, SYSTEM and Administrators may change it (a folder at a drive root would otherwise
+    ; inherit "Authenticated Users: Modify"). Grant first; drop the inherited entries only if that worked.
+    ReadEnvStr $7 USERNAME
+    ReadEnvStr $8 USERDOMAIN
+    nsExec::ExecToLog '"$SYSDIR\icacls.exe" "$INSTDIR" /grant:r "$8\$7:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX"'
+    Pop $0
+    ${If} $0 == "0"
+      nsExec::ExecToLog '"$SYSDIR\icacls.exe" "$INSTDIR" /inheritance:r'
+      Pop $0
+      ; and any explicit entry for everyone (left by an older install or by hand)
+      nsExec::ExecToLog '"$SYSDIR\icacls.exe" "$INSTDIR" /remove:g "*S-1-5-11" "*S-1-1-0"'
+      Pop $0
+    ${EndIf}
+  ${EndIf}
   File "${REPO}\release\${EXENAME}"
 
   ; explicit icon (not the implicit ",0"), so a reinstall to the same path never keeps a stale blank icon
@@ -93,17 +119,17 @@ Section "Install"
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
-  WriteRegStr   HKLM "Software\Rustorigin\Launcher" "InstallDir" "$INSTDIR"
-  WriteRegStr   HKLM "${ARPKEY}" "DisplayName"      "${APPNAME}"
-  WriteRegStr   HKLM "${ARPKEY}" "DisplayVersion"   "${VERSION}"
-  WriteRegStr   HKLM "${ARPKEY}" "Publisher"        "${PUBLISHER}"
-  WriteRegStr   HKLM "${ARPKEY}" "DisplayIcon"      "$INSTDIR\${EXENAME}"
-  WriteRegStr   HKLM "${ARPKEY}" "InstallLocation"  "$INSTDIR"
-  WriteRegStr   HKLM "${ARPKEY}" "UninstallString"  '"$INSTDIR\Uninstall.exe"'
-  WriteRegStr   HKLM "${ARPKEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
-  WriteRegDWORD HKLM "${ARPKEY}" "NoModify" 1
-  WriteRegDWORD HKLM "${ARPKEY}" "NoRepair" 1
-  WriteRegDWORD HKLM "${ARPKEY}" "EstimatedSize" 7600
+  WriteRegStr   HKCU "Software\Rustorigin\Launcher" "InstallDir" "$INSTDIR"
+  WriteRegStr   HKCU "${ARPKEY}" "DisplayName"      "${APPNAME}"
+  WriteRegStr   HKCU "${ARPKEY}" "DisplayVersion"   "${VERSION}"
+  WriteRegStr   HKCU "${ARPKEY}" "Publisher"        "${PUBLISHER}"
+  WriteRegStr   HKCU "${ARPKEY}" "DisplayIcon"      "$INSTDIR\${EXENAME}"
+  WriteRegStr   HKCU "${ARPKEY}" "InstallLocation"  "$INSTDIR"
+  WriteRegStr   HKCU "${ARPKEY}" "UninstallString"  '"$INSTDIR\Uninstall.exe"'
+  WriteRegStr   HKCU "${ARPKEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
+  WriteRegDWORD HKCU "${ARPKEY}" "NoModify" 1
+  WriteRegDWORD HKCU "${ARPKEY}" "NoRepair" 1
+  WriteRegDWORD HKCU "${ARPKEY}" "EstimatedSize" 7600
 
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'   ; SHCNE_ASSOCCHANGED: Explorer refreshes icons
 SectionEnd
@@ -141,6 +167,21 @@ Function un.IsSafeToWipe
   StrLen $R2 $R6
   ${If} $R2 < 4
     Return                                   ; drive root such as "C:\"
+  ${EndIf}
+  ; only a folder named like ours is deleted with everything in it: an install someone typed into an
+  ; existing folder (e.g. D:\Games) only loses the launcher's own files
+  StrCpy $R4 $R2
+  lastsep:
+    IntOp $R4 $R4 - 1
+    StrCpy $R3 $R6 1 $R4
+    StrCmp $R3 "\" +3
+    IntCmp $R4 0 +2 +2
+    Goto lastsep
+  IntOp $R4 $R4 + 1
+  StrCpy $R3 $R6 "" $R4
+  ${If} $R3 != "Rustorigin"
+  ${AndIf} $R3 != "Rustorigin Launcher"
+    Return
   ${EndIf}
   StrCpy $R3 $WINDIR 2                       ; system drive, e.g. "C:"
   ${If} $R6 == $WINDIR
@@ -206,10 +247,7 @@ Section "Uninstall"
   Pop $0
   Sleep 800
 
-  ; 2) shortcuts: the installer's (all users) and the Desktop one the launcher creates (current user)
-  SetShellVarContext all
-  Delete "$SMPROGRAMS\${APPNAME}.lnk"
-  Delete "$DESKTOP\${APPNAME}.lnk"
+  ; 2) shortcuts: the installer's and the Desktop one the launcher creates (both this user's)
   SetShellVarContext current
   Delete "$SMPROGRAMS\${APPNAME}.lnk"
   Delete "$DESKTOP\${APPNAME}.lnk"
@@ -234,9 +272,9 @@ Section "Uninstall"
   Call un.WipeDir
 
   ; 6) registry
-  DeleteRegKey HKLM "${ARPKEY}"
-  DeleteRegKey HKLM "Software\Rustorigin\Launcher"
-  DeleteRegKey /ifempty HKLM "Software\Rustorigin"   ; drop the parent too if nothing else lives there
+  DeleteRegKey HKCU "${ARPKEY}"
+  DeleteRegKey HKCU "Software\Rustorigin\Launcher"
+  DeleteRegKey /ifempty HKCU "Software\Rustorigin"   ; drop the parent too if nothing else lives there
 
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'   ; refresh Explorer (removed shortcuts/icons)
 SectionEnd

@@ -92,5 +92,5 @@ Write-Host ("        (also written to {0}.sha256)" -f (Split-Path $OutFile -Leaf
 Write-Host ""
 Write-Host "Next:"
 Write-Host "  1) upload $OutFile to your server (direct download link)"
-Write-Host "  2) in launcher.cfg set   DownloadUrl=<that link>   and   Sha256=$hash"
+Write-Host "  2) in launcher.cfg set   DownloadUrl=<that link>   Sha256=$hash   ClientSize=$((Get-Item -LiteralPath $OutFile).Length)"
 Write-Host "  3) rebuild the launcher (make_release.ps1) so the new hash is embedded"

@@ -190,7 +190,7 @@ public static class AcSession
     public static string NewNonceHex()
     {
         var b = new byte[16];
-        using (var rng = new RNGCryptoServiceProvider()) rng.GetBytes(b);
+        using (var rng = RandomNumberGenerator.Create()) rng.GetBytes(b);   // not RNGCryptoServiceProvider: obsolete (an error) where CI runs the tests
         return ToHex(b);
     }
 
@@ -604,7 +604,7 @@ public sealed class AcSessionClient
             else
             {
                 Interlocked.Increment(ref HeartbeatsRejected);
-                log("heartbeat refused (" + (reason ?? Short(r)) + ") - opening a new session");
+                log("heartbeat refused (" + Short(reason ?? r) + ") - opening a new session");   // the server's text, made one short line
                 grant = null;
                 if (!Sleep(RetryDelayMs)) return;
             }
@@ -627,6 +627,7 @@ public sealed class AcSessionClient
             req.UserAgent = "RustoriginLauncher";
             req.Timeout = 10000;
             req.ReadWriteTimeout = 10000;
+            req.AllowAutoRedirect = false;   // a redirect could lead off the checked endpoint (IsAllowedEndpoint), e.g. to plain http
             if (signature != null) req.Headers["X-AC-Sig"] = signature;
             byte[] data = Encoding.UTF8.GetBytes(body);
             req.ContentLength = data.Length;

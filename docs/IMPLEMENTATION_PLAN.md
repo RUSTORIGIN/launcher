@@ -81,7 +81,7 @@ superseded: the reductions are the intended shipping state.
   `DownloadRange`.
 - **Integrity (mandatory)**: `StartInstall` refuses to download without a configured `Sha256`;
   the finished `.part` is SHA-256-checked (`VerifyDownload` / `ComputeSha256`) **before** it is
-  promoted or extracted, and rejected on mismatch. See CLAUDE.md's security section.
+  promoted or extracted, and rejected on mismatch. See [LAUNCHER.md](LAUNCHER.md)'s security section.
 - **Extract**: `ExtractZip` to `InstallDir` (`C:\RustOrigin` by default) with zip-slip guards and
   per-file progress.
 - **Launch**: `Play` starts `LaunchExe` (default `RustClient.exe`) with per-server or default
@@ -128,7 +128,7 @@ With a correct `Sha256`, INSTALL downloads -> verifies -> extracts. With a delib
 `Sha256`, the download must be **rejected** ("Integrity check failed...") and nothing installed.
 
 Keep the client zip, the embedded `Sha256`, and the uploaded file in lockstep - see the
-**Release / publish checklist** in CLAUDE.md (re-packaging changes the hash).
+**Release / publish checklist** in [LAUNCHER.md](LAUNCHER.md) (re-packaging changes the hash).
 
 ---
 
