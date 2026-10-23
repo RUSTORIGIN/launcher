@@ -1,7 +1,8 @@
 # Client-side anti-cheat: launcher session (design, v1)
 
-Status: slices 1-8 are built (see [Build slices](#build-slices)); enforcement (slice 7) ships switched off. They run on the dev server only, and
-the shipped `launcher.cfg` leaves `AcSessionUrl` blank. This file is the contract the launcher, the session
+Status: slices 1-9 are built (see [Build slices](#build-slices)); enforcement (slice 7) ships switched off. Slice 10
+(the loaded-module signal) is built on the launcher and panel side; its service and plugin side is listed there as
+remaining work. They run on the dev server only, and the shipped `launcher.cfg` leaves `AcSessionUrl` blank. This file is the contract the launcher, the session
 service and the gate plugin are built against.
 
 ## Goal and limits
@@ -250,9 +251,13 @@ faked by a careful script.
 ## Privacy
 
 What leaves the player's PC: the SteamID, the launcher version, heartbeat timing, whether the game is
-running, the labels of matched signals (`tool:<id>`, `client:modified:<file>`) and the hardware id (a
+running, the labels of matched signals (`tool:<id>`, `client:modified:<file>`, `client:missing:<file>`, and since
+slice 10 `client:extra-module:<file>`, `module:unsigned:<32 hex>`, `module:missing-file`, `module:scan-failed`) and the hardware id (a
 one-way hash of the Windows MachineGuid). Game files are hashed on the PC, and only the "modified" label is
-sent, never a hash or file contents. There are no process lists or personal files.
+sent, never a hash or file contents. For the module signal the launcher lists the modules loaded **in the game
+process it started** (never in other programs): a game-folder file that is not part of the build is reported by its
+file name; an unsigned module from anywhere else by the first 32 hex characters of its SHA-256; never a path, the
+module list, a signed module, or a module in `%SystemRoot%`. There are no process lists or personal files.
 
 The session service keeps sessions in memory only and forgets them 6 hours after their last heartbeat. Its
 log carries counts only. The gate plugin's daily log records each join's status and labels with the
@@ -289,8 +294,9 @@ what is sent.
      (size + SHA-256 of the hosted build, from `scripts/make_client_filehashes.ps1`) differs. These files
      are hashed once per launch.
 
-   No process list, handle scan or memory read; only labels leave the PC. A one-time notice after the
-   first session-enabled PLAY says what is sent. The gate plugin logs the labels as evidence; they never
+   No process list, no file contents; only labels leave the PC. (Slice 10 added one read of the game process
+   itself: the list of its loaded modules. Nothing else is read, and still only labels are sent.) A one-time notice
+   after the first session-enabled PLAY says what is sent. The gate plugin logs the labels as evidence; they never
    kick anyone. The tool list is the one part that is not public: it lives in `ac_tools.txt` on the
    server, and players see only rule numbers. Anyone with a session can still read the rules from the
    reply, so it is out of plain sight, not secret.
@@ -336,6 +342,54 @@ what is sent.
    that speaks the protocol but doesn't read the log stays unlinked, is flagged no-pc, user-agent, version,
    unlinked, and with the link required is kicked at 122 s.
 
-Proposed next: a user-mode **loaded-module signal** (code injected into the game, or proxy DLLs in the game
-folder), with no driver and no admin rights. Design, false positives and privacy:
-[AC_MODULE_SIGNAL.md](AC_MODULE_SIGNAL.md). Not built.
+10. **Loaded-module signal** (phase A of [AC_MODULE_SIGNAL.md](AC_MODULE_SIGNAL.md): design, what it cannot see,
+    false positives, privacy). **Launcher (built):** `AcModules` in `src/AcSession.cs` lists the modules of the
+    game process (`EnumProcessModulesEx`, read-only, as the same user) from 60 s after the start and then at
+    every heartbeat, classifies each module once per launch, and adds to the heartbeat's `signals`:
+    - `client:extra-module:<file>`: a module from the game folder that is not in the `AcClientFile=` list,
+      which now covers every `.dll`/`.exe` of the build (`scripts\make_client_filehashes.ps1` default); only
+      produced when that list includes `RustClient.exe`, so an old three-file list never flags the game's own plugins;
+    - `module:unsigned:<32 hex>`: a module from outside the game folder and Windows' code folders (System32,
+      SysWOW64, WinSxS, assembly, Microsoft.NET; the user-writable rest of `%SystemRoot%` is judged) with no valid
+      Authenticode signature in the file or in a system catalog (`WinVerifyTrust`, offline, expired-but-intact
+      counts as signed): the first 32 hex characters of its SHA-256;
+    - `module:missing-file`: a loaded module whose file is gone from where it was loaded (renamed away after
+      injection); neither a name nor a hash;
+    - `module:scan-failed`: the game process could not be opened at all (the game runs elevated).
+
+    Labels stay for the launch once seen. Nothing can block or delay PLAY; a failure to list or read adds no
+    label. The one-time notice names the scan (pref renamed to `AcNoticeShown2`, so everyone sees the new text
+    once). Tested: the classifier against a temp folder with a fake module list and a fake signature check
+    (listed / unlisted / Windows / signed / unsigned / unreadable / missing, the cache, the first-scan delay,
+    the incomplete-list gate, `scan-failed`), and live on the test's own process (module list read, a signed
+    module recognised, no labels).
+
+    **Session service (`ac_session.py`, built on the dev copy):** next to `ac_tools.txt`, a private
+    `ac_modules.txt` (`<32 hex>|<name>|benign|cheat`, `AC_MODULES_FILE`, re-read when it changes; see
+    `ac_modules.txt.example`). The check reply's `labels` turn a known hash into `module:cheat:<name>` or
+    `module:benign:<name>` and leave an unknown hash as `module:unsigned:<hash>`; `signals` stay as sent. Every
+    `STATS_EVERY` the journal prints `module_hashes=<distinct unknown hashes>` and a line
+    `unknown modules (hash=sessions): <hash>=<distinct sessions> ...` (top 20, cumulative since start, session ids
+    counted, never SteamIDs): the measurement phase of the design doc, from which staff build the list. The
+    launcher never receives the list. Tested in `tests/test_ac_session.py` (parsing, translation, counting, reload).
+
+    **Gate plugin (OriginSession 0.5.1, nothing to do):** it already prints a player's readable labels whenever
+    they change, as one console line `[OriginSession] signals <name> [<steamid>] <label>,<label>` (the service's
+    `labels`, filtered to the launcher's alphabet, at most 32), in the same read-from-the-end shape as the `join`
+    and `suspect` lines, so a player's name cannot forge it. New labels flow through it unchanged.
+
+    **RustRCON panel (built, uncommitted in the panel's working tree):** `parseSignals` in `server/links.js` reads
+    that line; the collector keeps every label on the player record in `data/players.json` as
+    `signals: { "<label>": { first, last, count } }` (the 32 most recent) and emits a `signals` event for the feed;
+    `signalsCase` in `server/index.js` opens or extends the player's open case (title `Injected code: <name>`,
+    evidence `by: "session check", kind: "launcher"`, audit `launcher-signals`) for the module labels only
+    (`client:extra-module:*`, `module:unsigned:*`, `module:cheat:*`, `module:missing-file`, `module:scan-failed`; a
+    `module:benign:*` label is kept on the record but opens nothing), once per label set per 10 minutes, and
+    announces a new case like the other automatic ones. Review only: the panel never kicks or bans on a label.
+    The panel also reads the plugin's `join` / `link` / `change` / `kick` / `would-kick` lines into a live launcher
+    status per player (online table, player dialog), and its ban tools can ban the other accounts the launcher has
+    seen on the same PC together with the banned one (see the panel's README, "Launcher"). Tested with `npm test`.
+
+    **Rollout** as in the design doc: measure first (shadow, aggregated counts), build the translation list
+    from the common hashes, then weigh the labels in review. Phase B (executable memory without a module)
+    stays a proposal.
