@@ -294,11 +294,16 @@ owned by this user, SYSTEM or Administrators, and writable by no one else.
   (`FolderPin.RenameOver`). Whatever another account prepared at the name - a file with its own permissions, a
   handle it holds open - goes with the file it replaces; an existing record is never kept. If the name is held
   open without delete sharing, the replacement fails and what is there stays: before the lock that aborts the
-  lock (the folder stays exposed, so refused). When a failed lock leaves nothing at the name, a record is created
+  lock (the folder stays exposed, so refused) and counts as *busy*, like a game file open in another program
+  (`FolderPin.InUse`: a sharing violation, or access denied on the replace or move when an open of our own shows
+  the name is held - or, for a move, that we may add a folder there, so only an open handle is left to explain
+  it) - so the player is told to close the program, and not offered the administrator fix, which the same open
+  handle would refuse. A refusal that could be a permission stays one, and the fix is offered. When a failed lock leaves nothing at the name, a record is created
   there directly as a last resort. A *folder* (or folder link) planted at the name before the lock can't be
   replaced that way, so it is first moved aside in one step through a handle on it (`FolderPin.MoveAside`, never
   over anything) to `.rustorigin-lock-incomplete.<random>.old`; if that is refused (its planter denied the player
-  delete on it, or holds it or something in it open) the lock aborts and the folder stays exposed. Moved, it is an ordinary entry of the walk: if it can't be
+  delete on it, or holds it or something in it open) the lock aborts and the folder stays exposed (held open:
+  busy; denied: the fix is offered). Moved, it is an ordinary entry of the walk: if it can't be
   secured (as the player: deleted), the record of ours at the name keeps the folder refused - not the planter's
   folder, which its planter could remove after the lock. The record stays open, shared with no one,
   until the folder is private and the record is set to inherit from it. Leftover temporary records (a lock cut
@@ -311,7 +316,8 @@ owned by this user, SYSTEM or Administrators, and writable by no one else.
   once everything is); a file planted there is replaced. Uninstall keeps the record and any moved-aside folder. When the player's
   own lock was blocked only by files open in another program, no administrator fix is offered (close the game,
   then try again); for any other unsecured entry the fix is offered. After the elevated
-  fix, `RequirePrivateInstallDir` also requires the helper's exit code 0 (1 = entries it could not secure).
+  fix, `RequirePrivateInstallDir` also requires the helper's exit code 0 (1 = entries it could not secure,
+  3 = all of those were only open in another program: reported as busy, 2 = refused).
   Tested end to end through the built exe by `scripts\test_folder_lock.ps1`.
 - **Permissions are set one object at a time, through the pinned handles** (`FolderPin.GetSecurity`/`SetSecurity`
   = `Get`/`SetKernelObjectSecurity`), never by name: `SetNamedSecurityInfo` (.NET `SetAccessControl`) and even

@@ -53,7 +53,7 @@ try {
     icacls "$dir\busy.dll" /inheritance:d | Out-Null
     $fs = [IO.File]::Open("$dir\busy.dll", 'Open', 'Read', 'None')   # held open without sharing: can't be pinned
     try {
-        Check "entry in use: not secured (1)"               ((Secure $dir) -eq 1)
+        Check "entry in use: not secured, busy (3)"         ((Secure $dir) -eq 3)
         Check "unfinished-lock record left in the folder"   (Test-Path "$dir\.rustorigin-lock-incomplete")
         Check "other accounts can't remove the record"      (-not ((icacls "$dir\.rustorigin-lock-incomplete") -match 'S-1-5-11|Authenticated Users'))
         # the record as another account could have prepared it: marked, its own permissions letting
@@ -62,7 +62,7 @@ try {
         icacls "$dir\.rustorigin-lock-incomplete" /grant '*S-1-5-11:F' | Out-Null
         $old = [IO.File]::Open("$dir\.rustorigin-lock-incomplete", 'Open', 'Read', 'ReadWrite, Delete')
         try {
-            Check "still refused next time, though the folder itself is private now (1)" ((Secure $dir) -eq 1)
+            Check "still refused next time, though the folder itself is private now (3)" ((Secure $dir) -eq 3)
             Check "the record was replaced by a fresh one, never kept" ((Get-Content "$dir\.rustorigin-lock-incomplete") -ne 'prepared')
             Check "the fresh record: no rights for other accounts"   (-not ((icacls "$dir\.rustorigin-lock-incomplete") -match 'S-1-5-11|Authenticated Users'))
             $buf = New-Object byte[] 8; $n = $old.Read($buf, 0, 8)
@@ -73,6 +73,16 @@ try {
     } finally { $fs.Dispose() }
     Check "entry released: secured (0)"                     ((Secure $dir) -eq 0)
     Check "record removed once everything is secured"       (-not (Test-Path "$dir\.rustorigin-lock-incomplete"))
+
+    # ---- busy only when every failure is a file in use: one that isn't (a trailing-dot name) makes it fixable (1) ----
+    $dir = "$root\mixed\Rustorigin"
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    Set-Content "$dir\busy.dll" 'x'
+    [IO.File]::WriteAllText("\\?\$dir\odd.", 'x')
+    Expose $dir
+    $fs = [IO.File]::Open("$dir\busy.dll", 'Open', 'Read', 'None')
+    try { Check "an entry in use plus one that can't be opened: not secured, not busy (1)" ((Secure $dir) -eq 1) } finally { $fs.Dispose() }
+    [IO.File]::Delete("\\?\$dir\odd.")
 
     # ---- a record left by a walk that was cut short keeps a private folder refused until it is walked again ----
     Set-Content "$dir\.rustorigin-lock-incomplete" 'x'
@@ -128,7 +138,7 @@ try {
     Expose $dir
     $fs = [IO.File]::Open("$dir\.rustorigin-lock-incomplete\x.txt", 'Open', 'Read', 'ReadWrite')
     try {
-        Check "planted folder that can't be moved: refused (1)" ((Secure $dir) -eq 1)
+        Check "planted folder that can't be moved: refused as busy (3), no fix offered" ((Secure $dir) -eq 3)
         Check "the folder was left exposed, not locked"     ((icacls $dir) -match 'S-1-5-11|Authenticated Users')
         Check "the planted folder still at the name, nothing moved aside" ((Test-Path "$dir\.rustorigin-lock-incomplete" -PathType Container) -and
             -not (Get-ChildItem $dir -Force | Where-Object { $_.Name -like '.rustorigin-lock-incomplete.*' }))
@@ -143,6 +153,21 @@ try {
     Expose $dir
     Check "file at the record's name: folder secured (0)"   ((Secure $dir) -eq 0)
     Check "and no record left"                              (-not (Test-Path "$dir\.rustorigin-lock-incomplete"))
+
+    # ---- a file at the record's name held open without delete sharing can't be replaced: the lock aborts as busy ----
+    $dir = "$root\heldrecord\Rustorigin"
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    Set-Content "$dir\.rustorigin-lock-incomplete" 'planted'
+    Expose $dir
+    $fs = [IO.File]::Open("$dir\.rustorigin-lock-incomplete", 'Open', 'Read', 'ReadWrite')
+    try {
+        Check "record held without delete sharing: refused as busy (3), not as fixable" ((Secure $dir) -eq 3)
+        Check "the folder was left exposed, not locked"     ((icacls $dir) -match 'S-1-5-11|Authenticated Users')
+        Check "what was at the name is untouched, no temporary record left" ((Get-Content "$dir\.rustorigin-lock-incomplete") -eq 'planted' -and
+            -not (Get-ChildItem $dir -Force | Where-Object { $_.Name -like '.rustorigin-lock-incomplete.*' }))
+    } finally { $fs.Dispose() }
+    Check "released: replaced, folder secured (0)"          ((Secure $dir) -eq 0)
+    Check "and no record left either"                       (-not (Test-Path "$dir\.rustorigin-lock-incomplete"))
 
     # ---- a hard link at the record's name: the record is never written into the file it shares ----
     $dir = "$root\hardlink\Rustorigin"
@@ -186,6 +211,7 @@ try {
     foreach ($l in "$root\via\Rustorigin", "$root\parentlink", "$root\lock\Rustorigin\link") { if (Test-Path $l) { cmd /c rmdir "$l" 2>$null } }
     foreach ($v in "$root\canary\victim.txt", "$root\canary\victim2.txt") { if (Test-Path $v) { Set-ItemProperty $v -Name IsReadOnly -Value $false } }
     try { [IO.File]::Delete("\\?\$root\oddname\Rustorigin\game.dll.") } catch { }
+    try { [IO.File]::Delete("\\?\$root\mixed\Rustorigin\odd.") } catch { }
     foreach ($o in @(Get-ChildItem "$root\oddsquat\Rustorigin" -Force -Directory -ErrorAction SilentlyContinue)) { try { [IO.File]::Delete("\\?\$($o.FullName)\x.") } catch { } }
     try { [IO.File]::Delete("\\?\$root\tempsquat\Rustorigin\.rustorigin-lock-incomplete.new\x.") } catch { }
     cmd /c rmdir /s /q "$root" 2>$null
