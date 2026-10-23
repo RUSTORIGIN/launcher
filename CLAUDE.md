@@ -29,7 +29,8 @@ Releases. C# 5 / .NET Framework 4.x WPF, code-only (no XAML), compiled by Window
 - `scripts/`: build, package client, make delta pack, sign release, tests; `scripts/installer/`: NSIS + WiX
 - Reference docs: `docs/LAUNCHER.md` (behavior, config keys, runtime files, release checklist),
   `docs/STYLING.md` (UI), `docs/CLIENT_ANTICHEAT.md` (session protocol)
-- `.claude/agents/` (launcher-explorer, build-and-test, security-reviewer) and `.claude/rules/` (loaded per path)
+- `.claude/agents/` (launcher-explorer, build-and-test, security-reviewer) and `.claude/rules/` (loaded per path);
+  `.claude/settings.json` has a Stop hook (`.claude/hooks/compile-check.ps1`) that runs `build.bat` when `src/*.cs` changed
 
 ## Conventions
 - C# 5 only: no `$""`, `?.`, `nameof`, `catch ... when`, `out var`, expression-bodied members, tuples
@@ -65,7 +66,7 @@ Releases. C# 5 / .NET Framework 4.x WPF, code-only (no XAML), compiled by Window
 - Never run the NSIS uninstaller: it deletes `%LOCALAPPDATA%\Rustorigin`
 - `release/`, `RustClient.zip`, `*.patchpack`, root `RustoriginLauncher.exe` are build output (git-ignored)
 - Uploading to the CDN, tagging, publishing a release: outward-facing - only on an explicit request
-- `main` is PR-only (ruleset); work on a branch
+- `main` is PR-only (ruleset)
 
 ## Workflow
 - Before saying a change is done: compile (`build.bat` or `make_release.ps1`) and run the suites for the files
@@ -74,5 +75,5 @@ Releases. C# 5 / .NET Framework 4.x WPF, code-only (no XAML), compiled by Window
   `PieceHashes`/`FindBadPieces`, `ClientPatch.cs`, `UpdateParsing.cs`, `UpdateCheckWorker`/`PerformUpdate`,
   `SecureInstallDir`/`LockFolder`/`FolderExposure`, `sign_release.ps1`): run the `security-reviewer` agent before
   saying it's done
-- Commit only when asked; never commit `release/`, keys, or the client zip
-- When compacting, preserve: modified files, branch/PR, test results, open decisions, and anything not yet verified
+- Never commit `release/`, keys, or the client zip
+- When compacting, also preserve the PR number and anything not yet verified

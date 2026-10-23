@@ -15,7 +15,7 @@
 # Every action is pinned to a full commit SHA (the tag it came from is in the comment): a moved tag can't
 # change what runs here. Update a pin deliberately: gh api repos/<owner>/<action>/commits/<tag> --jq .sha
 #
-# It builds ONLY the ~7 MB launcher from the committed config/launcher.cfg (the multi-GB game client
+# It builds ONLY the ~5 MB launcher from the committed config/launcher.cfg (the multi-GB game client
 # is never in CI). The launcher embeds config/launcher.cfg's Sha256, so make sure that hash matches
 # the RustClient.zip you host - see the release checklist in docs/LAUNCHER.md.
 name: Release launcher
