@@ -285,12 +285,22 @@ owned by this user, SYSTEM or Administrators, and writable by no one else.
   path, so a subst drive or network path is refused too. Cloud/dedup reparse points (OneDrive placeholders) are
   not links and are allowed. Tested by `scripts\test_folder_pin.ps1`.
 - **An entry the lock can't secure keeps the folder refused** (unreadable, or held open by another program):
-  `LockFolder` writes `.rustorigin-lock-incomplete` into the folder before making the folder itself private,
-  and holds it open (shared with no one, so nobody can remove or swap it) until it has the locked folder's
-  permissions too - made in the open folder, it would otherwise keep that folder's, and another account could
-  delete it while the walk runs. A record of ours already there (a plain file owned by the player, SYSTEM or
-  Administrators) is kept and pinned the same way, never deleted and written again, so there is no moment
-  without one. It is removed only once every entry was secured - so a walk that failed or was cut short
+  `LockFolder` puts a fresh `.rustorigin-lock-incomplete` into the folder before making the folder itself
+  private, and again after a walk that left entries unsecured (`NewRecord`). Each one has the private
+  permissions from the start (created in the open folder, it would otherwise get that folder's, and another
+  account could open it with rights to change or delete it). When nothing is at the name it is created right
+  there; otherwise it is created under a temporary name nobody can guess (`.rustorigin-lock-incomplete.<random>.new`,
+  so nothing can be planted there first) and renamed over the file or link at the name in one step
+  (`FolderPin.RenameOver`). Whatever another account prepared at the name - a file with its own permissions, a
+  handle it holds open - goes with the file it replaces; an existing record is never kept. If the name is held
+  open without delete sharing, the replacement fails and what is there stays: before the lock that aborts the
+  lock (the folder stays exposed, so refused). When a failed lock leaves nothing at the name, a record is created
+  there directly as a last resort. A limit: a *folder* another account planted at the name before the lock is not
+  replaced - as the player the walk only tries to delete it, and if that fails it keeps the permissions its planter
+  gave it, who can then remove it after the lock. The record stays open, shared with no one,
+  until the folder is private and the record is set to inherit from it. Leftover temporary records (a lock cut
+  short between the two steps) are removed by the next lock that secures everything. The record is removed only
+  once every entry was secured - so a walk that failed or was cut short
   (launcher closed, crash) leaves it behind. While anything by that name exists, `FolderExposure` reports
   the folder as not secured, so the next check doesn't pass just because the folder's own permissions look
   private; the next lock walks it again. A folder planted at that name is secured by the walk like any other

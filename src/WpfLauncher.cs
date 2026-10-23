@@ -1052,38 +1052,41 @@ public class LauncherWindow : Window
         var acl = new RawSecurityDescriptor(PrivateSecurity(user).GetSecurityDescriptorBinaryForm(), 0).DiscretionaryAcl;
         // The record keeps the folder refused until the walk below secures everything: what is inside keeps its
         // old permissions until ResetTree reaches it, so a walk cut short (launcher closed, crash) must leave the
-        // folder refused. It is written before the folder is locked - so there is never a moment where the folder
-        // looks private without it (a failure here throws, leaving the folder as it was: exposed) - and held open,
-        // shared with no one, until its own permissions are private too: made in the open folder, it inherits
-        // that folder's permissions, which another account could otherwise use to delete it before ResetTree
-        // reaches it. A folder already at that name (planted before the lock) also keeps the folder refused while
-        // it exists: it is left to ResetTree like any other entry, and removed only after the walk, once nobody
-        // else can change what is inside it. A record of ours left by an earlier lock is kept (pinned the same
-        // way) rather than replaced: replacing it would leave the folder without one for a moment, and for good
-        // if the new one then can't be created. Any other file (or link) at the name is replaced, never written through.
+        // folder refused. A fresh one (NewRecord: private from the start; created at the name, or renamed over
+        // what is there) is put there before the folder is locked - so the folder never looks private without one
+        // (a failure here throws, leaving the folder as it was: exposed) - and again after a walk that left entries
+        // unsecured, never kept: a file another account prepared at the name, or holds open, could otherwise be
+        // deleted by that account once the lock is over. A folder already at that name (planted before the lock)
+        // also keeps the folder refused while it exists: it is left to ResetTree like any other entry, and removed
+        // only after the walk, once nobody else can change what is inside it (as the player the walk only tries to
+        // delete it: if that fails, its planter keeps its rights on it - a known limit). When a failed lock leaves
+        // nothing at the name, a record is created there directly as a last resort.
         string record = Path.Combine(dir, LockIncompleteName);
+        const string recordText = "folder lock in progress or incomplete; see launcher.log\r\n";
+        var fileAcl = FolderPin.InheritedAcl(acl, false);
         bool planted = Directory.Exists(record);
-        SafeFileHandle kept = planted ? null : PinOwnRecord(record, user);
-        FileStream created = planted || kept != null ? null : FolderPin.CreateNewFile(record, "folder lock in progress or incomplete; see launcher.log\r\n");
+        // protected until the folder is private: setting the open folder's permissions would pass them on to it
+        var held = planted ? null : NewRecord(record, fileAcl, false, recordText);
         try
         {
             // this folder only: what is inside keeps its permissions until ResetTree reaches it
             FolderPin.SetSecurity(pin, elevated && !TrustedSid(owner, user) ? AdminsSid : null, acl, true);
             // Record I/O from here on never throws: the caller must still run AfterLock. If the record can't be
-            // made private here, the walk still runs (it sets the record like any other entry), and the record is
-            // kept or written again after it.
-            SafeFileHandle held = kept ?? (created != null ? created.SafeFileHandle : null);
+            // set to inherit here, it stays private and the walk sets it like any other entry.
             if (held != null)
             {
-                try { FolderPin.SetSecurity(held, null, FolderPin.InheritedAcl(acl, false), false); }
+                try { FolderPin.SetSecurity(held.SafeFileHandle, null, fileAcl, false); }
                 catch (Exception ex) { failed++; if (log != null) log("install folder: lock record not secured (" + ex.Message + ")"); }
             }
+            else if (!Directory.Exists(record))
+            {
+                // the planted folder went before the lock took hold: a record of ours takes its place
+                planted = false;
+                try { using (NewRecord(record, fileAcl, true, recordText)) { } }
+                catch (Exception ex) { failed++; if (log != null) log("install folder: lock record not written (" + ex.Message + ")"); }
+            }
         }
-        finally
-        {
-            if (kept != null) kept.Dispose();
-            if (created != null) created.Dispose();
-        }
+        finally { if (held != null) held.Dispose(); }
         int untrusted = ResetTree(dir, acl, user, elevated, log, ref failed, ref busy);
         if (planted && failed == 0)
         {
@@ -1094,28 +1097,56 @@ public class LauncherWindow : Window
         {
             if (failed == 0) { if (File.Exists(record)) File.Delete(record); }
             else if (!Directory.Exists(record))
-            {
-                // one of ours is kept as it is (see above); only another file, or none, is written over
-                using (var own = PinOwnRecord(record, user))
-                    if (own == null) FolderPin.WriteNewFile(record, failed + " entries could not be secured; see launcher.log\r\n");
-            }
+                using (NewRecord(record, fileAcl, true, failed + " entries could not be secured; see launcher.log\r\n")) { }
         }
         catch (Exception ex) { failed++; if (log != null) log("install folder: lock record not updated (" + ex.Message + ")"); }
+        if (failed > 0 && !File.Exists(record) && !Directory.Exists(record))
+        {
+            // last resort: private, not yet inheriting, but there - the next lock replaces it
+            try { using (FolderPin.CreateNewFile(record, failed + " entries could not be secured; see launcher.log\r\n", fileAcl)) { } }
+            catch (Exception ex) { if (log != null) log("install folder: no lock record could be written (" + ex.Message + ")"); }
+        }
+        if (failed == 0)
+        {
+            // temporary records left by a lock cut short inside NewRecord: ours, private, and walked by now
+            try { foreach (string f in Directory.GetFiles(dir, LockIncompleteName + ".*" + LockTempSuffix)) File.Delete(f); }
+            catch (Exception ex) { if (log != null) log("install folder: temporary lock record not removed (" + ex.Message + ")"); }
+        }
         return untrusted;
     }
 
-    // The lock record at `record` when it is ours - a plain file with that one name, owned by `user`, SYSTEM or
-    // Administrators - pinned so nobody can remove it while the handle is open; null when it isn't, or can't be told.
-    static SafeFileHandle PinOwnRecord(string record, SecurityIdentifier user)
+    const string LockTempSuffix = ".new";
+
+    // Puts a fresh lock record at `record` with the private permissions fileAcl from the start (protected -
+    // inheriting nothing - unless `inherit`). When nothing is at the name it is created right there (CREATE_NEW
+    // is one step already). Otherwise it is made under a temporary name nobody can guess - so nobody can have
+    // planted anything there - and renamed over the file or link at the name in one step: what another account
+    // prepared there, its permissions or a handle it holds, stays with the file it replaced. Returned still open,
+    // shared with no one. Throws when it can't be put there: then what was at the name is left as it was (e.g. held
+    // open without delete sharing), or a record created at the name is left private, just not inheriting yet.
+    static FileStream NewRecord(string record, RawAcl fileAcl, bool inherit, string text)
     {
-        if (!File.Exists(record)) return null;
-        bool isDir, link; int err;
-        var h = FolderPin.PinForSecurity(record, out isDir, out link, out err);
-        if (h == null) return null;
-        try { if (!isDir && !link && FolderPin.LinkCount(h) == 1 && TrustedSid(FolderPin.GetSecurity(h).Owner, user)) return h; }
-        catch { }
-        h.Dispose();
-        return null;
+        if (!File.Exists(record) && !Directory.Exists(record))
+        {
+            var direct = FolderPin.CreateNewFile(record, text, fileAcl);
+            try { if (inherit) FolderPin.SetSecurity(direct.SafeFileHandle, null, fileAcl, false); }
+            catch { direct.Dispose(); throw; }
+            return direct;
+        }
+        string temp = record + "." + Guid.NewGuid().ToString("N") + LockTempSuffix;
+        var fs = FolderPin.CreateNewFile(temp, text, fileAcl);
+        try
+        {
+            if (inherit) FolderPin.SetSecurity(fs.SafeFileHandle, null, fileAcl, false);
+            FolderPin.RenameOver(fs.SafeFileHandle, record);
+            return fs;
+        }
+        catch
+        {
+            fs.Dispose();
+            try { FolderPin.DeleteName(temp); } catch { }
+            throw;
+        }
     }
 
     // Walks dir, whose permissions (dirAcl) are already set: each entry is set to what it inherits from dir.

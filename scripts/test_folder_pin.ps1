@@ -184,11 +184,47 @@ try {
     try { $fs = [FolderPin]::CreateNewFile("$root\dangle", "x") } catch { }
     Check "CreateNewFile: never through a dangling junction at the name" ($fs -eq $null -and -not (Test-Path "$root\nowhere.txt"))
     if ($fs) { $fs.Dispose() }
+
+    # ---- CreateNewFile with permissions: private from the start, nothing from the folder ----
+    $born = "$root\plain\Rustorigin\born.txt"
+    $fs = [FolderPin]::CreateNewFile($born, "born", (Acl "D:(A;;FA;;;$me)"))
+    try {
+        $bornAcl = Get-Acl $born
+        $rules = @($bornAcl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+        $bornOk = $bornAcl.AreAccessRulesProtected -and $rules.Count -eq 1 -and $rules[0].IdentityReference.Value -eq $me -and -not $rules[0].IsInherited
+        Check "CreateNewFile with permissions: created with exactly those, protected" $bornOk
+        if (-not $bornOk) { Write-Host "        (got $($bornAcl.Sddl))" }
+
+        # ---- RenameOver: replaces the name in one step; an old handle keeps the old file ----
+        Set-Content "$root\plain\Rustorigin\old.txt" 'old'
+        Set-ItemProperty "$root\plain\Rustorigin\old.txt" -Name IsReadOnly -Value $true
+        $old = [IO.File]::Open("$root\plain\Rustorigin\old.txt", 'Open', 'Read', 'ReadWrite, Delete')
+        try {
+            [FolderPin]::RenameOver($fs.SafeFileHandle, "$root\plain\Rustorigin\old.txt")
+            $buf = New-Object byte[] 3; $n = $old.Read($buf, 0, 3)
+            Check "RenameOver: an old handle still reads only the old file" ([Text.Encoding]::ASCII.GetString($buf, 0, $n) -eq 'old')
+        } finally { $old.Dispose() }
+    } finally { $fs.Dispose() }
+    Check "RenameOver: the read-only name now is the new file, the temporary name gone" ((Get-Content "$root\plain\Rustorigin\old.txt") -eq 'born' -and
+        -not (Test-Path $born))
+    $fs = [FolderPin]::CreateNewFile("$root\plain\Rustorigin\new2.txt", "new2")
+    cmd /c mklink /H "$root\plain\Rustorigin\linked.txt" "$root\canary\shared.txt" | Out-Null
+    $shared = (Get-Acl "$root\canary\shared.txt").Sddl
+    try { [FolderPin]::RenameOver($fs.SafeFileHandle, "$root\plain\Rustorigin\linked.txt") } finally { $fs.Dispose() }
+    Check "RenameOver onto a hard link: only that name replaced" ((Get-Content "$root\plain\Rustorigin\linked.txt") -eq 'new2' -and
+        (Get-Content "$root\canary\shared.txt") -eq 'shared' -and $shared -eq (Get-Acl "$root\canary\shared.txt").Sddl -and (Get-Item "$root\canary\shared.txt").IsReadOnly)
+    Set-Content "$root\plain\Rustorigin\new3.txt" 'new3'; Set-Content "$root\plain\Rustorigin\held.txt" 'held'
+    $fs = [FolderPin]::CreateNewFile("$root\plain\Rustorigin\new3.txt", "new3")
+    $lock = [IO.File]::Open("$root\plain\Rustorigin\held.txt", 'Open', 'Read', 'ReadWrite')   # no delete sharing
+    $threw = $false
+    try { try { [FolderPin]::RenameOver($fs.SafeFileHandle, "$root\plain\Rustorigin\held.txt") } catch { $threw = $true } } finally { $lock.Dispose(); $fs.Dispose() }
+    Check "RenameOver onto a name held without delete sharing: refused, nothing changed" ($threw -and (Get-Content "$root\plain\Rustorigin\held.txt") -eq 'held' -and
+        (Test-Path "$root\plain\Rustorigin\new3.txt"))
 } finally {
     cmd /c rmdir "$root\via\Rustorigin" 2>$null; cmd /c rmdir "$root\parentlink" 2>$null; cmd /c rmdir "$root\dangle" 2>$null
     foreach ($l in "$root\uninstall\Rustorigin\game\out", "$root\rotree\ro\out", "$root\swapped", "$root\turned") { if (Test-Path $l) { cmd /c rmdir "$l" 2>$null } }
     if (Test-Path "$root\rotarget") { attrib -r "$root\rotarget" }
-    foreach ($v in "$root\canary\shared.txt", "$root\canary\target.txt", "$root\canary\rolink.txt") { if (Test-Path $v) { Set-ItemProperty $v -Name IsReadOnly -Value $false } }
+    foreach ($v in "$root\canary\shared.txt", "$root\canary\target.txt", "$root\canary\rolink.txt", "$root\plain\Rustorigin\old.txt") { if (Test-Path $v) { Set-ItemProperty $v -Name IsReadOnly -Value $false } }
     Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
 }
 if ($script:fail) { Write-Host "$script:fail folder-pin test(s) FAILED"; exit 1 }
