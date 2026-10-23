@@ -3717,15 +3717,36 @@ public class LauncherWindow : Window
             if (string.IsNullOrEmpty(clientDir)) try { clientDir = Path.GetDirectoryName(FindGameExe()); } catch { }   // a game we did not start
             var files = new List<AcSignals.FileRule>(AcClientFiles);
             List<string> fileLabels = null;
+            // Code loaded into the game (docs/AC_MODULE_SIGNAL.md): the modules of the game process, read-only, from a
+            // minute after the start and then at every heartbeat. The process is looked up each time, so the scan
+            // follows the game like the session does when a bootstrapper hands over to a second process.
+            var modules = new AcModules(clientDir, files, LaunchExe, m => Log("ac-session: " + m));
+            // Once the started process is gone, the client's pid is looked up once and kept while that process lives,
+            // rather than enumerating processes at every heartbeat.
+            int adoptedPid = 0;
+            Func<int> gamePid = () =>
+            {
+                try { if (!proc.HasExited) return proc.Id; } catch { }
+                if (adoptedPid != 0)
+                {
+                    try { using (var p = Process.GetProcessById(adoptedPid)) if (!p.HasExited) return adoptedPid; } catch { }
+                    adoptedPid = 0;
+                }
+                try { var g = FindGameProcess(); if (g != null) adoptedPid = g.Id; } catch { }
+                return adoptedPid;
+            };
             acSession.Signals = () =>
             {
                 if (fileLabels == null) fileLabels = AcSignals.CheckClientFiles(clientDir, files);
-                return fileLabels;
+                var all = new List<string>(fileLabels);
+                all.AddRange(modules.Scan(gamePid()));
+                return all;
             };
             acSession.Start();
             // Tell the player once what the session sends. Shown after the game has already started, so it never
             // holds up PLAY; while the launcher is hidden in the tray it waits until the window is shown again.
-            if (!Prefs.GetBool("AcNoticeShown", false))
+            // The pref is versioned: players who saw the notice before the module scan existed see the new text once.
+            if (!Prefs.GetBool("AcNoticeShown2", false))
                 Dispatcher.BeginInvoke((Action)(() => { acNoticePending = true; ShowAcNoticeIfDue(); }));
         }
         catch (Exception ex) { Log("ac-session: not started: " + ex.Message); }
@@ -3738,15 +3759,19 @@ public class LauncherWindow : Window
     {
         if (!acNoticePending || hiddenForGame || !IsVisible) return;
         acNoticePending = false;
-        Prefs.Set("AcNoticeShown", true);
+        Prefs.Set("AcNoticeShown2", true);
         Alert("Anti-cheat session",
             "While you play, the launcher keeps a session with the Rustorigin server, so the server can tell a game " +
             "started from the launcher from one started on its own.\n\n" +
-            "It sends: your SteamID; the launcher version; whether the game is running; whether a few key game files " +
+            "It sends: your SteamID; the launcher version; whether the game is running; whether the game's files " +
             "match the official build; whether a program from a list the Rustorigin server provides is running (only the " +
-            "number of the rule it matched is sent, never your list of programs); and an ID of this PC that stays the same " +
-            "until Windows is reinstalled (a one-way hash of your Windows install ID). Like any website, the server also sees " +
-            "your IP address. It also reads one code the server sends to your game from the game's own log, to show the session belongs to this game. No files leave your PC.\n\n" +
+            "number of the rule it matched is sent, never your list of programs); whether code that isn't part of the game, " +
+            "Windows, or a signed program is loaded into the game (as the file's name when it sits in the game folder, otherwise " +
+            "as a fingerprint of the file that the server can match against known programs such as overlays, or only that a " +
+            "loaded file has vanished - never its path, and nothing about programs outside the game); and an ID of this " +
+            "PC that stays the same until Windows is reinstalled (a one-way hash of your Windows install ID). Like any website, " +
+            "the server also sees your IP address. It also reads one code the server sends to your game from the game's own log, " +
+            "to show the session belongs to this game. No files leave your PC.\n\n" +
             "Staff use the PC ID to see when several accounts play from one PC, and to keep banned players from coming back " +
             "on a new account: an account playing from the PC of a banned account is banned automatically. " +
             "The server keeps the PC ID with your account for up to 180 days after you last played.\n\n" +

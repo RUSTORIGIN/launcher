@@ -310,6 +310,87 @@ try {
     Check "client files: no folder -> no labels" ([AcSignals]::CheckClientFiles('', $frules).Count -eq 0)
 } finally { Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue }
 
+# ---- loaded modules (docs\AC_MODULE_SIGNAL.md): the classifier with a fake module list and a fake signature check ----
+# AcModules.Scan runs on the caller's thread here, so PowerShell script blocks can stand in for the two delegates.
+$mdir = Join-Path ([IO.Path]::GetTempPath()) ("ac-modules-test-" + [Guid]::NewGuid().ToString('N'))
+$game = Join-Path $mdir 'game'; $other = Join-Path $mdir 'other'
+New-Item -ItemType Directory -Force "$game\RustClient_Data\Plugins", $other | Out-Null
+try {
+    $bytes = [Text.Encoding]::ASCII.GetBytes('module bytes')
+    foreach ($f in "$game\RustClient.exe", "$game\GameAssembly.dll", "$game\RustClient_Data\Plugins\steam_api64.dll", "$game\dxgi.dll", "$game\Weird Name (1).DLL",
+                   "$other\overlay.dll", "$other\cheat.dll", "$other\broken.dll") { [IO.File]::WriteAllBytes($f, $bytes) }
+    $h = (Get-FileHash -LiteralPath "$game\RustClient.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+    $prefix = $h.Substring(0, 32)
+    # a module in the user-writable part of the Windows folder must be judged like any other file, not skipped
+    $winTemp = Join-Path $env:SystemRoot ("Temp\ac-modules-test-" + [Guid]::NewGuid().ToString('N') + ".dll")
+    try { [IO.File]::WriteAllBytes($winTemp, [Text.Encoding]::ASCII.GetBytes('windows temp module')) } catch { $winTemp = $null }
+    $tempPrefix = if ($winTemp) { (Get-FileHash -LiteralPath $winTemp -Algorithm SHA256).Hash.ToLowerInvariant().Substring(0, 32) } else { $null }
+    $rules = [System.Collections.Generic.List[AcSignals+FileRule]]::new()
+    foreach ($l in "RustClient.exe|$($bytes.Length)|$h", "GameAssembly.dll|$($bytes.Length)|$h", "RustClient_Data/Plugins/steam_api64.dll|$($bytes.Length)|$h") { $rules.Add([AcSignals]::ParseClientFile($l)) }
+    $signedCalls = New-Object 'System.Collections.Generic.List[string]'
+    # "signed" = overlay.dll only; broken.dll makes the check throw
+    $signer = [Func[string, bool]]{ param($p) $signedCalls.Add($p); if ($p -like '*broken.dll') { throw 'no' }; $p -like '*overlay.dll' }
+    $list = [System.Collections.Generic.List[string]]@("$game\RustClient.exe", "$game\GameAssembly.dll", "$game\RustClient_Data\Plugins\steam_api64.dll",
+        "$game\dxgi.dll", "$game\Weird Name (1).DLL", "$env:SystemRoot\System32\ntdll.dll", "$env:SystemRoot\System32\DriverStore\nothing-here.dll",
+        "$other\overlay.dll", "$other\cheat.dll", "$other\broken.dll", "$other\gone.dll")
+    if ($winTemp) { $list.Add($winTemp) }
+    $lister = [Func[int, System.Collections.Generic.List[string]]]{ param($id) $list }
+    $mods = New-Object AcModules $game, $rules, 'RustClient.exe', $null
+    $mods.IsSigned = $signer; $mods.ListModules = $lister; $mods.FirstScanDelayMs = 0
+    $labels = $mods.Scan(1234)
+    $expected = "client:extra-module:dxgi.dll,client:extra-module:weird_name__1_.dll,module:unsigned:$prefix,module:missing-file" + $(if ($winTemp) { ",module:unsigned:$tempPrefix" } else { '' })
+    Check "modules: listed, Windows-code, signed and unreadable modules give no label; unlisted game-folder, unsigned and vanished ones do" (($labels -join ',') -eq $expected)
+    Check "modules: game-folder and Windows code-folder modules never reach the signature check" (@($signedCalls | Where-Object { $_ -like "$game\*" -or $_ -like "$env:SystemRoot\System32\*" }).Count -eq 0)
+    if ($winTemp) { Check "modules: a module in the writable Windows\Temp is judged like any other" ($signedCalls -contains $winTemp) } else { Write-Host "  SKIP  Windows\Temp module (could not create a file there)" }
+    $empty = New-Object AcModules $null, $null, '', $null
+    $judged = 'System32\Tasks', 'System32\com\dmp', 'System32\FxsTmp', 'System32\Microsoft\Crypto\RSA\MachineKeys', 'System32\spool\PRINTERS', 'SysWOW64\com\dmp' |
+        Where-Object { $empty.Classify("$env:SystemRoot\$_\nothing-here.dll") -ne 'module:missing-file' }
+    Check "modules: Windows code folders are skipped, their user-writable parts are judged ($($judged -join ','))" (
+        @($judged).Count -eq 0 -and $null -eq $empty.Classify("$env:SystemRoot\SysWOW64\nothing-here.dll") -and $null -eq $empty.Classify("$env:SystemRoot\System32\DriverStore\nothing-here.dll"))
+    Check "modules: every label passes CleanSignals unchanged" (([AcSession]::CleanSignals($labels) -join ',') -eq ($labels -join ','))
+    $n = $signedCalls.Count; $c1 = $mods.Classified
+    $labels2 = $mods.Scan(1234)
+    Check "modules: a second scan classifies nothing again (cache) and keeps the labels" ($signedCalls.Count -eq $n -and $mods.Classified -eq $c1 -and ($labels2 -join ',') -eq ($labels -join ','))
+    $late = New-Object AcModules $game, $rules, 'RustClient.exe', $null
+    $late.IsSigned = $signer; $late.ListModules = $lister; $late.FirstScanDelayMs = 60000
+    Check "modules: nothing is scanned before the first-scan delay" ($late.Scan(1234).Count -eq 0 -and $late.Scans -eq 0)
+    $late.FirstScanDelayMs = 0
+    Check "modules: pid 0 (no game) -> no scan" ($late.Scan(0).Count -eq 0 -and $late.Scans -eq 0)
+    $failed = New-Object AcModules $game, $rules, 'RustClient.exe', $null
+    $failed.FirstScanDelayMs = 0; $failed.ListModules = [Func[int, System.Collections.Generic.List[string]]]{ param($id) $null }
+    Check "modules: a process that can't be opened -> module:scan-failed only" (($failed.Scan(1234) -join ',') -eq 'module:scan-failed')
+    $partial = [System.Collections.Generic.List[AcSignals+FileRule]]::new(); $partial.Add($rules[1])
+    $p = New-Object AcModules $game, $partial, 'RustClient.exe', $null
+    $p.IsSigned = $signer; $p.ListModules = $lister; $p.FirstScanDelayMs = 0
+    Check "modules: without the game exe on the file list, game-folder modules are not judged" (($p.Scan(1) -join ',') -eq ("module:unsigned:$prefix,module:missing-file" + $(if ($winTemp) { ",module:unsigned:$tempPrefix" } else { '' })))
+    Check "modules: name cleaning (lower case, [a-z0-9_.-], 40 chars)" ([AcModules]::CleanName('Weird Name (1).DLL') -eq 'weird_name__1_.dll' -and [AcModules]::CleanName(('a' * 50) + '.dll').Length -eq 40)
+    Check "modules: hash prefix is the first 32 hex of the file's SHA-256" ([AcModules]::HashPrefix("$other\cheat.dll") -eq $prefix)
+    Check "modules: hash prefix of a missing file -> null" ($null -eq [AcModules]::HashPrefix("$other\gone.dll"))
+    Check "modules: a file without a signature is not signed" (-not [AcModules]::HasTrustedSignature("$other\cheat.dll"))
+} finally { Remove-Item -Recurse -Force $mdir -ErrorAction SilentlyContinue; if ($winTemp) { Remove-Item -Force $winTemp -ErrorAction SilentlyContinue } }
+
+# catalog signatures: Windows' own files carry no signature in the file; the system catalogs vouch for them
+$catalogSigned = 'kernel32.dll', 'ntdll.dll', 'user32.dll', 'gdi32.dll' | ForEach-Object { Join-Path $env:SystemRoot "System32\$_" } |
+    Where-Object { $s = Get-AuthenticodeSignature -LiteralPath $_; $s.Status -eq 'Valid' -and $s.SignatureType -eq 'Catalog' } | Select-Object -First 1
+if ($catalogSigned) {
+    # (HasEmbeddedSignature may say yes too: WinVerifyTrust's file check consults the catalogs on its own on some Windows
+    # versions; the explicit catalog lookup is for the ones where it doesn't)
+    Check "modules: a catalog-signed Windows file is found in the catalogs and counts as signed ($(Split-Path $catalogSigned -Leaf))" ([AcModules]::HasCatalogSignature($catalogSigned) -and [AcModules]::HasTrustedSignature($catalogSigned))
+} else { Write-Host "  SKIP  catalog-signature check (no catalog-signed System32 file among the candidates)" }
+
+# live, on this very process: Windows PowerShell and pwsh load only Windows and Microsoft-signed modules
+$me = [Diagnostics.Process]::GetCurrentProcess()
+$live = [AcModules]::ListProcessModules($me.Id)
+Check "modules: this process's module list is read and includes its own exe" ($null -ne $live -and $live.Count -gt 10 -and @($live | Where-Object { $_ -ieq $me.MainModule.FileName }).Count -eq 1)
+Check "modules: a process that doesn't exist can't be opened" ($null -eq [AcModules]::ListProcessModules(4000000))
+$signedOne = $live | Where-Object { $_ -notlike "$env:SystemRoot\*" } | Where-Object { (Get-AuthenticodeSignature -LiteralPath $_).Status -eq 'Valid' } | Select-Object -First 1
+if ($signedOne) { Check "modules: a validly signed module counts as signed ($(Split-Path $signedOne -Leaf))" ([AcModules]::HasTrustedSignature($signedOne)) }
+else { Write-Host "  SKIP  signed-module check (every module of this process is under %SystemRoot%)" }
+$self = New-Object AcModules $null, $null, 'RustClient.exe', $null
+$self.FirstScanDelayMs = 0
+$selfLabels = $self.Scan($me.Id)
+Check "modules: a live scan of this process reports nothing ($($selfLabels -join ','))" ($selfLabels.Count -eq 0 -and $self.Scans -eq 1 -and $self.Classified -gt 0)
+
 # ---- optional: the real client against a running session service ----
 # ---- game link (#1): the code the server sends to the game, echoed from its log ----
 $code = '0123456789abcdef'

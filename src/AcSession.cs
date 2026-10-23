@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -444,6 +445,375 @@ public static class AcSignals
     {
         s = (s ?? "").Trim().ToLowerInvariant();
         return s.EndsWith(".exe") ? s.Substring(0, s.Length - 4) : s;
+    }
+}
+
+// Code loaded into the game (docs\AC_MODULE_SIGNAL.md, phase A): lists the modules of the RustClient.exe process the
+// launcher started - read-only, as the same user, without a driver or admin rights; nothing is written, suspended or
+// injected - and reports code that is neither part of the hosted client build, nor Windows, nor signed by a trusted
+// publisher. As everywhere in the session, only labels leave the PC, never a path or the module list:
+//   client:extra-module:<name>  a module in the game folder that is not in the hosted build's file list (AcClientFile=):
+//                               the proxy-DLL case (version.dll, dxgi.dll ...). <name> is the file name, cleaned
+//   module:unsigned:<32 hex>    a module from anywhere else without a valid Authenticode signature: the first 32 hex
+//                               characters of its SHA-256, so the server can translate known ones and nothing else
+//   module:missing-file         a loaded module whose file is no longer where Windows says it was loaded from (a DLL
+//                               renamed away after injection); no name, no hash
+//   module:scan-failed          the game process could not be opened at all (expected only when the game runs elevated)
+// Listed game files are the file check's job (client:modified). Windows' own code folders (System32, SysWOW64, WinSxS,
+// assembly, Microsoft.NET) are skipped: writing there needs admin rights, and their files are signed through catalogs,
+// not in the file. The rest of %SystemRoot% is NOT skipped: Temp, Tasks and tracing are writable by any user. The first
+// scan waits a minute (Unity loads plugins lazily); after that only modules not seen before are classified, so a scan
+// costs almost nothing. Evidence for staff, never a block here.
+public sealed class AcModules
+{
+    public const int DefaultFirstScanDelayMs = 60000;
+    public const int MaxNameLength = 40;
+    public const int HashPrefixLength = 32;
+    public const int MaxLabels = 64;   // the heartbeat sends at most MaxSignals anyway; this bounds the memory
+
+    // Both replaceable, so the classifier can be tested with a fake module list and a fake signature check.
+    public Func<int, List<string>> ListModules = ListProcessModules;
+    public Func<string, bool> IsSigned = HasTrustedSignature;
+    public int FirstScanDelayMs = DefaultFirstScanDelayMs;
+    public int Scans, Classified;   // counters for tests and the log
+
+    readonly string clientDir;              // the game folder, full path with a trailing separator, or null
+    readonly HashSet<string> listed = new HashSet<string>();   // relative paths (lower case) of the hosted build's listed files
+    readonly bool clientListComplete;
+    readonly string[] systemRoots;
+    readonly Action<string> log;
+    readonly Stopwatch since = Stopwatch.StartNew();
+    readonly Dictionary<string, string> cache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);   // path|size|mtime -> label or ""
+    readonly List<string> labels = new List<string>();
+    bool scanFailedLogged;
+
+    // clientDir is the folder of the game exe; rules are the AcClientFile= lines; gameExe is the game's exe name
+    // (LaunchExe). The extra-module label is only produced when the rules list the game's own exe: a list without
+    // it (the three key files of older configs) is not a list of the build's code files, and flagging every
+    // unlisted DLL of the game itself would be noise, not evidence.
+    public AcModules(string clientDir, IList<AcSignals.FileRule> rules, string gameExe, Action<string> log)
+    {
+        this.log = log ?? (s => { });
+        try { if (!string.IsNullOrEmpty(clientDir)) this.clientDir = WithSeparator(Path.GetFullPath(clientDir)); } catch { }
+        string exe = Path.GetFileName(gameExe ?? "").ToLowerInvariant();
+        bool complete = false;
+        if (rules != null)
+            foreach (var r in rules)
+            {
+                string rel = r.Path.ToLowerInvariant();
+                listed.Add(rel);
+                if (exe.Length > 0 && Path.GetFileName(rel) == exe) complete = true;
+            }
+        clientListComplete = complete;
+        var roots = new List<string>();
+        try
+        {
+            string w = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            if (!string.IsNullOrEmpty(w))
+                foreach (var sub in new[] { "System32", "SysWOW64", "WinSxS", "assembly", "Microsoft.NET" })
+                    roots.Add(WithSeparator(Path.Combine(Path.GetFullPath(w), sub)));
+        }
+        catch { }
+        systemRoots = roots.ToArray();
+    }
+
+    // Folders under the trusted Windows subtrees that a standard user can still write to (the well-known AppLocker-bypass
+    // list), so a module there is judged like any other file instead of being skipped.
+    static readonly string[] writableUnderSystem =
+    {
+        "System32\\Tasks\\", "System32\\Tasks_Migrated\\", "System32\\spool\\drivers\\color\\", "System32\\spool\\PRINTERS\\", "System32\\spool\\SERVERS\\",
+        "System32\\com\\dmp\\", "System32\\FxsTmp\\", "System32\\Microsoft\\Crypto\\RSA\\MachineKeys\\",
+        "SysWOW64\\Tasks\\", "SysWOW64\\com\\dmp\\", "SysWOW64\\FxsTmp\\",
+    };
+
+    // True for a path inside Windows' own code folders (see the class comment), which the scan skips.
+    bool IsTrustedWindowsPath(string full)
+    {
+        foreach (var root in systemRoots)
+        {
+            if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase)) continue;
+            string windows = root.Substring(0, root.TrimEnd('\\').LastIndexOf('\\') + 1);
+            foreach (var w in writableUnderSystem)
+                if (full.StartsWith(windows + w, StringComparison.OrdinalIgnoreCase)) return false;
+            return true;
+        }
+        return false;
+    }
+
+    // The labels gathered so far for the game process pid, after classifying any module not seen before. Labels
+    // stay for the rest of the launch once seen (an injector may unload again). Never throws; a failure to list
+    // or read something adds no label, except "module:scan-failed" when the process can't be opened at all.
+    public List<string> Scan(int pid)
+    {
+        try
+        {
+            if (pid > 0 && since.ElapsedMilliseconds >= FirstScanDelayMs)
+            {
+                List<string> modules = ListModules(pid);
+                Scans++;
+                if (modules == null)
+                {
+                    if (!scanFailedLogged) { log("module scan: the game process can't be opened - reporting module:scan-failed"); scanFailedLogged = true; }
+                    Add("module:scan-failed");
+                }
+                else foreach (var m in modules) Add(Classify(m));
+            }
+        }
+        catch (Exception e) { log("module scan failed: " + e.Message); }
+        return new List<string>(labels);
+    }
+
+    // The label for one module file, or null when it is fine (or can't be judged). Cached by path, size and
+    // last-write time, so each file is hashed or signature-checked once per launch. A module whose file is gone
+    // from the path it was loaded from is reported as such: a DLL can be renamed while it is mapped, and hiding the
+    // file that way is what an injector does after loading.
+    public string Classify(string path)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(path)) return null;
+            if (path.StartsWith("\\\\?\\")) path = path.Substring(4);
+            if (IsTrustedWindowsPath(Path.GetFullPath(path))) return null;
+            var fi = new FileInfo(path);
+            if (!fi.Exists) return "module:missing-file";
+            string key = fi.FullName + "|" + fi.Length.ToString(CultureInfo.InvariantCulture) + "|" + fi.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture);
+            string label;
+            if (cache.TryGetValue(key, out label)) return label.Length == 0 ? null : label;
+            label = ClassifyFile(fi) ?? "";
+            cache[key] = label;
+            Classified++;
+            return label.Length == 0 ? null : label;
+        }
+        catch { return null; }
+    }
+
+    string ClassifyFile(FileInfo fi)
+    {
+        string full = fi.FullName;
+        if (clientDir != null && full.StartsWith(clientDir, StringComparison.OrdinalIgnoreCase))
+        {
+            string rel = full.Substring(clientDir.Length).ToLowerInvariant();
+            if (listed.Contains(rel) || !clientListComplete) return null;   // listed: CheckClientFiles reports client:modified
+            return "client:extra-module:" + CleanName(fi.Name);
+        }
+        bool signed;
+        try { signed = IsSigned(full); } catch { return null; }   // a check that fails says nothing about the file
+        if (signed) return null;
+        string hash = HashPrefix(full);
+        return hash == null ? null : "module:unsigned:" + hash;
+    }
+
+    void Add(string label)
+    {
+        if (label == null || labels.Contains(label) || labels.Count >= MaxLabels) return;
+        labels.Add(label);
+    }
+
+    // A file name as a label part: lower case, [a-z0-9_.-] only, at most MaxNameLength characters.
+    public static string CleanName(string fileName)
+    {
+        string n = Regex.Replace((fileName ?? "").ToLowerInvariant(), "[^a-z0-9_.-]", "_");
+        return n.Length > MaxNameLength ? n.Substring(0, MaxNameLength) : n;
+    }
+
+    // The first HashPrefixLength hex characters of the file's SHA-256, read with full sharing (it is a loaded module).
+    // Null when it can't be read.
+    public static string HashPrefix(string path)
+    {
+        try
+        {
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1 << 20))
+            using (var sha = SHA256.Create())
+            {
+                var sb = new StringBuilder(64);
+                foreach (byte x in sha.ComputeHash(fs)) sb.Append(x.ToString("x2", CultureInfo.InvariantCulture));
+                return sb.ToString().Substring(0, HashPrefixLength);
+            }
+        }
+        catch { return null; }
+    }
+
+    static string WithSeparator(string dir)
+    {
+        return dir.EndsWith("\\") || dir.EndsWith("/") ? dir : dir + "\\";
+    }
+
+    // ---- the module list: psapi, read-only ----
+    const uint ProcessQueryInformation = 0x0400, ProcessVmRead = 0x0010;
+    const uint ListModulesAll = 0x03;
+
+    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inheritHandle, int pid);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr handle);
+    [DllImport("psapi.dll", SetLastError = true)] static extern bool EnumProcessModulesEx(IntPtr process, [Out] IntPtr[] modules, uint size, out uint needed, uint filter);
+    [DllImport("psapi.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern uint GetModuleFileNameExW(IntPtr process, IntPtr module, StringBuilder name, uint size);
+
+    // Full paths of the modules loaded in process pid (64-bit and 32-bit alike), as Windows reports them. Null when
+    // the process can't be opened (another user's or an elevated process, or one that has exited); an empty list when
+    // it was opened but the list couldn't be read this time (a process still starting up), to be retried later.
+    public static List<string> ListProcessModules(int pid)
+    {
+        IntPtr h = IntPtr.Zero;
+        try
+        {
+            h = OpenProcess(ProcessQueryInformation | ProcessVmRead, false, pid);
+            if (h == IntPtr.Zero) return null;
+            var result = new List<string>();
+            uint needed;
+            if (!EnumProcessModulesEx(h, new IntPtr[0], 0, out needed, ListModulesAll)) return result;
+            var mods = new IntPtr[needed / IntPtr.Size + 16];
+            if (!EnumProcessModulesEx(h, mods, (uint)(mods.Length * IntPtr.Size), out needed, ListModulesAll)) return result;
+            int count = Math.Min(mods.Length, (int)(needed / IntPtr.Size));
+            var name = new StringBuilder(1024);
+            for (int i = 0; i < count; i++)
+            {
+                name.Length = 0;
+                uint n = GetModuleFileNameExW(h, mods[i], name, (uint)name.Capacity);
+                if (n > 0) result.Add(name.ToString(0, (int)Math.Min(n, name.Capacity)));
+            }
+            return result;
+        }
+        catch { return null; }
+        finally { if (h != IntPtr.Zero) try { CloseHandle(h); } catch { } }
+    }
+
+    // ---- Authenticode: wintrust, offline ----
+    [StructLayout(LayoutKind.Sequential)]
+    struct WintrustFileInfo { public uint Size; public IntPtr FilePath; public IntPtr File; public IntPtr KnownSubject; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct WintrustData
+    {
+        public uint Size; public IntPtr PolicyCallbackData; public IntPtr SipClientData; public uint UiChoice; public uint RevocationChecks;
+        public uint UnionChoice; public IntPtr File; public uint StateAction; public IntPtr StateData; public IntPtr UrlReference;
+        public uint ProvFlags; public uint UiContext; public IntPtr SignatureSettings;
+    }
+
+    [DllImport("wintrust.dll", ExactSpelling = true)] static extern int WinVerifyTrust(IntPtr hwnd, ref Guid action, ref WintrustData data);
+
+    static readonly Guid GenericVerifyV2 = new Guid("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
+    const uint WtdUiNone = 2, WtdRevokeNone = 0, WtdChoiceFile = 1, WtdStateActionIgnore = 0;
+    const uint WtdRevocationCheckNone = 0x10, WtdCacheOnlyUrlRetrieval = 0x1000;
+    const int CertExpired = unchecked((int)0x800B0101);
+
+    // True when the file carries an Authenticode signature that verifies to a trusted root, in the file itself or in one
+    // of the system's security catalogs (how Windows and many Microsoft components are signed). No revocation check and
+    // no network fetch, so it is quick and works offline. An intact signature whose certificate has expired counts
+    // as signed (the signer is known; the label is meant for code with no publisher at all). A file with no
+    // signature, a bad hash, or a root this Windows user does not trust is not signed. "Trusted" is Windows' own
+    // judgement for the player's account: a root the player added to their own certificate store counts, which is
+    // one more way a determined cheater hides from this signal (docs\AC_MODULE_SIGNAL.md, "What it cannot see").
+    // Throws only on a marshaling failure.
+    public static bool HasTrustedSignature(string path)
+    {
+        return HasEmbeddedSignature(path) || HasCatalogSignature(path);
+    }
+
+    public static bool HasEmbeddedSignature(string path)
+    {
+        IntPtr pathPtr = IntPtr.Zero, filePtr = IntPtr.Zero;
+        try
+        {
+            pathPtr = Marshal.StringToCoTaskMemUni(path);
+            var fileInfo = new WintrustFileInfo { Size = (uint)Marshal.SizeOf(typeof(WintrustFileInfo)), FilePath = pathPtr };
+            filePtr = Marshal.AllocCoTaskMem((int)fileInfo.Size);
+            Marshal.StructureToPtr(fileInfo, filePtr, false);
+            return Trusted(WtdChoiceFile, filePtr);
+        }
+        finally
+        {
+            if (filePtr != IntPtr.Zero) Marshal.FreeCoTaskMem(filePtr);
+            if (pathPtr != IntPtr.Zero) Marshal.FreeCoTaskMem(pathPtr);
+        }
+    }
+
+    static bool Trusted(uint unionChoice, IntPtr unionPtr)
+    {
+        var data = new WintrustData
+        {
+            Size = (uint)Marshal.SizeOf(typeof(WintrustData)), UiChoice = WtdUiNone, RevocationChecks = WtdRevokeNone,
+            UnionChoice = unionChoice, File = unionPtr, StateAction = WtdStateActionIgnore,
+            ProvFlags = WtdRevocationCheckNone | WtdCacheOnlyUrlRetrieval
+        };
+        Guid action = GenericVerifyV2;
+        int rc = WinVerifyTrust(new IntPtr(-1), ref action, ref data);
+        return rc == 0 || rc == CertExpired;
+    }
+
+    // ---- catalog signatures: the file's hash looked up in the system catalogs, then verified like a signature ----
+    [DllImport("wintrust.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool CryptCATAdminAcquireContext2(out IntPtr admin, ref Guid subsystem, string hashAlgorithm, IntPtr strongHashPolicy, uint flags);
+    [DllImport("wintrust.dll", SetLastError = true)] static extern bool CryptCATAdminCalcHashFromFileHandle2(IntPtr admin, IntPtr file, ref uint hashSize, byte[] hash, uint flags);
+    [DllImport("wintrust.dll", SetLastError = true)] static extern IntPtr CryptCATAdminEnumCatalogFromHash(IntPtr admin, byte[] hash, uint hashSize, uint flags, ref IntPtr previous);
+    [DllImport("wintrust.dll", CharSet = CharSet.Unicode)] static extern bool CryptCATCatalogInfoFromContext(IntPtr catalog, ref CatalogInfo info, uint flags);
+    [DllImport("wintrust.dll")] static extern bool CryptCATAdminReleaseCatalogContext(IntPtr admin, IntPtr catalog, uint flags);
+    [DllImport("wintrust.dll")] static extern bool CryptCATAdminReleaseContext(IntPtr admin, uint flags);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct CatalogInfo { public uint Size; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string CatalogFile; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct WintrustCatalogInfo
+    {
+        public uint Size; public uint CatalogVersion; public IntPtr CatalogFilePath; public IntPtr MemberTag; public IntPtr MemberFilePath;
+        public IntPtr MemberFile; public IntPtr CalculatedFileHash; public uint CalculatedFileHashSize; public IntPtr CatalogContext; public IntPtr CatAdmin;
+    }
+
+    static readonly Guid DriverActionVerify = new Guid("F750E6C3-38EE-11D1-85E5-00C04FC295EE");
+    const uint WtdChoiceCatalog = 2;
+
+    // SHA-256 catalogs first (Windows 10+), then SHA-1 for older ones. Any failure along the way means "not found".
+    public static bool HasCatalogSignature(string path)
+    {
+        foreach (var algorithm in new[] { "SHA256", "SHA1" })
+        {
+            try { if (InCatalog(path, algorithm)) return true; }
+            catch { }
+        }
+        return false;
+    }
+
+    static bool InCatalog(string path, string algorithm)
+    {
+        IntPtr admin = IntPtr.Zero, catalog = IntPtr.Zero, catalogPath = IntPtr.Zero, memberTag = IntPtr.Zero, memberPath = IntPtr.Zero, infoPtr = IntPtr.Zero;
+        try
+        {
+            Guid subsystem = DriverActionVerify;
+            if (!CryptCATAdminAcquireContext2(out admin, ref subsystem, algorithm, IntPtr.Zero, 0)) return false;
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            {
+                uint size = 0;
+                CryptCATAdminCalcHashFromFileHandle2(admin, fs.SafeFileHandle.DangerousGetHandle(), ref size, null, 0);
+                if (size == 0 || size > 128) return false;
+                var hash = new byte[size];
+                if (!CryptCATAdminCalcHashFromFileHandle2(admin, fs.SafeFileHandle.DangerousGetHandle(), ref size, hash, 0)) return false;
+                IntPtr previous = IntPtr.Zero;
+                catalog = CryptCATAdminEnumCatalogFromHash(admin, hash, size, 0, ref previous);
+                if (catalog == IntPtr.Zero) return false;
+                var info = new CatalogInfo { Size = (uint)Marshal.SizeOf(typeof(CatalogInfo)) };
+                if (!CryptCATCatalogInfoFromContext(catalog, ref info, 0) || string.IsNullOrEmpty(info.CatalogFile)) return false;
+                var tag = new StringBuilder(hash.Length * 2);
+                foreach (byte b in hash) tag.Append(b.ToString("X2", CultureInfo.InvariantCulture));
+                catalogPath = Marshal.StringToCoTaskMemUni(info.CatalogFile);
+                memberTag = Marshal.StringToCoTaskMemUni(tag.ToString());
+                memberPath = Marshal.StringToCoTaskMemUni(path);
+                var ci = new WintrustCatalogInfo
+                {
+                    Size = (uint)Marshal.SizeOf(typeof(WintrustCatalogInfo)), CatalogFilePath = catalogPath, MemberTag = memberTag,
+                    MemberFilePath = memberPath, MemberFile = fs.SafeFileHandle.DangerousGetHandle()
+                };
+                infoPtr = Marshal.AllocCoTaskMem((int)ci.Size);
+                Marshal.StructureToPtr(ci, infoPtr, false);
+                return Trusted(WtdChoiceCatalog, infoPtr);
+            }
+        }
+        finally
+        {
+            if (infoPtr != IntPtr.Zero) Marshal.FreeCoTaskMem(infoPtr);
+            if (memberPath != IntPtr.Zero) Marshal.FreeCoTaskMem(memberPath);
+            if (memberTag != IntPtr.Zero) Marshal.FreeCoTaskMem(memberTag);
+            if (catalogPath != IntPtr.Zero) Marshal.FreeCoTaskMem(catalogPath);
+            if (catalog != IntPtr.Zero) try { CryptCATAdminReleaseCatalogContext(admin, catalog, 0); } catch { }
+            if (admin != IntPtr.Zero) try { CryptCATAdminReleaseContext(admin, 0); } catch { }
+        }
     }
 }
 

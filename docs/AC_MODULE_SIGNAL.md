@@ -1,8 +1,9 @@
-# Anti-cheat session: loaded-module signal (proposal)
+# Anti-cheat session: loaded-module signal
 
-Status: **proposal, not built.** It extends the evidence labels of the launcher session
-([CLIENT_ANTICHEAT.md](CLIENT_ANTICHEAT.md), slice 5) and would ship as its own slice after the
-enforcement switch. Nothing here changes the protocol: it only adds labels to the heartbeat's `signals`.
+Status: **phase A is built** on the launcher side (`AcModules` in `src/AcSession.cs`, slice 10 of
+[CLIENT_ANTICHEAT.md](CLIENT_ANTICHEAT.md), which also lists the service and plugin work that remains and the
+RustRCON panel contract); **phase B stays a proposal.** It extends the evidence labels of the launcher session
+(slice 5). Nothing here changes the protocol: it only adds labels to the heartbeat's `signals`.
 
 ## Goal
 
@@ -24,7 +25,9 @@ Say this plainly, in the doc and to staff:
 - **Kernel cheats and DMA hardware.** A user-mode scan can't see below itself.
 - **Manually mapped code** (an injector that writes a DLL into memory without the Windows loader). It
   doesn't appear in the module list. Phase B below only hints at it.
-- **Signed cheats.** A cheat signed with a trusted (stolen or bought) certificate is not reported.
+- **Signed cheats.** A cheat signed with a trusted (stolen or bought) certificate is not reported. Nor is one
+  signed with a certificate the player made themself and added to their own Windows certificate store: the check
+  is Windows' own Authenticode verdict for that user account, and the player owns the account.
 - **A fake launcher.** The launcher is open source, so a fake one can simply report nothing. That is the
   limit of the whole session design, not of this signal.
 
@@ -34,10 +37,12 @@ Say this plainly, in the doc and to staff:
 
 On the session thread, using the `Process` that `Play` started:
 
-1. **Open the game read-only:** `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ)` and
-   `EnumProcessModulesEx(LIST_MODULES_ALL)` + `GetModuleFileNameExW`. The launcher is built `anycpu` without
-   the 32-bit preference, so it runs as 64-bit and sees the 64-bit game's modules. Nothing is written,
-   suspended or injected.
+1. **Open the game read-only:** `OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ)` (what
+   `EnumProcessModulesEx` needs) and `EnumProcessModulesEx(LIST_MODULES_ALL)` + `GetModuleFileNameExW`. The
+   launcher is built `anycpu` without the 32-bit preference, so it runs as 64-bit and sees the 64-bit game's
+   modules. Nothing is written, suspended or injected. A process that can't be opened at all gives one
+   `module:scan-failed` label; a list that can't be read this time (a process still starting) gives nothing
+   and is retried at the next heartbeat.
 2. **When:** the first scan 60 s after the game starts (Unity loads plugins lazily), then at every
    heartbeat. Listing the modules takes milliseconds; only modules not seen before are classified, so a
    scan after the first one costs almost nothing.
@@ -45,9 +50,10 @@ On the session thread, using the `Process` that `Play` started:
 
 | Module location | Check | Label when it fails |
 |---|---|---|
-| The client folder (the folder of `RustClient.exe`) | Size + SHA-256 against the hosted build's list of code files (`AcClientFile=`, extended to every `.dll`/`.exe` in the build: 14 files for the 2021-04 client) | `client:modified:<name>` when it's listed but differs; `client:extra-module:<name>` when it isn't listed (the proxy-DLL case) |
-| `%SystemRoot%` (System32, SysWOW64, WinSxS, DriverStore) | None: writing there needs admin rights. These are Windows and the GPU drivers. | none |
-| Anywhere else | Authenticode via `WinVerifyTrust`, with no revocation check and no network fetch | `module:unsigned:<first 32 hex of SHA-256>` when there is no signature, a bad hash, or an untrusted or self-signed root |
+| The client folder (the folder of `RustClient.exe`) | Is it on the hosted build's list of code files (`AcClientFile=`, now every `.dll`/`.exe` in the build: 14 files for the 2021-04 client, the default of `scripts\make_client_filehashes.ps1`)? Listed files are hashed by the existing file check. | `client:modified:<name>` (file check) when it's listed but differs; `client:extra-module:<name>` when it isn't listed (the proxy-DLL case). The extra-module label is only produced when the list includes `RustClient.exe` itself: an older three-file list is not a list of the build's code files, and flagging the game's own plugins would be noise |
+| Windows' code folders: `%SystemRoot%\System32`, `SysWOW64`, `WinSxS`, `assembly`, `Microsoft.NET` (DriverStore is under System32) | None: writing there needs admin rights, and their files are signed through catalogs. **The rest of `%SystemRoot%` is not skipped**, and neither are the well-known user-writable folders inside System32/SysWOW64 (`Tasks`, `Tasks_Migrated`, `spool\drivers\color`, `spool\PRINTERS`, `spool\SERVERS`, `com\dmp`, `FxsTmp`, `Microsoft\Crypto\RSA\MachineKeys`): a module there is judged like any other file. | none |
+| Anywhere else | Authenticode via `WinVerifyTrust`, in the file or in a system catalog (`CryptCATAdminEnumCatalogFromHash`, how Windows and many Microsoft components are signed), with no revocation check and no network fetch | `module:unsigned:<first 32 hex of SHA-256>` when there is no signature, a bad hash, or an untrusted or self-signed root |
+| A path whose file is gone | None possible: a mapped DLL can be renamed while loaded, and hiding the file that way is what an injector does | `module:missing-file` (no name, no hash) |
 
 `<name>` is the file name, lowercased and reduced to `[a-z0-9_.-]`, at most 40 characters. A file name in
 the game folder says nothing about the player. Every label stays within the existing 64-character rule.
@@ -91,17 +97,20 @@ Verify each during the measurement phase. None of these is assumed safe without 
 | ReShade and other post-processing mods | Proxy DLL in the game folder: `client:extra-module:dxgi.dll` (or similar). Legitimate, but it is exactly the cheat-loading technique, so staff need to look |
 | Players' own modified client files | `client:modified:<name>`: correct, and it is what the existing file check already reports |
 
-**Translating hashes for staff.** As with tools, the service would keep a private `ac_modules.txt`
-(`<hash prefix>|<name>|benign|cheat`) and turn `module:unsigned:<hash>` into
-`module:unsigned:rtss-hooks` in its `labels` reply. The list stays out of this repo, the exe and the
-config. The launcher only reports hashes and never receives the list.
+**Translating hashes for staff.** As with tools, the service keeps a private `ac_modules.txt`
+(`<hash prefix>|<name>|benign|cheat`) and turns `module:unsigned:<hash>` into `module:benign:rtss-hooks` or
+`module:cheat:<name>` in its `labels` reply; an unknown hash stays as it is. The kind matters downstream: the
+RustRCON panel opens a review case for unknown and cheat modules, not for benign ones. The list stays out of
+this repo, the exe and the config. The launcher only reports hashes and never receives the list.
 
 ## Privacy
 
 What leaves the PC, in addition to today's labels:
 
 - for game-folder files: the file name, only when it's not part of the official build;
-- for any other unsigned module loaded **into the game**: the first 32 hex characters of its SHA-256.
+- for any other unsigned module loaded **into the game**: the first 32 hex characters of its SHA-256;
+- `module:missing-file` when a loaded module's file is no longer where it was loaded from (nothing about the file);
+- `module:scan-failed` when the game process could not be opened at all.
 
 Never sent: module paths, names of modules outside the game folder, signed modules, the module list, memory
 contents (phase B sends a bucket, not addresses or bytes). Modules are inspected only inside the game
@@ -111,10 +120,10 @@ This **changes a promise.** Slice 5 says the launcher does no "handle scan or me
 process's modules and querying its memory map are reads of the game process, not of the player's files or
 other programs. Even so:
 
-- the slice-5 wording in `CLIENT_ANTICHEAT.md` has to change with this slice;
-- the one-time PLAY notice must name it ("whether code that isn't part of the game, Windows, or a signed
-  program is loaded into the game, as an anonymous fingerprint");
-- the notice pref has to be renamed (e.g. `AcNoticeShown2`) so players who saw the old text see the new one.
+- the slice-5 wording in `CLIENT_ANTICHEAT.md` changed with this slice;
+- the one-time PLAY notice names it ("whether code that isn't part of the game, Windows, or a signed program
+  is loaded into the game", as the file's name in the game folder, otherwise as an anonymous fingerprint);
+- the notice pref was renamed to `AcNoticeShown2`, so players who saw the old text see the new one once.
 
 A hash of an unsigned file could in theory point to someone's own homemade tool. It is still only a hash, and
 only of code running inside the game.
@@ -131,16 +140,23 @@ only of code running inside the game.
 
 Phase B follows the same three steps separately.
 
-## Build outline (for when it's approved)
+## What is built (phase A)
 
-- `src/AcSession.cs`: an `AcModules` class with the P/Invoke calls (`psapi`, `wintrust`), the
-  location/hash/signature classifier and its cache, written so tests can feed it a fake module list. It joins
-  the client's `Signals` source; failures add no labels, except one `module:scan-failed` label when the game
-  can't be opened at all (expected only if the game was started elevated).
-- `scripts/make_client_filehashes.ps1`: default to every `.dll`/`.exe` in the client folder.
-- `scripts/test_ac_session.ps1`: the classifier against a temp folder (listed / modified / extra /
-  unsigned / signed files), plus a live scan of the PowerShell process itself (Windows PowerShell loads
-  Windows and Microsoft-signed modules, so it should produce no labels).
-- Service: `ac_modules.txt` translation and the aggregated counts; plugin: nothing new (labels already flow).
-- Docs: this file becomes a section of `CLIENT_ANTICHEAT.md`; update the notice text, `README.md` and
-  `CLAUDE.md`.
+- `src/AcSession.cs`: the `AcModules` class with the P/Invoke calls (`psapi`, `wintrust`), the
+  location/list/signature classifier and its cache (path + size + last-write time), with the module list and
+  the signature check replaceable so tests can feed it a fake module list. `StartAcSession` in
+  `src/WpfLauncher.cs` adds its labels to the client's `Signals` source; the game process is looked up at each
+  scan, so the scan follows the game like the session does. Failures add no labels, except one
+  `module:scan-failed` label when the game can't be opened at all.
+- `scripts/make_client_filehashes.ps1` defaults to every `.dll`/`.exe` in the client folder (the launcher's
+  own exe and the uninstaller, which the installer puts there, left out) plus the il2cpp metadata;
+  `config/launcher.cfg` carries the 14 code files of the 2021-04 build.
+- `scripts/test_ac_session.ps1`: the classifier against a temp folder (listed / unlisted / Windows / signed /
+  unsigned / unreadable / missing modules, the cache, the first-scan delay, the incomplete-list gate,
+  `scan-failed`), and a live scan of the test's own PowerShell process (module list read, a validly signed
+  module recognised, no labels).
+- Docs: the notice text, `CLIENT_ANTICHEAT.md` (slice 10, with the panel contract), `LAUNCHER.md`, `README.md`.
+
+The service's `ac_modules.txt` translation and aggregated counts are built on the dev copy of `ac_session.py`;
+OriginSession already prints the labels (`signals` line), and the RustRCON panel consumes them
+(`CLIENT_ANTICHEAT.md` slice 10). Nothing is deployed to prod.
