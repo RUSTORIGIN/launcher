@@ -298,18 +298,38 @@ public static class FolderPin
     // nothing, when the old one is open somewhere without delete sharing, or newPath is a folder.
     public static void RenameOver(SafeFileHandle h, string newPath)
     {
-        // FILE_RENAME_INFO: Flags (ReplaceIfExists for the older class), pointer-aligned RootDirectory (none),
-        // FileNameLength in bytes, then the name
-        byte[] name = Encoding.Unicode.GetBytes(Path.GetFullPath(newPath));
-        int lengthAt = 2 * IntPtr.Size, nameAt = lengthAt + 4;
-        var info = new byte[nameAt + name.Length + 2];
-        BitConverter.GetBytes(FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS | FILE_RENAME_IGNORE_READONLY_ATTRIBUTE).CopyTo(info, 0);
-        BitConverter.GetBytes(name.Length).CopyTo(info, lengthAt);
-        name.CopyTo(info, nameAt);
+        var info = RenameInfo(newPath, FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS | FILE_RENAME_IGNORE_READONLY_ATTRIBUTE);
         if (SetFileInformationByHandle(h, FileRenameInfoEx, info, (uint)info.Length)) return;
         // Windows before 10 1809: the older rename, which also replaces in one step, but not a read-only name
         BitConverter.GetBytes(1u).CopyTo(info, 0);
         if (!SetFileInformationByHandle(h, FileRenameInfo, info, (uint)info.Length)) throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+
+    // Renames what is at path - a folder, file or link, never what a link points at - to newPath in one step,
+    // through a handle on path itself, and never over anything: throws, changing nothing, when newPath is taken,
+    // or path is open somewhere without delete sharing (a folder also when an entry inside it is open).
+    public static void MoveAside(string path, string newPath)
+    {
+        using (var h = CreateFileW(Path.GetFullPath(path), DELETE | FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero))
+        {
+            if (h.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+            var info = RenameInfo(newPath, 0);   // ReplaceIfExists false
+            if (!SetFileInformationByHandle(h, FileRenameInfo, info, (uint)info.Length)) throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+    }
+
+    // FILE_RENAME_INFO: Flags (ReplaceIfExists for the older class), pointer-aligned RootDirectory (none),
+    // FileNameLength in bytes, then the name
+    static byte[] RenameInfo(string newPath, uint flags)
+    {
+        byte[] name = Encoding.Unicode.GetBytes(Path.GetFullPath(newPath));
+        int lengthAt = 2 * IntPtr.Size, nameAt = lengthAt + 4;
+        var info = new byte[nameAt + name.Length + 2];
+        BitConverter.GetBytes(flags).CopyTo(info, 0);
+        BitConverter.GetBytes(name.Length).CopyTo(info, lengthAt);
+        name.CopyTo(info, nameAt);
+        return info;
     }
 
     // How many names the file has: above 1, another name (a hard link) may be outside the folder being locked.

@@ -220,6 +220,27 @@ try {
     try { try { [FolderPin]::RenameOver($fs.SafeFileHandle, "$root\plain\Rustorigin\held.txt") } catch { $threw = $true } } finally { $lock.Dispose(); $fs.Dispose() }
     Check "RenameOver onto a name held without delete sharing: refused, nothing changed" ($threw -and (Get-Content "$root\plain\Rustorigin\held.txt") -eq 'held' -and
         (Test-Path "$root\plain\Rustorigin\new3.txt"))
+
+    # ---- MoveAside: a folder (or link) renamed in one step, never over anything ----
+    $m = "$root\plain\Rustorigin"
+    New-Item -ItemType Directory -Force "$m\planted" | Out-Null; Set-Content "$m\planted\x.txt" 'x'
+    [FolderPin]::MoveAside("$m\planted", "$m\aside")
+    Check "MoveAside: the folder and what is in it moved"   ((-not (Test-Path "$m\planted")) -and (Get-Content "$m\aside\x.txt") -eq 'x')
+    New-Item -ItemType Directory -Force "$m\planted" | Out-Null
+    $threw = $false
+    try { [FolderPin]::MoveAside("$m\planted", "$m\aside") } catch { $threw = $true }
+    Check "MoveAside onto a taken name: refused, nothing changed" ($threw -and (Test-Path "$m\planted") -and (Get-Content "$m\aside\x.txt") -eq 'x')
+    Set-Content "$m\planted\open.txt" 'open'
+    $lock = [IO.File]::Open("$m\planted\open.txt", 'Open', 'Read', 'ReadWrite')
+    $threw = $false
+    try { try { [FolderPin]::MoveAside("$m\planted", "$m\aside2") } catch { $threw = $true } } finally { $lock.Dispose() }
+    Check "MoveAside of a folder with an entry held open: refused" ($threw -and (Test-Path "$m\planted\open.txt") -and -not (Test-Path "$m\aside2"))
+    Junction "$m\jplanted" "$root\canary"
+    $canary = (Get-Acl "$root\canary").Sddl
+    [FolderPin]::MoveAside("$m\jplanted", "$m\jaside")
+    Check "MoveAside of a junction: the link itself moved, its target unchanged" ((-not (Test-Path "$m\jplanted")) -and
+        ((Get-Item "$m\jaside" -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -and (Test-Path "$root\canary\shared.txt") -and $canary -eq (Get-Acl "$root\canary").Sddl)
+    cmd /c rmdir "$m\jaside" 2>$null
 } finally {
     cmd /c rmdir "$root\via\Rustorigin" 2>$null; cmd /c rmdir "$root\parentlink" 2>$null; cmd /c rmdir "$root\dangle" 2>$null
     foreach ($l in "$root\uninstall\Rustorigin\game\out", "$root\rotree\ro\out", "$root\swapped", "$root\turned") { if (Test-Path $l) { cmd /c rmdir "$l" 2>$null } }
