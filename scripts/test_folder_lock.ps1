@@ -55,7 +55,10 @@ try {
     try {
         Check "entry in use: not secured (1)"               ((Secure $dir) -eq 1)
         Check "unfinished-lock record left in the folder"   (Test-Path "$dir\.rustorigin-lock-incomplete")
+        Check "other accounts can't remove the record"      (-not ((icacls "$dir\.rustorigin-lock-incomplete") -match 'S-1-5-11|Authenticated Users'))
+        Set-Content "$dir\.rustorigin-lock-incomplete" 'kept'   # marks this file: a replaced record would lose it
         Check "still refused next time, though the folder itself is private now (1)" ((Secure $dir) -eq 1)
+        Check "our record kept as it was, never deleted and written again" ((Get-Content "$dir\.rustorigin-lock-incomplete") -eq 'kept')
     } finally { $fs.Dispose() }
     Check "entry released: secured (0)"                     ((Secure $dir) -eq 0)
     Check "record removed once everything is secured"       (-not (Test-Path "$dir\.rustorigin-lock-incomplete"))

@@ -116,10 +116,6 @@ try {
     Check "WriteNewFile wrote a new file at the name" ((Get-Content "$root\plain\Rustorigin\rec.txt") -eq 'ours')
     Check "WriteNewFile left the hard link's other name unchanged, read-only flag included" ((Get-Content "$root\canary\target.txt") -eq 'original' -and
         (Get-Item "$root\canary\target.txt").IsReadOnly)
-    Check "IsPlainFile: the file WriteNewFile made"   ([FolderPin]::IsPlainFile("$root\plain\Rustorigin\rec.txt"))
-    cmd /c mklink /H "$root\plain\Rustorigin\rec2.txt" "$root\canary\target.txt" | Out-Null
-    Check "IsPlainFile: not a hard link, folder, junction or missing name" (-not ([FolderPin]::IsPlainFile("$root\plain\Rustorigin\rec2.txt") -or
-        [FolderPin]::IsPlainFile("$root\plain\Rustorigin") -or [FolderPin]::IsPlainFile("$root\via\Rustorigin") -or [FolderPin]::IsPlainFile("$root\nothing")))
 
     # ---- InheritedAcl: the Windows inheritance rules (pure) ----
     function Acl($sddl) { ,(New-Object Security.AccessControl.RawSecurityDescriptor $sddl).DiscretionaryAcl }   # "," keeps the ACL from being unrolled
@@ -161,8 +157,29 @@ try {
     Check "DeleteName removed the read-only hard link" (-not (Test-Path "$root\sec\d\hl.txt"))
     Check "DeleteName left the other name's content, permissions and read-only flag alone" ((Get-Content "$root\canary\shared.txt") -eq 'shared' -and
         $shared -eq (Get-Acl "$root\canary\shared.txt").Sddl -and (Get-Item "$root\canary\shared.txt").IsReadOnly)
+
+    # ---- CreateNewFile: held open, nobody can remove it, and its permissions are set through it ----
+    $held = "$root\plain\Rustorigin\held.txt"
+    $fs = [FolderPin]::CreateNewFile($held, "held")
+    try {
+        $removed = $true
+        try { [IO.File]::Delete($held) } catch { $removed = $false }
+        Check "CreateNewFile: the held file can't be deleted" (-not $removed)
+        [FolderPin]::SetSecurity($fs.SafeFileHandle, $null, (Acl "D:(A;ID;FA;;;$me)"), $false)
+    } finally { $fs.Dispose() }
+    Check "CreateNewFile: text written" ((Get-Content $held) -eq 'held')
+    Check "CreateNewFile: permissions set through the held handle" ((Get-Acl $held).Sddl.Contains("D:(A;ID;FA;;;$me)") -and -not (Get-Acl $held).AreAccessRulesProtected)
+    $fs = $null
+    try { $fs = [FolderPin]::CreateNewFile("$root\via\Rustorigin", "x") } catch { }
+    Check "CreateNewFile: never through a junction at the name" ($fs -eq $null -and (Test-Path "$root\via\Rustorigin") -and -not (Test-Path "$root\target\Rustorigin\*"))
+    if ($fs) { $fs.Dispose() }
+    cmd /c mklink /J "$root\dangle" "$root\nowhere.txt" | Out-Null   # a junction to a name that doesn't exist yet
+    $fs = $null
+    try { $fs = [FolderPin]::CreateNewFile("$root\dangle", "x") } catch { }
+    Check "CreateNewFile: never through a dangling junction at the name" ($fs -eq $null -and -not (Test-Path "$root\nowhere.txt"))
+    if ($fs) { $fs.Dispose() }
 } finally {
-    cmd /c rmdir "$root\via\Rustorigin" 2>$null; cmd /c rmdir "$root\parentlink" 2>$null
+    cmd /c rmdir "$root\via\Rustorigin" 2>$null; cmd /c rmdir "$root\parentlink" 2>$null; cmd /c rmdir "$root\dangle" 2>$null
     foreach ($l in "$root\uninstall\Rustorigin\game\out", "$root\rotree\ro\out", "$root\swapped", "$root\turned") { if (Test-Path $l) { cmd /c rmdir "$l" 2>$null } }
     if (Test-Path "$root\rotarget") { attrib -r "$root\rotarget" }
     foreach ($v in "$root\canary\shared.txt", "$root\canary\target.txt", "$root\canary\rolink.txt") { if (Test-Path $v) { Set-ItemProperty $v -Name IsReadOnly -Value $false } }

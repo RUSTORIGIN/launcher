@@ -285,9 +285,12 @@ owned by this user, SYSTEM or Administrators, and writable by no one else.
   path, so a subst drive or network path is refused too. Cloud/dedup reparse points (OneDrive placeholders) are
   not links and are allowed. Tested by `scripts\test_folder_pin.ps1`.
 - **An entry the lock can't secure keeps the folder refused** (unreadable, or held open by another program):
-  `LockFolder` writes `.rustorigin-lock-incomplete` into the folder before making the folder itself private
-  (and checks it is still a plain file of ours right after; if it can't be, nothing is walked), and removes it
-  only once every entry was secured - so a walk that failed or was cut short
+  `LockFolder` writes `.rustorigin-lock-incomplete` into the folder before making the folder itself private,
+  and holds it open (shared with no one, so nobody can remove or swap it) until it has the locked folder's
+  permissions too - made in the open folder, it would otherwise keep that folder's, and another account could
+  delete it while the walk runs. A record of ours already there (a plain file owned by the player, SYSTEM or
+  Administrators) is kept and pinned the same way, never deleted and written again, so there is no moment
+  without one. It is removed only once every entry was secured - so a walk that failed or was cut short
   (launcher closed, crash) leaves it behind. While anything by that name exists, `FolderExposure` reports
   the folder as not secured, so the next check doesn't pass just because the folder's own permissions look
   private; the next lock walks it again. A folder planted at that name is secured by the walk like any other

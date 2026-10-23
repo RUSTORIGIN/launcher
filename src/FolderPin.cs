@@ -20,9 +20,9 @@ public static class FolderPin
     // Read-data access is what makes the pin hold: Windows only enforces share modes against a handle that has
     // data (or delete) access, so an attributes-only handle would not stop a rename.
     const uint FILE_READ_DATA = 0x1, FILE_READ_ATTRIBUTES = 0x80;
-    const uint DELETE = 0x10000, READ_CONTROL = 0x20000, WRITE_DAC = 0x40000, WRITE_OWNER = 0x80000;
+    const uint DELETE = 0x10000, READ_CONTROL = 0x20000, WRITE_DAC = 0x40000, WRITE_OWNER = 0x80000, GENERIC_WRITE = 0x40000000;
     const uint FILE_SHARE_READ = 1, FILE_SHARE_WRITE = 2, FILE_SHARE_DELETE = 4;
-    const uint OPEN_EXISTING = 3;
+    const uint CREATE_NEW = 1, OPEN_EXISTING = 3;
     const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000, FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
     const int FileDispositionInfo = 4, FileAttributeTagInfo = 9, FileDispositionInfoEx = 21;
     const uint OWNER_SECURITY_INFORMATION = 1, DACL_SECURITY_INFORMATION = 4;
@@ -236,23 +236,27 @@ public static class FolderPin
     // anything (even a dangling link) is at the name by then.
     public static void WriteNewFile(string path, string text)
     {
-        // only that name goes, read-only or not; a hard link's other name keeps its attributes too
-        if (File.Exists(path)) DeleteName(path);
-        byte[] b = Encoding.UTF8.GetBytes(text);
-        using (var fs = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            fs.Write(b, 0, b.Length);
+        using (CreateNewFile(path, text)) { }
     }
 
-    // True when path is a file with that one name - no link, no folder, no hard link; false when it can't be told.
-    public static bool IsPlainFile(string path)
+    // The same, but returns the new file still open, shared with no one: until it is closed nobody else can
+    // open, rename or delete it, and SetSecurity can change its permissions through its SafeFileHandle.
+    public static FileStream CreateNewFile(string path, string text)
     {
+        // only that name goes, read-only or not; a hard link's other name keeps its attributes too
+        if (File.Exists(path)) DeleteName(path);
+        // a link put at the name meanwhile, even a dangling one, is a name already taken: never followed
+        var h = CreateFileW(path, GENERIC_WRITE | READ_CONTROL | WRITE_DAC, 0, IntPtr.Zero, CREATE_NEW, FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero);
+        if (h.IsInvalid) { int error = Marshal.GetLastWin32Error(); h.Dispose(); throw new Win32Exception(error); }
+        var fs = new FileStream(h, FileAccess.Write);
         try
         {
-            bool isDir, isLink;
-            using (var h = Pin(path, out isDir, out isLink))
-                return h != null && !isDir && !isLink && LinkCount(h) == 1;
+            byte[] b = Encoding.UTF8.GetBytes(text);
+            fs.Write(b, 0, b.Length);
+            fs.Flush();
         }
-        catch { return false; }
+        catch { fs.Dispose(); throw; }
+        return fs;
     }
 
     // How many names the file has: above 1, another name (a hard link) may be outside the folder being locked.
