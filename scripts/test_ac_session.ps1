@@ -194,6 +194,11 @@ $g = [AcSession]::ParseSessionReply("{`"session`":`"$sess`",`"key`":`"$key`",`"h
 Check "session reply: huge number -> default" ($g.Heartbeat -eq 30)
 Check "session reply: missing key -> null"  ($null -eq [AcSession]::ParseSessionReply("{`"session`":`"$sess`"}"))
 Check "session reply: short key -> null"    ($null -eq [AcSession]::ParseSessionReply("{`"session`":`"$sess`",`"key`":`"abcd`"}"))
+# phase-B floor comes from the server (memfloormb, whole MB -> bytes); absent means phase B off
+$g = [AcSession]::ParseSessionReply("{`"session`":`"$sess`",`"key`":`"$key`",`"memfloormb`":3}")
+Check "session reply: memfloormb parsed to bytes"  ($g.MemFloorBytes -eq 3 * 1024 * 1024)
+Check "session reply: no memfloormb -> 0 (phase B off)" ([AcSession]::ParseSessionReply("{`"session`":`"$sess`",`"key`":`"$key`"}").MemFloorBytes -eq 0)
+Check "session reply: memfloormb clamped to 4096 MB" ([AcSession]::ParseSessionReply("{`"session`":`"$sess`",`"key`":`"$key`",`"memfloormb`":999999}").MemFloorBytes -eq 4096L * 1024 * 1024)
 Check "session reply: not JSON -> null"     ($null -eq [AcSession]::ParseSessionReply('<html>502 Bad Gateway</html>'))
 Check "session reply: null -> null"         ($null -eq [AcSession]::ParseSessionReply($null))
 
@@ -395,19 +400,22 @@ $selfModuleLabels = @($selfLabels | Where-Object { $_ -notlike 'mem:*' })
 Check "modules: a live module scan of this process reports no module labels ($($selfModuleLabels -join ','))" ($selfModuleLabels.Count -eq 0 -and $self.Scans -eq 1 -and $self.Classified -gt 0)
 
 # ---- phase B: executable memory no module backs (manually mapped injection) ----
-# The bucketing (the floor, the label) is pure and tested with a fake region list; the real VirtualQueryEx walk is
-# covered by the live check below. A region list standing in for what RealAnonExecRegions returns:
-function MemScan($sizes) {
+# The floor comes from the server (see the session-reply tests below); the bucketing is pure and tested with a fake
+# region list and an explicit floor. A region list standing in for what RealAnonExecRegions returns:
+function MemScan($sizes, $floorBytes) {
     $m = New-Object AcModules $null, $null, '', $null
     $m.FirstScanDelayMs = 0
+    $m.MemFloorBytes = [long]$floorBytes
     $m.ListModules = [Func[int, System.Collections.Generic.List[string]]] { param($id) New-Object System.Collections.Generic.List[string] }
     $m.ListAnonExecRegions = [Func[int, System.Collections.Generic.List[long]]] { param($id) $l = New-Object System.Collections.Generic.List[long]; foreach ($s in $sizes) { $l.Add([long]$s) }; $l }
     return $m.Scan(1)
 }
-Check "mem: nothing unbacked -> no label"                              ((@(MemScan @()) | Where-Object { $_ -like 'mem:*' }).Count -eq 0)
-Check "mem: a little, under the floor (overlay trampolines) -> no label" ((@(MemScan @(65536, 131072, 4096)) | Where-Object { $_ -like 'mem:*' }).Count -eq 0)
-Check "mem: a mapped image over the floor -> mem:private-exec:large"    (@(MemScan @(30MB)) -contains 'mem:private-exec:large')
-Check "mem: many regions summing over the floor -> large"              (@(MemScan @(1MB, 1MB, 1MB)) -contains 'mem:private-exec:large')
+Check "mem: no floor from the server (0) -> never a label, even over any size" ((@(MemScan @(30MB) 0) | Where-Object { $_ -like 'mem:*' }).Count -eq 0)
+Check "mem: nothing unbacked -> no label"                              ((@(MemScan @() 1MB) | Where-Object { $_ -like 'mem:*' }).Count -eq 0)
+Check "mem: a little, under the floor (overlay trampolines) -> no label" ((@(MemScan @(65536, 131072, 4096) 1MB) | Where-Object { $_ -like 'mem:*' }).Count -eq 0)
+Check "mem: a mapped image over the floor -> mem:private-exec:large"    (@(MemScan @(30MB) 1MB) -contains 'mem:private-exec:large')
+Check "mem: many regions summing over the floor -> large"              (@(MemScan @(1MB, 1MB, 1MB) 1MB) -contains 'mem:private-exec:large')
+Check "mem: the floor is honoured (2 MB total under a 3 MB floor -> no label)" ((@(MemScan @(1MB, 1MB) 3MB) | Where-Object { $_ -like 'mem:*' }).Count -eq 0)
 $rcProc = Get-Process RustClient -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($rcProc) {
     $regions = [AcModules]::RealAnonExecRegions($rcProc.Id)

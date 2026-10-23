@@ -3739,6 +3739,7 @@ public class LauncherWindow : Window
             {
                 if (fileLabels == null) fileLabels = AcSignals.CheckClientFiles(clientDir, files);
                 var all = new List<string>(fileLabels);
+                modules.MemFloorBytes = acSession.MemFloorBytes;   // phase-B floor comes from the server's session reply, not the client
                 all.AddRange(modules.Scan(gamePid()));
                 return all;
             };

@@ -34,6 +34,7 @@ public static class AcSession
         public int Heartbeat;      // seconds between heartbeats
         public int Ttl;            // seconds a session stays fresh without a heartbeat
         public string ToolSpec;    // tool rules from the server ("1=autohotkey,autohotkeyu64;2=..."), or null - see AcSignals.ParseToolSpec
+        public long MemFloorBytes; // phase-B floor from the server ("memfloormb"), in bytes; 0 = the server didn't send one
     }
 
     // Steam's registry stores the logged-in account as a 32-bit account id; the server sees SteamID64s.
@@ -175,7 +176,12 @@ public static class AcSession
         int hb = Clamp(JsonInt(json, "heartbeat", 30), MinHeartbeat, MaxHeartbeat);
         int ttl = Clamp(JsonInt(json, "ttl", 120), MinTtl, MaxTtl);
         if (ttl < 2 * hb) ttl = Math.Min(MaxTtl, 2 * hb);
-        return new Grant { Session = session.ToLowerInvariant(), KeyHex = key.ToLowerInvariant(), Heartbeat = hb, Ttl = ttl, ToolSpec = JsonStr(json, "tools") };
+        // memfloormb: the phase-B floor in whole MB, server-sent like the tool list so the number stays off the client.
+        // Absent or <= 0 means the server didn't enable phase B, and the client reports no memory label. Clamped so a
+        // bad reply can't make the floor absurd.
+        int memFloorMb = JsonInt(json, "memfloormb", 0);
+        long memFloorBytes = memFloorMb > 0 ? (long)Math.Min(memFloorMb, 4096) * 1024 * 1024 : 0;
+        return new Grant { Session = session.ToLowerInvariant(), KeyHex = key.ToLowerInvariant(), Heartbeat = hb, Ttl = ttl, ToolSpec = JsonStr(json, "tools"), MemFloorBytes = memFloorBytes };
     }
 
     // Reply to POST /v1/heartbeat: true when accepted. nextSeconds is the clamped interval the server
@@ -475,12 +481,12 @@ public sealed class AcModules
     // without the Windows loader - never appears in the module list, so phase A can't see it. It does leave
     // executable memory that no loaded module accounts for. A clean game already has a little of that (an overlay
     // or recorder leaves small hook trampolines - measured at ~0.2 MB on the 2021-04 client, no single region over
-    // ~0.06 MB), so the label is sent only when the total clears MemReportMinBytes, where a whole mapped image
-    // would sit. The default (1 MB) is ~5x the measured clean baseline and was checked against a real manual-map
-    // injection whose mapped code section alone was ~1.6 MB in one region; refine it from more samples. The signal
-    // ships measure-only (the panel keeps the label but opens no case), because legitimate software makes
-    // executable memory too.
-    public const long MemReportMinBytes = 1L * 1024 * 1024;
+    // ~0.06 MB), so the label is sent only when the total clears MemFloorBytes, where a whole mapped image would sit.
+    // The floor is NOT a constant here: the server sends it in the session reply (like the tool list), so the exact
+    // number stays off the client and out of this open-source repo; AcSessionClient copies it here each session.
+    // 0 means the server didn't enable phase B, so no memory label is produced. The signal ships measure-only (the
+    // panel keeps the label but opens no case), because legitimate software makes executable memory too.
+    public long MemFloorBytes;
 
     // Replaceable, so the classifier can be tested with a fake module list, signature check and region list.
     public Func<int, List<string>> ListModules = ListProcessModules;
@@ -583,11 +589,11 @@ public sealed class AcModules
         try
         {
             List<long> sizes = ListAnonExecRegions(pid);
-            if (sizes == null) return null;
+            if (sizes == null || MemFloorBytes <= 0) return null;   // no floor from the server: phase B is off
             MemScans++;
             long total = 0;
             foreach (long s in sizes) total += s;
-            return total >= MemReportMinBytes ? "mem:private-exec:large" : null;
+            return total >= MemFloorBytes ? "mem:private-exec:large" : null;
         }
         catch { return null; }
     }
@@ -936,6 +942,9 @@ public sealed class AcSessionClient
     Thread thread;
 
     public int Opened, HeartbeatsOk, HeartbeatsRejected, NetworkErrors;
+    // The phase-B memory floor the server sent with the current session, in bytes (0 = none). The caller reads it
+    // from here to drive AcModules, so the number never has to live in the client. Set each time a session opens.
+    public long MemFloorBytes;
     // Evidence labels to send with each heartbeat (see AcSignals), asked for on the client thread before
     // every heartbeat. Null = none. A throwing source just sends no labels that time. The tool labels are
     // added by the client itself, from the rules the server sent with the session.
@@ -1041,6 +1050,7 @@ public sealed class AcSessionClient
                 }
                 seq = 0; retry = RetryDelayMs; sentLink = null;   // a new session must link again
                 tools = AcSignals.ParseToolSpec(grant.ToolSpec);
+                MemFloorBytes = grant.MemFloorBytes;   // phase-B floor for this session (0 = the server did not enable it)
                 Interlocked.Increment(ref Opened);
                 log("session opened, heartbeat every " + grant.Heartbeat + " s, " + tools.Count + " tool rule(s) from the server, " +
                     (AcSession.IsHex(hw, 64) ? "hardware id sent" : "no hardware id"));

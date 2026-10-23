@@ -79,12 +79,20 @@ loaded module (`RealAnonExecRegions`, replaceable for tests). That is where a ma
 Legitimate software makes such regions too: overlays and recorders place small executable trampolines for
 their hooks, and GPU drivers may as well. Measured on the clean 2021-04 client this floor is about **0.2 MB**
 across a handful of tiny regions, none over ~0.06 MB. A real manual-map injection (ExLoader), by contrast,
-added a single **~1.6 MB** executable region. So the signal is sent **only when the total clears a floor**
-(`MemReportMinBytes`, default **1 MB**, ~5x the measured clean baseline and below the observed injection),
-as a single label `mem:private-exec:large`,
-and ships **measure-only**: the RustRCON panel keeps the label on the record and shows it, but does not open a
-case on it (it is deliberately left out of the panel's `isInjectionLabel`), because the false-positive sources
-above are real. Raise or lower the floor, or let the panel act on it, once the measurement phase has data.
+added a single **~1.6 MB** executable region. So the signal is sent **only when the total clears a floor**, as a
+single label `mem:private-exec:large`.
+
+**The floor comes from the server, not the client.** The launcher is open source, so a constant floor in the repo
+would hand a cheat developer the exact number to map under. Instead the session service sends it in the session
+reply (`memfloormb`, whole MB), exactly as it already sends the tool list, and `AcSessionClient` passes it to
+`AcModules.MemFloorBytes` for that session. It lives in the service's `server.env` (`AC_MEM_FLOOR_MB`), never in
+this repo, the exe or a player's config. If the server sends nothing, `MemFloorBytes` is 0 and **no memory label
+is produced** - phase B is off until the operator enables it. Pick a value above the measured clean baseline
+(~0.2 MB) and below a mapped image; the measurements here are guidance, the operational number stays server-side.
+
+The signal ships **measure-only**: the RustRCON panel keeps the label on the record and shows it, but does not
+open a case on it (it is deliberately left out of the panel's `isInjectionLabel`), because the false-positive
+sources above are real. Let the panel act on it once the measurement phase has data.
 
 Two limits worth stating: the scan sees a manually mapped DLL only while its memory is still executable (an
 injector that maps, runs and frees is caught only if it is resident during a heartbeat), and a process that
