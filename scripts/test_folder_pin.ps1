@@ -168,7 +168,13 @@ try {
         [FolderPin]::SetSecurity($fs.SafeFileHandle, $null, (Acl "D:(A;ID;FA;;;$me)"), $false)
     } finally { $fs.Dispose() }
     Check "CreateNewFile: text written" ((Get-Content $held) -eq 'held')
-    Check "CreateNewFile: permissions set through the held handle" ((Get-Acl $held).Sddl.Contains("D:(A;ID;FA;;;$me)") -and -not (Get-Acl $held).AreAccessRulesProtected)
+    # compared entry by entry, not as SDDL text: Windows may add DACL control flags (e.g. "D:AI") to the string
+    $heldAcl = Get-Acl $held
+    $rules = @($heldAcl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    $setOk = $rules.Count -eq 1 -and $rules[0].IdentityReference.Value -eq $me -and $rules[0].IsInherited -and
+        $rules[0].FileSystemRights -eq [Security.AccessControl.FileSystemRights]::FullControl -and -not $heldAcl.AreAccessRulesProtected
+    Check "CreateNewFile: permissions set through the held handle" $setOk
+    if (-not $setOk) { Write-Host "        (got $($heldAcl.Sddl))" }
     $fs = $null
     try { $fs = [FolderPin]::CreateNewFile("$root\via\Rustorigin", "x") } catch { }
     Check "CreateNewFile: never through a junction at the name" ($fs -eq $null -and (Test-Path "$root\via\Rustorigin") -and -not (Test-Path "$root\target\Rustorigin\*"))
