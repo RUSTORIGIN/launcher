@@ -13,6 +13,7 @@ Check it against the trust model (CLAUDE.md "Security invariants", docs/LAUNCHER
 - Trust anchor: the embedded `launcher.cfg`; a side config only with `--dev-config`, and never for `AcSessionUrl` / `AcClientFile` / `UpdatePublicKey`; `LaunchExe` / `UpdateRepo` validated
 - Self-update: only signed `SHA256SUMS.txt` (tag bound), checked before the update prompt; `release.yml` least-privilege, SHA-pinned actions, drafts only
 - Filesystem: fail-closed install folder; no path can leave `InstallDir` (zip-slip, `SafeRelPath`, junctions); Uninstall guards
+- Install-folder lock: permissions set only through pinned handles (`FolderPin`), never by name; the `.rustorigin-lock-incomplete` record is ours and in place before the folder looks private, and stays until every entry is secured
 - Network: https only, redirects included; size caps on everything read from a server; server text sanitized before logging
 - Processes: PLAY runs exactly `InstallDir\LaunchExe`; `OpenUrl` only http(s); no new elevation paths
 - Anti-cheat: only labels leave the PC; the notice text matches what is sent

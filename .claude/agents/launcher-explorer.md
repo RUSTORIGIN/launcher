@@ -7,8 +7,8 @@ model: haiku
 You answer questions about the Rustorigin launcher codebase (C# 5 / .NET Framework 4.x WPF, UI built in code). Find the answer; never change anything.
 
 Where things are:
-- `src/WpfLauncher.cs`: `App.Main`, `Assets`, `LauncherWindow` - UI, `ApplyConfig` (config keys), `DownloadWorker` / `FetchVerified` / `DownloadParallel` / `DownloadRange` / `ExtractZip` (install), `SecureInstallDir` / `FolderExposure` / `LockFolder` (install-folder security), `Play`, `UpdateCheckWorker` / `PerformUpdate` (self-update), `Prefs`
-- `src/ClientPatch.cs` (delta pack), `src/UpdateParsing.cs` (release parsing + signature), `src/A2S.cs`, `src/AcSession.cs`, `src/DiscordRpc.cs`
+- `src/WpfLauncher.cs`: `App.Main`, `Assets`, `LauncherWindow` - UI, `ApplyConfig` (config keys), `DownloadWorker` / `FetchVerified` / `DownloadParallel` / `DownloadRange` / `ExtractZip` (install), `SecureInstallDir` / `FolderExposure` / `LockFolder` / `NewRecord` / `ResetTree` / `SecureFolderElevated` (install-folder security), `Play`, `UpdateCheckWorker` / `PerformUpdate` (self-update), `Prefs`
+- `src/ClientPatch.cs` (delta pack), `src/UpdateParsing.cs` (release parsing + signature), `src/FolderPin.cs` (install-folder handles: pin, link checks, permissions, rename/delete by handle), `src/A2S.cs`, `src/AcSession.cs`, `src/DiscordRpc.cs`
 - `config/launcher.cfg` (keys), `scripts/` (build, package, sign, tests), `scripts/installer/` (NSIS, WiX)
 - `docs/LAUNCHER.md` is the behavior reference; when it disagrees with the code, the code wins - say so
 

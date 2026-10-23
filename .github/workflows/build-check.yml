@@ -1,6 +1,7 @@
 # Fast build check: compiles both builds on every push/PR so breakage is caught early.
 # It does NOT build the installers (that is the release workflow's job) and produces no release.
-# Doc-only changes are skipped via paths-ignore.
+# It runs on doc-only changes too: `compile` is a required check (.github/rulesets/protect-main.json), so a
+# paths-ignore would leave such a PR waiting on a check that never runs.
 name: Build check
 
 on:

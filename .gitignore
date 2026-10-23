@@ -41,5 +41,5 @@ rclone.conf
 *private*key*
 signing-key*
 
-# Claude Code: .claude/agents and .claude/rules are shared; personal settings are not
+# Claude Code: .claude/agents, rules, hooks and settings.json are shared; personal settings are not
 .claude/settings.local.json

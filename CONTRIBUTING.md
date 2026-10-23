@@ -28,7 +28,7 @@ git checkout -b short-descriptive-name    # e.g. fix-resume-offset
 It must compile, and the six test suites must pass (CI runs both on every PR):
 
 ```powershell
-.\scripts\build.bat            # quick compile check of src\WpfLauncher.cs
+.\scripts\build.bat            # quick compile check of src\*.cs
 # or a full shippable build - pass the version already in src\WpfLauncher.cs: the script writes it into that file
 .\scripts\make_release.ps1 -Version 1.2.0
 # tests (one script per area)
@@ -36,6 +36,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_updater_parsing
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_a2s_parsing.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_client_patch.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_ac_session.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_folder_pin.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_folder_lock.ps1   # needs the release exe (make_release.ps1)
 ```
 
 If you touched the **download / verify** path, also run the integrity smoke test: with `Sha256`

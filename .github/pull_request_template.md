@@ -10,7 +10,7 @@
 
 ## Testing
 
-- [ ] `Build check` CI is green (release build of `RustoriginLauncher.exe` + the four `scripts\test_*.ps1` suites)
+- [ ] `Build check` CI is green (release build of `RustoriginLauncher.exe` + the six `scripts\test_*.ps1` suites)
 - [ ] If launcher behavior changed: built with `scripts\make_release.ps1` and ran the exe
 - [ ] If the download/verify path changed: ran the integrity smoke test (blank / correct / wrong `Sha256`)
 

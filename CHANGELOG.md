@@ -21,6 +21,17 @@ All notable changes to the RustOrigin launcher are documented here. Format loose
 - `scripts\make_piece_hashes.ps1` builds `config\piece-hashes.txt` from the hosted files. Re-run it
   whenever the client zip or the pack changes.
 
+### Security
+- **The game folder must be private.** The launcher only installs, updates and plays from an install
+  folder that just your account, SYSTEM and administrators can change: a folder made at the root of a
+  drive otherwise lets any account on the PC swap the game. It locks a folder you own by itself; an
+  older per-machine install, or a folder another account created, gets a one-time administrator fix
+  ("Protect the game folder"). Files another account put in the folder are removed (or taken over by
+  the administrator fix), and the game must then be repaired before PLAY. The lock never follows a
+  junction or symlink and never changes a file shared through a hard link. While anything in the
+  folder could not be secured (for example a file open in another program), the folder stays refused
+  until a later attempt secures it.
+
 ## [1.1.2] - 2026-10-14
 
 ### Fixed
