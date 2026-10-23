@@ -3768,7 +3768,8 @@ public class LauncherWindow : Window
             "number of the rule it matched is sent, never your list of programs); whether code that isn't part of the game, " +
             "Windows, or a signed program is loaded into the game (as the file's name when it sits in the game folder, otherwise " +
             "as a fingerprint of the file that the server can match against known programs such as overlays, or only that a " +
-            "loaded file has vanished - never its path, and nothing about programs outside the game); and an ID of this " +
+            "loaded file has vanished, or that the game holds an unusual amount of running code that no program file accounts for - " +
+            "never its path, the memory's contents, and nothing about programs outside the game); and an ID of this " +
             "PC that stays the same until Windows is reinstalled (a one-way hash of your Windows install ID). Like any website, " +
             "the server also sees your IP address. It also reads one code the server sends to your game from the game's own log, " +
             "to show the session belongs to this game. No files leave your PC.\n\n" +

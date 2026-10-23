@@ -252,12 +252,14 @@ faked by a careful script.
 
 What leaves the player's PC: the SteamID, the launcher version, heartbeat timing, whether the game is
 running, the labels of matched signals (`tool:<id>`, `client:modified:<file>`, `client:missing:<file>`, and since
-slice 10 `client:extra-module:<file>`, `module:unsigned:<32 hex>`, `module:missing-file`, `module:scan-failed`) and the hardware id (a
+slice 10 `client:extra-module:<file>`, `module:unsigned:<32 hex>`, `module:missing-file`, `module:scan-failed`, `mem:private-exec:large`) and the hardware id (a
 one-way hash of the Windows MachineGuid). Game files are hashed on the PC, and only the "modified" label is
 sent, never a hash or file contents. For the module signal the launcher lists the modules loaded **in the game
 process it started** (never in other programs): a game-folder file that is not part of the build is reported by its
 file name; an unsigned module from anywhere else by the first 32 hex characters of its SHA-256; never a path, the
-module list, a signed module, or a module in `%SystemRoot%`. There are no process lists or personal files.
+module list, a signed module, or a module in `%SystemRoot%`. For phase B the launcher walks the game's memory map
+and sends one coarse flag when the executable memory no module backs is over a floor, never a size, an address or
+the memory's contents. There are no process lists or personal files.
 
 The session service keeps sessions in memory only and forgets them 6 hours after their last heartbeat. Its
 log carries counts only. The gate plugin's daily log records each join's status and labels with the
@@ -355,7 +357,10 @@ what is sent.
       counts as signed): the first 32 hex characters of its SHA-256;
     - `module:missing-file`: a loaded module whose file is gone from where it was loaded (renamed away after
       injection); neither a name nor a hash;
-    - `module:scan-failed`: the game process could not be opened at all (the game runs elevated).
+    - `module:scan-failed`: the game process could not be opened at all (the game runs elevated);
+    - `mem:private-exec:large` (phase B): the game holds more executable memory that no loaded module backs than
+      a floor allows - where a manually mapped DLL lives. A coarse "over the floor" flag, never a size or address;
+      measure-only (the panel keeps it, opens no case on it).
 
     Labels stay for the launch once seen. Nothing can block or delay PLAY; a failure to list or read adds no
     label. The one-time notice names the scan (pref renamed to `AcNoticeShown2`, so everyone sees the new text
@@ -391,5 +396,9 @@ what is sent.
     seen on the same PC together with the banned one (see the panel's README, "Launcher"). Tested with `npm test`.
 
     **Rollout** as in the design doc: measure first (shadow, aggregated counts), build the translation list
-    from the common hashes, then weigh the labels in review. Phase B (executable memory without a module)
-    stays a proposal.
+    from the common hashes, then weigh the labels in review. Phase B (executable memory no module backs, for
+    manually mapped injectors) is built and ships measure-only: the launcher sends `mem:private-exec:large` when
+    the game holds unbacked executable memory over a floor (`AcModules.MemReportMinBytes`, 1 MB, ~5x the measured
+    clean baseline and below a real manual-map injection's ~1.6 MB), and the panel keeps it on the record but
+    opens no case on it yet. See
+    [AC_MODULE_SIGNAL.md](AC_MODULE_SIGNAL.md).

@@ -471,11 +471,23 @@ public sealed class AcModules
     public const int HashPrefixLength = 32;
     public const int MaxLabels = 64;   // the heartbeat sends at most MaxSignals anyway; this bounds the memory
 
-    // Both replaceable, so the classifier can be tested with a fake module list and a fake signature check.
+    // Phase B (docs\AC_MODULE_SIGNAL.md): a manually mapped DLL - code an injector writes into the game's memory
+    // without the Windows loader - never appears in the module list, so phase A can't see it. It does leave
+    // executable memory that no loaded module accounts for. A clean game already has a little of that (an overlay
+    // or recorder leaves small hook trampolines - measured at ~0.2 MB on the 2021-04 client, no single region over
+    // ~0.06 MB), so the label is sent only when the total clears MemReportMinBytes, where a whole mapped image
+    // would sit. The default (1 MB) is ~5x the measured clean baseline and was checked against a real manual-map
+    // injection whose mapped code section alone was ~1.6 MB in one region; refine it from more samples. The signal
+    // ships measure-only (the panel keeps the label but opens no case), because legitimate software makes
+    // executable memory too.
+    public const long MemReportMinBytes = 1L * 1024 * 1024;
+
+    // Replaceable, so the classifier can be tested with a fake module list, signature check and region list.
     public Func<int, List<string>> ListModules = ListProcessModules;
     public Func<string, bool> IsSigned = HasTrustedSignature;
+    public Func<int, List<long>> ListAnonExecRegions = RealAnonExecRegions;   // sizes of exec regions no module backs
     public int FirstScanDelayMs = DefaultFirstScanDelayMs;
-    public int Scans, Classified;   // counters for tests and the log
+    public int Scans, Classified, MemScans;   // counters for tests and the log
 
     readonly string clientDir;              // the game folder, full path with a trailing separator, or null
     readonly HashSet<string> listed = new HashSet<string>();   // relative paths (lower case) of the hosted build's listed files
@@ -556,11 +568,28 @@ public sealed class AcModules
                     if (!scanFailedLogged) { log("module scan: the game process can't be opened - reporting module:scan-failed"); scanFailedLogged = true; }
                     Add("module:scan-failed");
                 }
-                else foreach (var m in modules) Add(Classify(m));
+                else { foreach (var m in modules) Add(Classify(m)); Add(MemoryBucket(pid)); }
             }
         }
         catch (Exception e) { log("module scan failed: " + e.Message); }
         return new List<string>(labels);
+    }
+
+    // The phase-B label for the executable memory in the game that no loaded module backs (a manually mapped
+    // injector lives here), or null when the total is under the benign floor or the scan can't run. Point-in-time
+    // and cheap; it is re-checked every scan and the label, once sent, stays for the launch. Measure-only.
+    public string MemoryBucket(int pid)
+    {
+        try
+        {
+            List<long> sizes = ListAnonExecRegions(pid);
+            if (sizes == null) return null;
+            MemScans++;
+            long total = 0;
+            foreach (long s in sizes) total += s;
+            return total >= MemReportMinBytes ? "mem:private-exec:large" : null;
+        }
+        catch { return null; }
     }
 
     // The label for one module file, or null when it is fine (or can't be judged). Cached by path, size and
@@ -674,6 +703,78 @@ public sealed class AcModules
         }
         catch { return null; }
         finally { if (h != IntPtr.Zero) try { CloseHandle(h); } catch { } }
+    }
+
+    // ---- executable memory with no backing module: VirtualQueryEx, read-only (phase B) ----
+    const uint MemCommit = 0x1000, MemImage = 0x1000000;
+    const uint PageExecuteAny = 0xF0;   // PAGE_EXECUTE | _READ | _READWRITE | _WRITECOPY
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern IntPtr VirtualQueryEx(IntPtr process, IntPtr address, out MemoryBasicInformation info, IntPtr length);
+
+    // 64-bit MEMORY_BASIC_INFORMATION. The launcher runs 64-bit (anycpu, no 32-bit preference), so this is the one
+    // the game and this process both use.
+    [StructLayout(LayoutKind.Sequential)]
+    struct MemoryBasicInformation
+    {
+        public ulong BaseAddress, AllocationBase;
+        public uint AllocationProtect, Alignment1;
+        public ulong RegionSize;
+        public uint State, Protect, Type, Alignment2;
+    }
+
+    // Sizes of the committed, executable regions of process pid that no loaded module backs: private or mapped
+    // executable memory, or an executable image whose allocation base is not a loaded module. Null when the process
+    // can't be opened; an empty list when it is clean. Nothing is read from the regions - only the memory map is
+    // walked - and nothing is written.
+    public static List<long> RealAnonExecRegions(int pid)
+    {
+        IntPtr h = IntPtr.Zero;
+        try
+        {
+            h = OpenProcess(ProcessQueryInformation | ProcessVmRead, false, pid);
+            if (h == IntPtr.Zero) return null;
+            var bases = ModuleBases(h);
+            var sizes = new List<long>();
+            var mbi = new MemoryBasicInformation();
+            IntPtr len = new IntPtr(Marshal.SizeOf(typeof(MemoryBasicInformation)));
+            ulong addr = 0;
+            const ulong max = 0x7FFFFFFF0000UL;   // top of the user-mode address space on x64
+            int guard = 0;
+            while (addr < max && guard++ < 2000000)
+            {
+                if (VirtualQueryEx(h, new IntPtr((long)addr), out mbi, len).ToInt64() == 0) break;
+                if (mbi.RegionSize == 0) break;
+                if (mbi.State == MemCommit && (mbi.Protect & PageExecuteAny) != 0)
+                {
+                    bool backedImage = mbi.Type == MemImage && bases.Contains(mbi.AllocationBase);
+                    if (!backedImage) sizes.Add((long)mbi.RegionSize);
+                }
+                ulong next = mbi.BaseAddress + mbi.RegionSize;
+                if (next <= addr) break;
+                addr = next;
+            }
+            return sizes;
+        }
+        catch { return null; }
+        finally { if (h != IntPtr.Zero) try { CloseHandle(h); } catch { } }
+    }
+
+    // Base addresses of the modules loaded in the open process handle (the module handle is the load address).
+    static HashSet<ulong> ModuleBases(IntPtr h)
+    {
+        var set = new HashSet<ulong>();
+        try
+        {
+            uint needed;
+            if (!EnumProcessModulesEx(h, new IntPtr[0], 0, out needed, ListModulesAll)) return set;
+            var mods = new IntPtr[needed / IntPtr.Size + 16];
+            if (!EnumProcessModulesEx(h, mods, (uint)(mods.Length * IntPtr.Size), out needed, ListModulesAll)) return set;
+            int count = Math.Min(mods.Length, (int)(needed / IntPtr.Size));
+            for (int i = 0; i < count; i++) set.Add((ulong)mods[i].ToInt64());
+        }
+        catch { }
+        return set;
     }
 
     // ---- Authenticode: wintrust, offline ----

@@ -389,7 +389,31 @@ else { Write-Host "  SKIP  signed-module check (every module of this process is 
 $self = New-Object AcModules $null, $null, 'RustClient.exe', $null
 $self.FirstScanDelayMs = 0
 $selfLabels = $self.Scan($me.Id)
-Check "modules: a live scan of this process reports nothing ($($selfLabels -join ','))" ($selfLabels.Count -eq 0 -and $self.Scans -eq 1 -and $self.Classified -gt 0)
+# this host is .NET, which JITs into private executable memory, so the phase-B mem label may legitimately appear
+# here (it would not on the IL2CPP game, which is AOT); the module part must still report nothing
+$selfModuleLabels = @($selfLabels | Where-Object { $_ -notlike 'mem:*' })
+Check "modules: a live module scan of this process reports no module labels ($($selfModuleLabels -join ','))" ($selfModuleLabels.Count -eq 0 -and $self.Scans -eq 1 -and $self.Classified -gt 0)
+
+# ---- phase B: executable memory no module backs (manually mapped injection) ----
+# The bucketing (the floor, the label) is pure and tested with a fake region list; the real VirtualQueryEx walk is
+# covered by the live check below. A region list standing in for what RealAnonExecRegions returns:
+function MemScan($sizes) {
+    $m = New-Object AcModules $null, $null, '', $null
+    $m.FirstScanDelayMs = 0
+    $m.ListModules = [Func[int, System.Collections.Generic.List[string]]] { param($id) New-Object System.Collections.Generic.List[string] }
+    $m.ListAnonExecRegions = [Func[int, System.Collections.Generic.List[long]]] { param($id) $l = New-Object System.Collections.Generic.List[long]; foreach ($s in $sizes) { $l.Add([long]$s) }; $l }
+    return $m.Scan(1)
+}
+Check "mem: nothing unbacked -> no label"                              ((@(MemScan @()) | Where-Object { $_ -like 'mem:*' }).Count -eq 0)
+Check "mem: a little, under the floor (overlay trampolines) -> no label" ((@(MemScan @(65536, 131072, 4096)) | Where-Object { $_ -like 'mem:*' }).Count -eq 0)
+Check "mem: a mapped image over the floor -> mem:private-exec:large"    (@(MemScan @(30MB)) -contains 'mem:private-exec:large')
+Check "mem: many regions summing over the floor -> large"              (@(MemScan @(1MB, 1MB, 1MB)) -contains 'mem:private-exec:large')
+$rcProc = Get-Process RustClient -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($rcProc) {
+    $regions = [AcModules]::RealAnonExecRegions($rcProc.Id)
+    $usedMb = if ($regions) { [math]::Round((($regions | Measure-Object -Sum).Sum) / 1MB, 2) } else { 'n/a' }
+    Check "mem: a live scan of the running game returns a region list ($usedMb MB unbacked exec)" ($null -ne $regions)
+} else { Write-Host "  SKIP  live memory scan (RustClient not running)" }
 
 # ---- optional: the real client against a running session service ----
 # ---- game link (#1): the code the server sends to the game, echoed from its log ----

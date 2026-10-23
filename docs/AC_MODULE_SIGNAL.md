@@ -2,7 +2,7 @@
 
 Status: **phase A is built** on the launcher side (`AcModules` in `src/AcSession.cs`, slice 10 of
 [CLIENT_ANTICHEAT.md](CLIENT_ANTICHEAT.md), which also lists the service and plugin work that remains and the
-RustRCON panel contract); **phase B stays a proposal.** It extends the evidence labels of the launcher session
+RustRCON panel contract); **phase B is built, measure-only.** It extends the evidence labels of the launcher session
 (slice 5). Nothing here changes the protocol: it only adds labels to the heartbeat's `signals`.
 
 ## Goal
@@ -69,14 +69,32 @@ build's hashes, which the launcher already has a mechanism for (`AcClientFile=`,
 intact but whose certificate has expired counts as signed: the signer is known, and the label is meant for
 code with no publisher at all.
 
-### Phase B (later, measure first): executable memory with no module
+### Phase B (built, measure-only): executable memory with no module
 
-`VirtualQueryEx` over the game's address space, counting regions that are executable (`PAGE_EXECUTE*`) and
-either private memory (`MEM_PRIVATE`) or an image that isn't in the module list. That is where a manually
-mapped DLL lives. Legitimate software makes such regions too: overlays and recorders place small executable
-trampolines for their hooks, and GPU drivers may as well. So phase B reports a **size bucket only**
-(`mem:private-exec:none|small|large`, thresholds set from the measured baseline) and starts in measure-only
-mode. It is the weakest signal here, and it is optional.
+`AcModules.MemoryBucket` walks the game's address space with `VirtualQueryEx` (read-only; the map is walked,
+nothing in the regions is read) and sums the committed, executable (`PAGE_EXECUTE*`) regions that no loaded
+module backs: private or mapped executable memory, or an executable image whose allocation base is not a
+loaded module (`RealAnonExecRegions`, replaceable for tests). That is where a manually mapped DLL lives.
+
+Legitimate software makes such regions too: overlays and recorders place small executable trampolines for
+their hooks, and GPU drivers may as well. Measured on the clean 2021-04 client this floor is about **0.2 MB**
+across a handful of tiny regions, none over ~0.06 MB. A real manual-map injection (ExLoader), by contrast,
+added a single **~1.6 MB** executable region. So the signal is sent **only when the total clears a floor**
+(`MemReportMinBytes`, default **1 MB**, ~5x the measured clean baseline and below the observed injection),
+as a single label `mem:private-exec:large`,
+and ships **measure-only**: the RustRCON panel keeps the label on the record and shows it, but does not open a
+case on it (it is deliberately left out of the panel's `isInjectionLabel`), because the false-positive sources
+above are real. Raise or lower the floor, or let the panel act on it, once the measurement phase has data.
+
+Two limits worth stating: the scan sees a manually mapped DLL only while its memory is still executable (an
+injector that maps, runs and frees is caught only if it is resident during a heartbeat), and a process that
+JITs code (anything on .NET or Mono) fills private executable memory as normal operation - the Rust client is
+IL2CPP (ahead-of-time), so this does not apply to it, but it is why the signal is scoped to the game process.
+
+A refinement the first live sample suggests, for when there is more data: the injection landed as **one** 1.6 MB
+region while every benign region was under 0.06 MB, so the **largest single unbacked region** separates them far
+more sharply than the total does, and it is harder to trip with benign overlays (many tiny regions). The total is
+harder to evade by splitting the map, though. A later version could report on both; today it uses the total only.
 
 ### Not in scope
 
