@@ -19,7 +19,7 @@ public static class FolderPin
 {
     // Read-data access is what makes the pin hold: Windows only enforces share modes against a handle that has
     // data (or delete) access, so an attributes-only handle would not stop a rename.
-    const uint FILE_READ_DATA = 0x1, FILE_READ_ATTRIBUTES = 0x80;
+    const uint FILE_READ_DATA = 0x1, FILE_ADD_SUBDIRECTORY = 0x4, FILE_READ_ATTRIBUTES = 0x80;
     const uint DELETE = 0x10000, READ_CONTROL = 0x20000, WRITE_DAC = 0x40000, WRITE_OWNER = 0x80000, GENERIC_WRITE = 0x40000000;
     const uint FILE_SHARE_READ = 1, FILE_SHARE_WRITE = 2, FILE_SHARE_DELETE = 4;
     const uint CREATE_NEW = 1, OPEN_EXISTING = 3;
@@ -28,6 +28,7 @@ public static class FolderPin
     // Replace what is at the new name in one step, even if it is open elsewhere (shared for delete) or read-only.
     const uint FILE_RENAME_REPLACE_IF_EXISTS = 0x1, FILE_RENAME_POSIX_SEMANTICS = 0x2, FILE_RENAME_IGNORE_READONLY_ATTRIBUTE = 0x40;
     const uint OWNER_SECURITY_INFORMATION = 1, DACL_SECURITY_INFORMATION = 4;
+    const int ERROR_ACCESS_DENIED = 5, ERROR_SHARING_VIOLATION = 32, ERROR_LOCK_VIOLATION = 33, ERROR_NOT_SUPPORTED = 50, ERROR_INVALID_PARAMETER = 87;
     // Delete the name now even if the file is open elsewhere, and even if it is read-only - without clearing
     // the read-only attribute, which a hard link shares with its other names.
     const uint FILE_DISPOSITION_DELETE = 0x1, FILE_DISPOSITION_POSIX_SEMANTICS = 0x2, FILE_DISPOSITION_IGNORE_READONLY = 0x10;
@@ -300,9 +301,21 @@ public static class FolderPin
     {
         var info = RenameInfo(newPath, FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS | FILE_RENAME_IGNORE_READONLY_ATTRIBUTE);
         if (SetFileInformationByHandle(h, FileRenameInfoEx, info, (uint)info.Length)) return;
-        // Windows before 10 1809: the older rename, which also replaces in one step, but not a read-only name
-        BitConverter.GetBytes(1u).CopyTo(info, 0);
-        if (!SetFileInformationByHandle(h, FileRenameInfo, info, (uint)info.Length)) throw new Win32Exception(Marshal.GetLastWin32Error());
+        int error = Marshal.GetLastWin32Error();
+        // The older rename, which also replaces in one step (but not a read-only name), for Windows before 10 1809
+        // or a file system or filter that doesn't know the newer one - whatever error they report that with. Not
+        // after a plain refusal (access denied, in use), which the older rename would only repeat: that one is
+        // reported as it is, so the log shows why the replacement failed and not why the older rename did.
+        if (error != ERROR_ACCESS_DENIED && error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION)
+        {
+            BitConverter.GetBytes(1u).CopyTo(info, 0);
+            if (SetFileInformationByHandle(h, FileRenameInfo, info, (uint)info.Length)) return;
+            error = Marshal.GetLastWin32Error();
+        }
+        // Access denied here means either that the old file is open somewhere without delete sharing or that
+        // we may not delete its name (or it is a folder): an open of our own, sharing everything, tells them apart.
+        if (error == ERROR_ACCESS_DENIED && HeldOpen(newPath)) throw new InUseException(newPath, error);
+        throw InUseOrWin32(newPath, error);
     }
 
     // Renames what is at path - a folder, file or link, never what a link points at - to newPath in one step,
@@ -313,10 +326,53 @@ public static class FolderPin
         using (var h = CreateFileW(Path.GetFullPath(path), DELETE | FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING,
             FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero))
         {
-            if (h.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (h.IsInvalid) throw InUseOrWin32(path, Marshal.GetLastWin32Error());
             var info = RenameInfo(newPath, 0);   // ReplaceIfExists false
-            if (!SetFileInformationByHandle(h, FileRenameInfo, info, (uint)info.Length)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (SetFileInformationByHandle(h, FileRenameInfo, info, (uint)info.Length)) return;
+            int error = Marshal.GetLastWin32Error();
+            // We hold delete access on it and newPath is free, so access denied on the rename itself is Windows
+            // refusing to move a folder while something in it is open - unless we may not add a folder to
+            // newPath's folder, which the elevated fix could get past: that one stays a permission.
+            if (error == ERROR_ACCESS_DENIED && MayAddFolder(Path.GetDirectoryName(Path.GetFullPath(newPath)))) throw new InUseException(path, error);
+            throw InUseOrWin32(path, error);
         }
+    }
+
+    // True when we may create a subfolder in dir (an open asking for just that right; nothing is created).
+    static bool MayAddFolder(string dir)
+    {
+        if (dir == null) return false;
+        using (var h = CreateFileW(dir, FILE_ADD_SUBDIRECTORY | FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, IntPtr.Zero,
+            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero))
+            return !h.IsInvalid;
+    }
+
+    // True when the exception says the name was open in another program without delete sharing: a refusal no
+    // permission or administrator can get past, so the lock reports it as busy rather than offering the fix.
+    public static bool InUse(Exception ex)
+    {
+        if (ex is InUseException) return true;
+        var w = ex as Win32Exception;
+        return w != null && (w.NativeErrorCode == ERROR_SHARING_VIOLATION || w.NativeErrorCode == ERROR_LOCK_VIOLATION);
+    }
+
+    // True when path can't be opened for delete, sharing everything, because another handle on it doesn't share
+    // delete; false when it can, or fails for any other reason (a permission, a folder: not an open handle).
+    static bool HeldOpen(string path)
+    {
+        using (var h = CreateFileW(Path.GetFullPath(path), DELETE | FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, IntPtr.Zero,
+            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero))
+        {
+            if (!h.IsInvalid) return false;
+            int error = Marshal.GetLastWin32Error();
+            return error == ERROR_SHARING_VIOLATION || error == ERROR_LOCK_VIOLATION;
+        }
+    }
+
+    static Exception InUseOrWin32(string path, int error)
+    {
+        if (error == ERROR_SHARING_VIOLATION || error == ERROR_LOCK_VIOLATION) return new InUseException(path, error);
+        return new Win32Exception(error);
     }
 
     // FILE_RENAME_INFO: Flags (ReplaceIfExists for the older class), pointer-aligned RootDirectory (none),
@@ -428,4 +484,12 @@ public static class FolderPin
         if (s.StartsWith(@"\\?\")) return s.Substring(4);
         return s;
     }
+}
+
+// A name that could not be renamed, replaced or deleted because it - or, for a folder, something in it - is open
+// in another program without delete sharing (FolderPin.InUse). Unlike a permission, no administrator can get past
+// that, so the lock reports it as busy: close the program, then try again.
+public class InUseException : IOException
+{
+    public InUseException(string path, int error) : base(path + " is open in another program (" + new Win32Exception(error).Message + ")") { }
 }

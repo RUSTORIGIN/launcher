@@ -30,7 +30,9 @@ All notable changes to the RustOrigin launcher are documented here. Format loose
   the administrator fix), and the game must then be repaired before PLAY. The lock never follows a
   junction or symlink and never changes a file shared through a hard link. While anything in the
   folder could not be secured (for example a file open in another program), the folder stays refused
-  until a later attempt secures it.
+  until a later attempt secures it. When the only thing in the way is something open in another
+  program - a game file, or the lock's own record file held by another account - the launcher says to
+  close it rather than offering the administrator fix, which the same open file would stop too.
 
 ## [1.1.2] - 2026-10-14
 

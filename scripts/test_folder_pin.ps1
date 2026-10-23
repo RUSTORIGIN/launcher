@@ -216,10 +216,17 @@ try {
     Set-Content "$root\plain\Rustorigin\new3.txt" 'new3'; Set-Content "$root\plain\Rustorigin\held.txt" 'held'
     $fs = [FolderPin]::CreateNewFile("$root\plain\Rustorigin\new3.txt", "new3")
     $lock = [IO.File]::Open("$root\plain\Rustorigin\held.txt", 'Open', 'Read', 'ReadWrite')   # no delete sharing
-    $threw = $false
-    try { try { [FolderPin]::RenameOver($fs.SafeFileHandle, "$root\plain\Rustorigin\held.txt") } catch { $threw = $true } } finally { $lock.Dispose(); $fs.Dispose() }
+    # PowerShell wraps what a .NET method threw; InUse wants the exception itself
+    function Inner($err) { $e = $err.Exception; while ($e.InnerException) { $e = $e.InnerException }; $e }
+    $threw = $false; $inUse = $false
+    try { try { [FolderPin]::RenameOver($fs.SafeFileHandle, "$root\plain\Rustorigin\held.txt") } catch { $threw = $true; $inUse = [FolderPin]::InUse((Inner $_)) } } finally { $lock.Dispose(); $fs.Dispose() }
     Check "RenameOver onto a name held without delete sharing: refused, nothing changed" ($threw -and (Get-Content "$root\plain\Rustorigin\held.txt") -eq 'held' -and
         (Test-Path "$root\plain\Rustorigin\new3.txt"))
+    Check "RenameOver onto a held name: counted as in use (busy), not as a permission" $inUse
+    $lock = [IO.File]::Open("$root\plain\Rustorigin\held.txt", 'Open', 'Read', 'ReadWrite')
+    $inUse = $false
+    try { try { [FolderPin]::DeleteName("$root\plain\Rustorigin\held.txt") } catch { $inUse = [FolderPin]::InUse((Inner $_)) } } finally { $lock.Dispose() }
+    Check "DeleteName of a held name: counted as in use"  ($inUse -and (Test-Path "$root\plain\Rustorigin\held.txt"))
 
     # ---- MoveAside: a folder (or link) renamed in one step, never over anything ----
     $m = "$root\plain\Rustorigin"
@@ -227,14 +234,31 @@ try {
     [FolderPin]::MoveAside("$m\planted", "$m\aside")
     Check "MoveAside: the folder and what is in it moved"   ((-not (Test-Path "$m\planted")) -and (Get-Content "$m\aside\x.txt") -eq 'x')
     New-Item -ItemType Directory -Force "$m\planted" | Out-Null
-    $threw = $false
-    try { [FolderPin]::MoveAside("$m\planted", "$m\aside") } catch { $threw = $true }
+    $threw = $false; $inUse = $true
+    try { [FolderPin]::MoveAside("$m\planted", "$m\aside") } catch { $threw = $true; $inUse = [FolderPin]::InUse((Inner $_)) }
     Check "MoveAside onto a taken name: refused, nothing changed" ($threw -and (Test-Path "$m\planted") -and (Get-Content "$m\aside\x.txt") -eq 'x')
+    Check "MoveAside onto a taken name: not counted as in use" (-not $inUse)
     Set-Content "$m\planted\open.txt" 'open'
     $lock = [IO.File]::Open("$m\planted\open.txt", 'Open', 'Read', 'ReadWrite')
-    $threw = $false
-    try { try { [FolderPin]::MoveAside("$m\planted", "$m\aside2") } catch { $threw = $true } } finally { $lock.Dispose() }
+    $threw = $false; $inUse = $false
+    try { try { [FolderPin]::MoveAside("$m\planted", "$m\aside2") } catch { $threw = $true; $inUse = [FolderPin]::InUse((Inner $_)) } } finally { $lock.Dispose() }
     Check "MoveAside of a folder with an entry held open: refused" ($threw -and (Test-Path "$m\planted\open.txt") -and -not (Test-Path "$m\aside2"))
+    Check "MoveAside of a folder with an entry held open: counted as in use" $inUse
+    # the same refusal from a permission (delete denied on the folder) is not in use: the elevated fix can get past it
+    icacls "$m\planted" /deny "*${me}:(D)" | Out-Null
+    $threw = $false; $inUse = $true
+    try { try { [FolderPin]::MoveAside("$m\planted", "$m\aside3") } catch { $threw = $true; $inUse = [FolderPin]::InUse((Inner $_)) } } finally { icacls "$m\planted" /remove:d "*$me" | Out-Null }
+    Check "MoveAside of a folder we may not delete: refused, not counted as in use" ($threw -and -not $inUse -and (Test-Path "$m\planted\open.txt") -and -not (Test-Path "$m\aside3"))
+    # the rename step itself refused with access denied, not because anything is open but because we may not add
+    # a folder to the destination: still a permission, not in use
+    icacls "$m" /deny "*${me}:(AD)" | Out-Null
+    $threw = $false; $inUse = $true
+    try { try { [FolderPin]::MoveAside("$m\planted", "$m\aside3") } catch { $threw = $true; $inUse = [FolderPin]::InUse((Inner $_)) } } finally { icacls "$m" /remove:d "*$me" | Out-Null }
+    Check "MoveAside where no folder may be added at the destination: refused, not counted as in use" ($threw -and -not $inUse -and (Test-Path "$m\planted\open.txt") -and -not (Test-Path "$m\aside3"))
+    $fs = [FolderPin]::CreateNewFile("$m\new4.txt", "new4")
+    $threw = $false; $inUse = $true
+    try { try { [FolderPin]::RenameOver($fs.SafeFileHandle, "$m\aside") } catch { $threw = $true; $inUse = [FolderPin]::InUse((Inner $_)) } } finally { $fs.Dispose() }
+    Check "RenameOver onto a folder: refused, nothing changed, not counted as in use" ($threw -and -not $inUse -and (Get-Content "$m\aside\x.txt") -eq 'x' -and (Test-Path "$m\new4.txt"))
     Junction "$m\jplanted" "$root\canary"
     $canary = (Get-Acl "$root\canary").Sddl
     [FolderPin]::MoveAside("$m\jplanted", "$m\jaside")
@@ -245,6 +269,7 @@ try {
     cmd /c rmdir "$root\via\Rustorigin" 2>$null; cmd /c rmdir "$root\parentlink" 2>$null; cmd /c rmdir "$root\dangle" 2>$null
     foreach ($l in "$root\uninstall\Rustorigin\game\out", "$root\rotree\ro\out", "$root\swapped", "$root\turned") { if (Test-Path $l) { cmd /c rmdir "$l" 2>$null } }
     if (Test-Path "$root\rotarget") { attrib -r "$root\rotarget" }
+    if ($me) { foreach ($d in "$root\plain\Rustorigin\planted", "$root\plain\Rustorigin") { if (Test-Path $d) { icacls $d /remove:d "*$me" | Out-Null } } }
     foreach ($v in "$root\canary\shared.txt", "$root\canary\target.txt", "$root\canary\rolink.txt", "$root\plain\Rustorigin\old.txt") { if (Test-Path $v) { Set-ItemProperty $v -Name IsReadOnly -Value $false } }
     Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
 }

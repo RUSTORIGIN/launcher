@@ -1070,9 +1070,18 @@ public class LauncherWindow : Window
         string record = Path.Combine(dir, LockIncompleteName);
         const string recordText = "folder lock in progress or incomplete; see launcher.log\r\n";
         var fileAcl = FolderPin.InheritedAcl(acl, false);
-        if (Directory.Exists(record)) FolderPin.MoveAside(record, record + "." + Guid.NewGuid().ToString("N") + LockAsideSuffix);
-        // protected until the folder is private: setting the open folder's permissions would pass them on to it
-        using (var held = NewRecord(record, fileAcl, false, recordText))
+        FileStream held;
+        try
+        {
+            if (Directory.Exists(record)) FolderPin.MoveAside(record, record + "." + Guid.NewGuid().ToString("N") + LockAsideSuffix);
+            // protected until the folder is private: setting the open folder's permissions would pass them on to it
+            held = NewRecord(record, fileAcl, false, recordText);
+        }
+        // The caller counts the failure; when the name (or the planted folder) was only open in another program it
+        // counts as busy too, so the player is told to close the program instead of being offered the elevated
+        // fix, which the same open handle would refuse.
+        catch (Exception ex) { if (FolderPin.InUse(ex)) busy++; throw; }
+        using (held)
         {
             // this folder only: what is inside keeps its permissions until ResetTree reaches it
             FolderPin.SetSecurity(pin, elevated && !TrustedSid(owner, user) ? AdminsSid : null, acl, true);
@@ -1293,9 +1302,11 @@ public class LauncherWindow : Window
 
     // RustoriginLauncher.exe --secure-folder "<dir>" <player SID>, started elevated (UAC) by RequirePrivateInstallDir.
     // Only acts on a folder that is exposed right now - so a crafted call can't take over a private folder - and
-    // that looks like a Rustorigin install. Exit code 0 = the folder is private now.
+    // that looks like a Rustorigin install. Exit code 0 = the folder is private now, 1 = entries it could not
+    // secure, 3 = those entries were all only open in another program, 2 = refused.
     public static int SecureFolderElevated(string dir, string sid)
     {
+        int failed = 0, busy = 0;
         try
         {
             var user = new SecurityIdentifier(sid);
@@ -1308,13 +1319,13 @@ public class LauncherWindow : Window
             {
                 if (pin == null) return 2;   // a link, or not openable: never re-permission it
                 if (FolderExposure(dir, user) == null) return 0;
-                int failed = 0, busy = 0;
                 int untrusted = LockFolder(dir, pin, user, true, null, ref failed, ref busy);
                 AfterLock(dir, untrusted, null);
-                return failed == 0 && FolderExposure(dir, user) == null ? 0 : 1;
+                if (failed == 0) return FolderExposure(dir, user) == null ? 0 : 1;
+                return busy == failed ? 3 : 1;
             }
         }
-        catch { return 1; }
+        catch { failed++; return busy == failed ? 3 : 1; }   // a lock that threw before the walk: busy when LockFolder counted it so
     }
 
     // PLAY / INSTALL / UPDATE gate (UI thread): true when InstallDir is private. Locks it when this user may;
@@ -1345,17 +1356,19 @@ public class LauncherWindow : Window
                 Log("install folder: elevated fix exited with " + exitCode);
             }
             catch (Exception ex) { Log("install folder: elevated fix not run (" + ex.Message + ")"); }   // e.g. the UAC prompt was declined
-            // 0 = the helper secured everything; anything else (1 = entries it could not secure, 2 = refused,
-            // -1 = not run) keeps the folder refused even when its own permissions look private now.
+            // 0 = the helper secured everything; anything else (1 = entries it could not secure, 3 = entries only
+            // open in another program, 2 = refused, -1 = not run) keeps the folder refused even when its own
+            // permissions look private now.
             why = FolderExposure(dir, Me());
-            if (why == null && exitCode != 0) why = exitCode == 1 ? LockIncompleteReason : "could not be secured by the administrator fix";
+            if (why == null && exitCode != 0)
+                why = exitCode == 1 ? LockIncompleteReason : exitCode == 3 ? LockBusyReason : "could not be secured by the administrator fix";
             if (why == null) { Log("install folder locked (elevated): " + dir); RefreshState(); return true; }
         }
         bool installed = IsInstalled();
         // A fresh install can simply use another folder: forget this one so the next INSTALL asks again.
         if (!installed && !HasPartial()) { try { File.Delete(InstallDirFile()); } catch { } installDirChosen = false; }
         ShowStatus(Danger, "The game folder " + dir + " " + why + ". Other accounts could change the game there, so the launcher won't use it" +
-            (ownBusy ? " - launcher.log lists the files." : !installed ? " - click Install and pick another folder." :
+            (ownBusy ? " - launcher.log lists the files." : why == LockBusyReason ? "" : !installed ? " - click Install and pick another folder." :
              fixable ? " - accept the fix when asked, or ask an administrator." :
              " - move the game to a normal folder on an NTFS drive, or ask an administrator."), true);
         return false;
