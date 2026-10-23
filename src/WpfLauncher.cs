@@ -897,9 +897,12 @@ public class LauncherWindow : Window
                 {
                     keep.Add(Path.GetFullPath(Path.Combine(InstallDir, "RustoriginLauncher.exe")));
                     keep.Add(Path.GetFullPath(Path.Combine(InstallDir, "Uninstall.exe")));
-                    // an unfinished folder lock stays recorded, a folder at that name too (FolderExposure counts
-                    // both): what could not be secured may outlive the uninstall
+                    // an unfinished folder lock stays recorded (FolderExposure counts a file or folder at that name):
+                    // what could not be secured may outlive the uninstall. A folder the lock moved aside from that
+                    // name stays whole too: it may still be another account's, which could turn a subfolder into a
+                    // junction while it is being emptied.
                     keep.Add(Path.GetFullPath(Path.Combine(InstallDir, LockIncompleteName)));
+                    foreach (string d in Directory.GetDirectories(InstallDir, LockIncompleteName + ".*" + LockAsideSuffix)) keep.Add(Path.GetFullPath(d));
                 }
                 catch { }
                 FolderPin.DeleteDirContents(InstallDir, keep);
@@ -1052,42 +1055,94 @@ public class LauncherWindow : Window
         var acl = new RawSecurityDescriptor(PrivateSecurity(user).GetSecurityDescriptorBinaryForm(), 0).DiscretionaryAcl;
         // The record keeps the folder refused until the walk below secures everything: what is inside keeps its
         // old permissions until ResetTree reaches it, so a walk cut short (launcher closed, crash) must leave the
-        // folder refused. It is written before the folder is locked - so there is never a moment where the folder
-        // looks private without it (a failure here throws, leaving the folder as it was: exposed) - and checked
-        // again after, as another account could remove or swap it until then. A folder already at that name
-        // (planted before the lock) also keeps the folder refused while it exists: it is left to ResetTree like
-        // any other entry, and removed only after the walk, once nobody else can change what is inside it.
-        // A file (or link) already at the name is replaced, never written through.
+        // folder refused. A fresh one (NewRecord: private from the start; created at the name, or renamed over
+        // what is there) is put there before the folder is locked - so the folder never looks private without one
+        // (a failure here throws, leaving the folder as it was: exposed) - and again after a walk that left entries
+        // unsecured, never kept: a file another account prepared at the name, or holds open, could otherwise be
+        // deleted by that account once the lock is over. A folder (or folder link) already at that name, planted
+        // before the lock, is first moved aside in one step to a name nobody can guess, never over anything - a
+        // refusal (its planter denied us delete on it, or holds it or something in it open) throws, leaving the
+        // folder exposed. Moved, it is walked like any
+        // other entry (deleted as the player when another account owns it, taken over when elevated), so if it
+        // can't be secured a record of ours at the name - not the planter's folder, which the planter could remove -
+        // keeps the folder refused; it is removed once everything is secured. When a failed lock leaves nothing at the name, a record is created
+        // there directly as a last resort.
         string record = Path.Combine(dir, LockIncompleteName);
         const string recordText = "folder lock in progress or incomplete; see launcher.log\r\n";
-        if (!Directory.Exists(record)) FolderPin.WriteNewFile(record, recordText);
-        // this folder only: what is inside keeps its permissions until ResetTree reaches it
-        FolderPin.SetSecurity(pin, elevated && !TrustedSid(owner, user) ? AdminsSid : null, acl, true);
-        bool planted = Directory.Exists(record);
-        if (!planted && !FolderPin.IsPlainFile(record))
+        var fileAcl = FolderPin.InheritedAcl(acl, false);
+        if (Directory.Exists(record)) FolderPin.MoveAside(record, record + "." + Guid.NewGuid().ToString("N") + LockAsideSuffix);
+        // protected until the folder is private: setting the open folder's permissions would pass them on to it
+        using (var held = NewRecord(record, fileAcl, false, recordText))
         {
-            // Record I/O from here on never throws: the caller must still run AfterLock.
-            try { FolderPin.WriteNewFile(record, recordText); }
-            catch (Exception ex)
-            {
-                failed++;
-                if (log != null) log("install folder: lock record not written (" + ex.Message + ") - not walked");
-                return 0;
-            }
+            // this folder only: what is inside keeps its permissions until ResetTree reaches it
+            FolderPin.SetSecurity(pin, elevated && !TrustedSid(owner, user) ? AdminsSid : null, acl, true);
+            // Record I/O from here on never throws: the caller must still run AfterLock. If the record can't be
+            // set to inherit here, it stays private and the walk sets it like any other entry.
+            try { FolderPin.SetSecurity(held.SafeFileHandle, null, fileAcl, false); }
+            catch (Exception ex) { failed++; if (log != null) log("install folder: lock record not secured (" + ex.Message + ")"); }
         }
         int untrusted = ResetTree(dir, acl, user, elevated, log, ref failed, ref busy);
-        if (planted && failed == 0)
-        {
-            try { if (Directory.Exists(record)) FolderPin.DeleteTree(record); }   // as the player ResetTree may have deleted it already
-            catch (Exception ex) { failed++; if (log != null) log("install folder: could not remove " + record + " (" + ex.Message + ")"); }
-        }
         try
         {
             if (failed == 0) { if (File.Exists(record)) File.Delete(record); }
-            else if (!Directory.Exists(record)) FolderPin.WriteNewFile(record, failed + " entries could not be secured; see launcher.log\r\n");
+            else if (!Directory.Exists(record))
+                using (NewRecord(record, fileAcl, true, failed + " entries could not be secured; see launcher.log\r\n")) { }
         }
         catch (Exception ex) { failed++; if (log != null) log("install folder: lock record not updated (" + ex.Message + ")"); }
+        if (failed > 0 && !File.Exists(record) && !Directory.Exists(record))
+        {
+            // last resort: private, not yet inheriting, but there - the next lock replaces it
+            try { using (FolderPin.CreateNewFile(record, failed + " entries could not be secured; see launcher.log\r\n", fileAcl)) { } }
+            catch (Exception ex) { if (log != null) log("install folder: no lock record could be written (" + ex.Message + ")"); }
+        }
+        if (failed == 0)
+        {
+            // temporary records left by a lock cut short inside NewRecord: ours, private, and walked by now
+            try { foreach (string f in Directory.GetFiles(dir, LockIncompleteName + ".*" + LockTempSuffix)) File.Delete(f); }
+            catch (Exception ex) { if (log != null) log("install folder: temporary lock record not removed (" + ex.Message + ")"); }
+            // folders moved aside from the record's name, by this lock or an earlier one: secured by the walk too
+            try
+            {
+                foreach (string d in Directory.GetDirectories(dir, LockIncompleteName + ".*" + LockAsideSuffix))
+                    if (d.EndsWith(LockAsideSuffix, StringComparison.OrdinalIgnoreCase)) FolderPin.DeleteTree(d);   // "*.old" also matches "*.older"
+            }
+            catch (Exception ex) { if (log != null) log("install folder: folder moved aside from the lock record not removed (" + ex.Message + ")"); }
+        }
         return untrusted;
+    }
+
+    const string LockTempSuffix = ".new", LockAsideSuffix = ".old";
+
+    // Puts a fresh lock record at `record` with the private permissions fileAcl from the start (protected -
+    // inheriting nothing - unless `inherit`). When nothing is at the name it is created right there (CREATE_NEW
+    // is one step already). Otherwise it is made under a temporary name nobody can guess - so nobody can have
+    // planted anything there - and renamed over the file or link at the name in one step: what another account
+    // prepared there, its permissions or a handle it holds, stays with the file it replaced. Returned still open,
+    // shared with no one. Throws when it can't be put there: then what was at the name is left as it was (e.g. held
+    // open without delete sharing), or a record created at the name is left private, just not inheriting yet.
+    static FileStream NewRecord(string record, RawAcl fileAcl, bool inherit, string text)
+    {
+        if (!File.Exists(record) && !Directory.Exists(record))
+        {
+            var direct = FolderPin.CreateNewFile(record, text, fileAcl);
+            try { if (inherit) FolderPin.SetSecurity(direct.SafeFileHandle, null, fileAcl, false); }
+            catch { direct.Dispose(); throw; }
+            return direct;
+        }
+        string temp = record + "." + Guid.NewGuid().ToString("N") + LockTempSuffix;
+        var fs = FolderPin.CreateNewFile(temp, text, fileAcl);
+        try
+        {
+            if (inherit) FolderPin.SetSecurity(fs.SafeFileHandle, null, fileAcl, false);
+            FolderPin.RenameOver(fs.SafeFileHandle, record);
+            return fs;
+        }
+        catch
+        {
+            fs.Dispose();
+            try { FolderPin.DeleteName(temp); } catch { }
+            throw;
+        }
     }
 
     // Walks dir, whose permissions (dirAcl) are already set: each entry is set to what it inherits from dir.
@@ -1219,7 +1274,8 @@ public class LauncherWindow : Window
                 AfterLock(dir, untrusted, Log);
             }
         }
-        catch (Exception ex) { Log("install folder: lock failed (" + ex.GetType().Name + ": " + ex.Message + ")"); }
+        // counted, so the folder stays refused even if it looks private now (a failure after its permissions were set)
+        catch (Exception ex) { failed++; Log("install folder: lock failed (" + ex.GetType().Name + ": " + ex.Message + ")"); }
         why = failed == 0 ? FolderExposure(dir, me) : busy == failed ? LockBusyReason : LockIncompleteReason;
         Log(why == null ? "install folder locked to this user, SYSTEM and Administrators: " + dir : "install folder " + dir + " " + why);
         return why;

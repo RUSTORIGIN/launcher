@@ -20,11 +20,13 @@ public static class FolderPin
     // Read-data access is what makes the pin hold: Windows only enforces share modes against a handle that has
     // data (or delete) access, so an attributes-only handle would not stop a rename.
     const uint FILE_READ_DATA = 0x1, FILE_READ_ATTRIBUTES = 0x80;
-    const uint DELETE = 0x10000, READ_CONTROL = 0x20000, WRITE_DAC = 0x40000, WRITE_OWNER = 0x80000;
+    const uint DELETE = 0x10000, READ_CONTROL = 0x20000, WRITE_DAC = 0x40000, WRITE_OWNER = 0x80000, GENERIC_WRITE = 0x40000000;
     const uint FILE_SHARE_READ = 1, FILE_SHARE_WRITE = 2, FILE_SHARE_DELETE = 4;
-    const uint OPEN_EXISTING = 3;
+    const uint CREATE_NEW = 1, OPEN_EXISTING = 3;
     const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000, FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
-    const int FileDispositionInfo = 4, FileAttributeTagInfo = 9, FileDispositionInfoEx = 21;
+    const int FileRenameInfo = 3, FileDispositionInfo = 4, FileAttributeTagInfo = 9, FileDispositionInfoEx = 21, FileRenameInfoEx = 22;
+    // Replace what is at the new name in one step, even if it is open elsewhere (shared for delete) or read-only.
+    const uint FILE_RENAME_REPLACE_IF_EXISTS = 0x1, FILE_RENAME_POSIX_SEMANTICS = 0x2, FILE_RENAME_IGNORE_READONLY_ATTRIBUTE = 0x40;
     const uint OWNER_SECURITY_INFORMATION = 1, DACL_SECURITY_INFORMATION = 4;
     // Delete the name now even if the file is open elsewhere, and even if it is read-only - without clearing
     // the read-only attribute, which a hard link shares with its other names.
@@ -36,6 +38,8 @@ public static class FolderPin
 
     [StructLayout(LayoutKind.Sequential)]
     struct FILE_ATTRIBUTE_TAG_INFO { public uint FileAttributes; public uint ReparseTag; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct SECURITY_ATTRIBUTES { public int Length; public IntPtr SecurityDescriptor; public int InheritHandle; }
     // FILETIMEs as uint pairs: a long would be 8-byte aligned and shift every field after FileAttributes.
     [StructLayout(LayoutKind.Sequential)]
     struct BY_HANDLE_FILE_INFORMATION
@@ -46,6 +50,8 @@ public static class FolderPin
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr sa, uint disposition, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CreateFileW")]
+    static extern SafeFileHandle CreateFileWithSecurity(string name, uint access, uint share, ref SECURITY_ATTRIBUTES sa, uint disposition, uint flags, IntPtr template);
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool GetFileInformationByHandleEx(SafeFileHandle h, int infoClass, out FILE_ATTRIBUTE_TAG_INFO info, uint size);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -56,6 +62,8 @@ public static class FolderPin
     static extern bool SetFileInformationByHandle(SafeFileHandle h, int infoClass, ref uint info, uint size);
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool SetFileInformationByHandle(SafeFileHandle h, int infoClass, ref byte info, uint size);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool SetFileInformationByHandle(SafeFileHandle h, int infoClass, byte[] info, uint size);
     // The kernel's own get/set (NtQuerySecurityObject / NtSetSecurityObject): they act on this one object only,
     // unlike SetSecurityInfo and SetNamedSecurityInfo, which also propagate to what is inside a folder.
     [DllImport("advapi32.dll", SetLastError = true)]
@@ -236,23 +244,92 @@ public static class FolderPin
     // anything (even a dangling link) is at the name by then.
     public static void WriteNewFile(string path, string text)
     {
-        // only that name goes, read-only or not; a hard link's other name keeps its attributes too
-        if (File.Exists(path)) DeleteName(path);
-        byte[] b = Encoding.UTF8.GetBytes(text);
-        using (var fs = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            fs.Write(b, 0, b.Length);
+        using (CreateNewFile(path, text)) { }
     }
 
-    // True when path is a file with that one name - no link, no folder, no hard link; false when it can't be told.
-    public static bool IsPlainFile(string path)
+    // The same, but returns the new file still open, shared with no one: until it is closed nobody else can
+    // rename or delete it, or open it to read or write its content. (An open for its permissions alone is not
+    // stopped by sharing, only by the permissions - hence `dacl`.) SetSecurity can change its permissions and
+    // RenameOver its name through its SafeFileHandle.
+    public static FileStream CreateNewFile(string path, string text)
     {
+        return CreateNewFile(path, text, null);
+    }
+
+    // The same, created with the permissions dacl (protected: nothing inherited from the folder) when it isn't
+    // null, so there is no moment in which the folder's permissions give anyone rights on it.
+    public static FileStream CreateNewFile(string path, string text, RawAcl dacl)
+    {
+        // only that name goes, read-only or not; a hard link's other name keeps its attributes too
+        if (File.Exists(path)) DeleteName(path);
+        // a link put at the name meanwhile, even a dangling one, is a name already taken: never followed
+        const uint access = GENERIC_WRITE | DELETE | READ_CONTROL | WRITE_DAC;
+        SafeFileHandle h;
+        if (dacl == null) h = CreateFileW(path, access, 0, IntPtr.Zero, CREATE_NEW, FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero);
+        else
+        {
+            var sd = new RawSecurityDescriptor(ControlFlags.DiscretionaryAclPresent | ControlFlags.SelfRelative | ControlFlags.DiscretionaryAclProtected, null, null, null, dacl);
+            var b = new byte[sd.BinaryLength];
+            sd.GetBinaryForm(b, 0);
+            var pinned = GCHandle.Alloc(b, GCHandleType.Pinned);
+            try
+            {
+                var sa = new SECURITY_ATTRIBUTES { Length = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES)), SecurityDescriptor = pinned.AddrOfPinnedObject() };
+                h = CreateFileWithSecurity(path, access, 0, ref sa, CREATE_NEW, FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero);
+            }
+            finally { pinned.Free(); }
+        }
+        if (h.IsInvalid) { int error = Marshal.GetLastWin32Error(); h.Dispose(); throw new Win32Exception(error); }
+        FileStream fs;
+        try { fs = new FileStream(h, FileAccess.Write); } catch { h.Dispose(); throw; }
         try
         {
-            bool isDir, isLink;
-            using (var h = Pin(path, out isDir, out isLink))
-                return h != null && !isDir && !isLink && LinkCount(h) == 1;
+            byte[] b = Encoding.UTF8.GetBytes(text);
+            fs.Write(b, 0, b.Length);
+            fs.Flush();
         }
-        catch { return false; }
+        catch { fs.Dispose(); throw; }
+        return fs;
+    }
+
+    // Renames the file h is open on (it needs DELETE access: CreateNewFile) to newPath, in one step replacing
+    // the file or link at that name - only that name, read-only or not. newPath never stops existing, and a handle
+    // someone holds on the file it replaces keeps reaching only that file, never this one. Throws, changing
+    // nothing, when the old one is open somewhere without delete sharing, or newPath is a folder.
+    public static void RenameOver(SafeFileHandle h, string newPath)
+    {
+        var info = RenameInfo(newPath, FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS | FILE_RENAME_IGNORE_READONLY_ATTRIBUTE);
+        if (SetFileInformationByHandle(h, FileRenameInfoEx, info, (uint)info.Length)) return;
+        // Windows before 10 1809: the older rename, which also replaces in one step, but not a read-only name
+        BitConverter.GetBytes(1u).CopyTo(info, 0);
+        if (!SetFileInformationByHandle(h, FileRenameInfo, info, (uint)info.Length)) throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+
+    // Renames what is at path - a folder, file or link, never what a link points at - to newPath in one step,
+    // through a handle on path itself, and never over anything: throws, changing nothing, when newPath is taken,
+    // or path is open somewhere without delete sharing (a folder also when an entry inside it is open).
+    public static void MoveAside(string path, string newPath)
+    {
+        using (var h = CreateFileW(Path.GetFullPath(path), DELETE | FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero))
+        {
+            if (h.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+            var info = RenameInfo(newPath, 0);   // ReplaceIfExists false
+            if (!SetFileInformationByHandle(h, FileRenameInfo, info, (uint)info.Length)) throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+    }
+
+    // FILE_RENAME_INFO: Flags (ReplaceIfExists for the older class), pointer-aligned RootDirectory (none),
+    // FileNameLength in bytes, then the name
+    static byte[] RenameInfo(string newPath, uint flags)
+    {
+        byte[] name = Encoding.Unicode.GetBytes(Path.GetFullPath(newPath));
+        int lengthAt = 2 * IntPtr.Size, nameAt = lengthAt + 4;
+        var info = new byte[nameAt + name.Length + 2];
+        BitConverter.GetBytes(flags).CopyTo(info, 0);
+        BitConverter.GetBytes(name.Length).CopyTo(info, lengthAt);
+        name.CopyTo(info, nameAt);
+        return info;
     }
 
     // How many names the file has: above 1, another name (a hard link) may be outside the folder being locked.

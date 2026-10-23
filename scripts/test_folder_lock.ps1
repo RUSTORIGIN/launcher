@@ -55,7 +55,21 @@ try {
     try {
         Check "entry in use: not secured (1)"               ((Secure $dir) -eq 1)
         Check "unfinished-lock record left in the folder"   (Test-Path "$dir\.rustorigin-lock-incomplete")
-        Check "still refused next time, though the folder itself is private now (1)" ((Secure $dir) -eq 1)
+        Check "other accounts can't remove the record"      (-not ((icacls "$dir\.rustorigin-lock-incomplete") -match 'S-1-5-11|Authenticated Users'))
+        # the record as another account could have prepared it: marked, its own permissions letting
+        # Authenticated Users change or delete it, and a handle held open on it from before the next lock
+        Set-Content "$dir\.rustorigin-lock-incomplete" 'prepared'
+        icacls "$dir\.rustorigin-lock-incomplete" /grant '*S-1-5-11:F' | Out-Null
+        $old = [IO.File]::Open("$dir\.rustorigin-lock-incomplete", 'Open', 'Read', 'ReadWrite, Delete')
+        try {
+            Check "still refused next time, though the folder itself is private now (1)" ((Secure $dir) -eq 1)
+            Check "the record was replaced by a fresh one, never kept" ((Get-Content "$dir\.rustorigin-lock-incomplete") -ne 'prepared')
+            Check "the fresh record: no rights for other accounts"   (-not ((icacls "$dir\.rustorigin-lock-incomplete") -match 'S-1-5-11|Authenticated Users'))
+            $buf = New-Object byte[] 8; $n = $old.Read($buf, 0, 8)
+            Check "a handle held on the old one reaches only the old file" ([Text.Encoding]::ASCII.GetString($buf, 0, $n) -eq 'prepared')
+            # -like, not -Filter: Windows wildcards would also match the record itself ("name.*" matches "name")
+            Check "no temporary record left"                     (-not (Get-ChildItem $dir -Force | Where-Object { $_.Name -like '.rustorigin-lock-incomplete.*.new' }))
+        } finally { $old.Dispose() }
     } finally { $fs.Dispose() }
     Check "entry released: secured (0)"                     ((Secure $dir) -eq 0)
     Check "record removed once everything is secured"       (-not (Test-Path "$dir\.rustorigin-lock-incomplete"))
@@ -76,6 +90,7 @@ try {
     $canary = Sddl "$root\canary"
     Check "folder at the record's name: secured, then removed (0)" ((Secure $dir) -eq 0)
     Check "no record (and no planted folder) left"          (-not (Test-Path "$dir\.rustorigin-lock-incomplete"))
+    Check "nothing moved aside left"                        (-not (Get-ChildItem $dir -Force | Where-Object { $_.Name -like '.rustorigin-lock-incomplete.*' }))
     Check "link inside it removed, its target kept and unchanged" ((Test-Path "$root\canary\keep.txt") -and $canary -eq (Sddl "$root\canary"))
 
     # ---- a planted folder made undeletable with read-only entries is still removed ----
@@ -86,6 +101,40 @@ try {
     Expose $dir
     Check "read-only folder at the record's name: secured, then removed (0)" ((Secure $dir) -eq 0)
     Check "no record left"                                  (-not (Test-Path "$dir\.rustorigin-lock-incomplete"))
+
+    # ---- a planted folder at the record's name that can't be secured is moved aside: a record of ours takes the name ----
+    $dir = "$root\oddsquat\Rustorigin"
+    New-Item -ItemType Directory -Force "$dir\.rustorigin-lock-incomplete" | Out-Null
+    [IO.File]::WriteAllText("\\?\$dir\.rustorigin-lock-incomplete\x.", 'x')   # can't be opened: the folder can't be secured or removed
+    Expose $dir
+    function Aside { Get-ChildItem $dir -Force -Directory | Where-Object { $_.Name -like '.rustorigin-lock-incomplete.*.old' } }
+    function OurRecord { (Test-Path "$dir\.rustorigin-lock-incomplete" -PathType Leaf) -and
+        ((Get-Content "$dir\.rustorigin-lock-incomplete") -like '*could not be secured*') -and
+        -not ((icacls "$dir\.rustorigin-lock-incomplete") -match 'S-1-5-11|Authenticated Users') }
+    Check "unsecurable folder at the record's name: not secured (1)" ((Secure $dir) -eq 1)
+    Check "the folder itself was still locked"              (-not ((icacls $dir) -match 'S-1-5-11|Authenticated Users'))
+    Check "the planted folder was moved aside"              (@(Aside).Count -eq 1)
+    Check "a record of ours, a file, is at the name"        (OurRecord)
+    Check "still refused next time (1)"                     ((Secure $dir) -eq 1)
+    Check "and our record is still at the name"             (OurRecord)
+    foreach ($a in @(Aside)) { [IO.File]::Delete("\\?\$($a.FullName)\x.") }
+    Check "once it can be secured: secured (0)"             ((Secure $dir) -eq 0)
+    Check "record and moved-aside folder removed"           (-not (Test-Path "$dir\.rustorigin-lock-incomplete") -and -not (Aside))
+
+    # ---- a planted folder that can't be moved aside (something in it held open) aborts the lock: the folder stays exposed ----
+    $dir = "$root\heldsquat\Rustorigin"
+    New-Item -ItemType Directory -Force "$dir\.rustorigin-lock-incomplete" | Out-Null
+    Set-Content "$dir\.rustorigin-lock-incomplete\x.txt" 'x'
+    Expose $dir
+    $fs = [IO.File]::Open("$dir\.rustorigin-lock-incomplete\x.txt", 'Open', 'Read', 'ReadWrite')
+    try {
+        Check "planted folder that can't be moved: refused (1)" ((Secure $dir) -eq 1)
+        Check "the folder was left exposed, not locked"     ((icacls $dir) -match 'S-1-5-11|Authenticated Users')
+        Check "the planted folder still at the name, nothing moved aside" ((Test-Path "$dir\.rustorigin-lock-incomplete" -PathType Container) -and
+            -not (Get-ChildItem $dir -Force | Where-Object { $_.Name -like '.rustorigin-lock-incomplete.*' }))
+    } finally { $fs.Dispose() }
+    Check "released: moved aside, secured, removed (0)"     ((Secure $dir) -eq 0)
+    Check "nothing left at or beside the record's name"     (-not (Get-ChildItem $dir -Force | Where-Object { $_.Name -like '.rustorigin-lock-incomplete*' }))
 
     # ---- a file another account could have left at the record's name is replaced by ours ----
     $dir = "$root\fileplant\Rustorigin"
@@ -120,10 +169,25 @@ try {
     Check "entry named with a trailing dot created"         ((cmd /c dir /b "$dir") -contains 'game.dll.')
     Check "trailing-dot entry: not secured (1)"             ((Secure $dir) -eq 1)
     [IO.File]::Delete("\\?\$dir\game.dll.")
+
+    # ---- a folder nobody can remove at a guessable temporary name doesn't stop the lock or end it without a record ----
+    $dir = "$root\tempsquat\Rustorigin"
+    New-Item -ItemType Directory -Force "$dir\.rustorigin-lock-incomplete.new" | Out-Null
+    [IO.File]::WriteAllText("\\?\$dir\.rustorigin-lock-incomplete.new\x.", 'x')   # can't be opened: the folder can't be secured or removed
+    Set-Content "$dir\.rustorigin-lock-incomplete" 'planted'   # something at the record's name, so it is replaced through a temporary name
+    Expose $dir
+    Check "undeletable folder at the old temporary name: not secured (1)" ((Secure $dir) -eq 1)
+    Check "the folder itself was still locked"              (-not ((icacls $dir) -match 'S-1-5-11|Authenticated Users'))
+    Check "a fresh record is at the name"                   ((Test-Path "$dir\.rustorigin-lock-incomplete" -PathType Leaf) -and (Get-Content "$dir\.rustorigin-lock-incomplete") -ne 'planted')
+    Check "still refused next time (1)"                     ((Secure $dir) -eq 1)
+    Check "and a record is still at the name"               (Test-Path "$dir\.rustorigin-lock-incomplete" -PathType Leaf)
+    [IO.File]::Delete("\\?\$dir\.rustorigin-lock-incomplete.new\x.")
 } finally {
     foreach ($l in "$root\via\Rustorigin", "$root\parentlink", "$root\lock\Rustorigin\link") { if (Test-Path $l) { cmd /c rmdir "$l" 2>$null } }
     foreach ($v in "$root\canary\victim.txt", "$root\canary\victim2.txt") { if (Test-Path $v) { Set-ItemProperty $v -Name IsReadOnly -Value $false } }
     try { [IO.File]::Delete("\\?\$root\oddname\Rustorigin\game.dll.") } catch { }
+    foreach ($o in @(Get-ChildItem "$root\oddsquat\Rustorigin" -Force -Directory -ErrorAction SilentlyContinue)) { try { [IO.File]::Delete("\\?\$($o.FullName)\x.") } catch { } }
+    try { [IO.File]::Delete("\\?\$root\tempsquat\Rustorigin\.rustorigin-lock-incomplete.new\x.") } catch { }
     cmd /c rmdir /s /q "$root" 2>$null
 }
 if ($script:fail) { Write-Host "$script:fail folder-lock test(s) FAILED"; exit 1 }

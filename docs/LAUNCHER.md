@@ -285,13 +285,30 @@ owned by this user, SYSTEM or Administrators, and writable by no one else.
   path, so a subst drive or network path is refused too. Cloud/dedup reparse points (OneDrive placeholders) are
   not links and are allowed. Tested by `scripts\test_folder_pin.ps1`.
 - **An entry the lock can't secure keeps the folder refused** (unreadable, or held open by another program):
-  `LockFolder` writes `.rustorigin-lock-incomplete` into the folder before making the folder itself private
-  (and checks it is still a plain file of ours right after; if it can't be, nothing is walked), and removes it
-  only once every entry was secured - so a walk that failed or was cut short
+  `LockFolder` puts a fresh `.rustorigin-lock-incomplete` into the folder before making the folder itself
+  private, and again after a walk that left entries unsecured (`NewRecord`). Each one has the private
+  permissions from the start (created in the open folder, it would otherwise get that folder's, and another
+  account could open it with rights to change or delete it). When nothing is at the name it is created right
+  there; otherwise it is created under a temporary name nobody can guess (`.rustorigin-lock-incomplete.<random>.new`,
+  so nothing can be planted there first) and renamed over the file or link at the name in one step
+  (`FolderPin.RenameOver`). Whatever another account prepared at the name - a file with its own permissions, a
+  handle it holds open - goes with the file it replaces; an existing record is never kept. If the name is held
+  open without delete sharing, the replacement fails and what is there stays: before the lock that aborts the
+  lock (the folder stays exposed, so refused). When a failed lock leaves nothing at the name, a record is created
+  there directly as a last resort. A *folder* (or folder link) planted at the name before the lock can't be
+  replaced that way, so it is first moved aside in one step through a handle on it (`FolderPin.MoveAside`, never
+  over anything) to `.rustorigin-lock-incomplete.<random>.old`; if that is refused (its planter denied the player
+  delete on it, or holds it or something in it open) the lock aborts and the folder stays exposed. Moved, it is an ordinary entry of the walk: if it can't be
+  secured (as the player: deleted), the record of ours at the name keeps the folder refused - not the planter's
+  folder, which its planter could remove after the lock. The record stays open, shared with no one,
+  until the folder is private and the record is set to inherit from it. Leftover temporary records (a lock cut
+  short between the two steps) and moved-aside folders are removed by the next lock that secures everything. The record is removed only
+  once every entry was secured - so a walk that failed or was cut short
   (launcher closed, crash) leaves it behind. While anything by that name exists, `FolderExposure` reports
   the folder as not secured, so the next check doesn't pass just because the folder's own permissions look
-  private; the next lock walks it again. A folder planted at that name is secured by the walk like any other
-  entry and only then removed; a file planted there is replaced. Uninstall keeps the record. When the player's
+  private; the next lock walks it again. A folder planted at that name is moved aside and handled by the walk
+  like any other entry (as the player deleted when another account owns it, otherwise secured and only removed
+  once everything is); a file planted there is replaced. Uninstall keeps the record and any moved-aside folder. When the player's
   own lock was blocked only by files open in another program, no administrator fix is offered (close the game,
   then try again); for any other unsecured entry the fix is offered. After the elevated
   fix, `RequirePrivateInstallDir` also requires the helper's exit code 0 (1 = entries it could not secure).
@@ -306,13 +323,13 @@ owned by this user, SYSTEM or Administrators, and writable by no one else.
   whose name ends in a dot or space (only creatable through a `\\?\` path; Windows trims it when opening) can't
   be pinned as itself, so it counts as not secured.
 - **Untrusted folders are taken apart without following links** (`FolderPin.DeleteTree`): the player's own
-  lock deletes a folder another account owns (a planted `.rustorigin-lock-incomplete` folder too), and that
+  lock deletes a folder another account owns (a planted `.rustorigin-lock-incomplete` folder too, once moved aside), and that
   account keeps its rights inside it meanwhile - enough to empty a subfolder and turn it into a junction to one
   of the player's folders. So every folder is pinned while it is emptied, and every entry is opened and deleted
   only after its real path is checked to be its pinned folder's real path plus its name (`InFolder`); a recursive
   `Directory.Delete(path, true)` would follow such a junction. Read-only entries are deleted as they are
   (`DeleteName`, `FILE_DISPOSITION_IGNORE_READONLY`; on Windows before 10 1809 a read-only one stays, and the
-  folder stays refused). Uninstall keeps a record folder whole, like a record file.
+  folder stays refused). Uninstall keeps a folder moved aside from the record's name whole, like the record.
 - Limits: it can't tell that a file another account *modified in place* before the lock was changed (only the
   `AcClientFile` hashes and a repair can), and nothing protects against malware running as the player.
 
