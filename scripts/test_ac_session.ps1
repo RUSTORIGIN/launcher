@@ -394,9 +394,11 @@ else { Write-Host "  SKIP  signed-module check (every module of this process is 
 $self = New-Object AcModules $null, $null, 'RustClient.exe', $null
 $self.FirstScanDelayMs = 0
 $selfLabels = $self.Scan($me.Id)
-# this host is .NET, which JITs into private executable memory, so the phase-B mem label may legitimately appear
-# here (it would not on the IL2CPP game, which is AOT); the module part must still report nothing
-$selfModuleLabels = @($selfLabels | Where-Object { $_ -notlike 'mem:*' })
+# Only the module part is asserted here: this host is .NET, which JITs into private executable memory (the phase-B
+# mem label may legitimately appear - it would not on the IL2CPP game, which is AOT), and on a shared CI runner
+# another unsigned process may hold a read/write handle to this one (a legitimate handle:external-rw). Both are
+# environmental and measure-only; the module scan of this process must still report nothing.
+$selfModuleLabels = @($selfLabels | Where-Object { $_ -like 'client:*' -or $_ -like 'module:*' })
 Check "modules: a live module scan of this process reports no module labels ($($selfModuleLabels -join ','))" ($selfModuleLabels.Count -eq 0 -and $self.Scans -eq 1 -and $self.Classified -gt 0)
 
 # ---- phase B: executable memory no module backs (manually mapped injection) ----
