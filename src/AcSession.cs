@@ -711,8 +711,18 @@ public sealed class AcModules
             for (int i = 0; i < count; i++)
             {
                 name.Length = 0;
-                uint n = GetModuleFileNameExW(h, mods[i], name, (uint)name.Capacity);
-                if (n > 0) result.Add(name.ToString(0, (int)Math.Min(n, name.Capacity)));
+                uint cap = (uint)name.Capacity;
+                uint n = GetModuleFileNameExW(h, mods[i], name, cap);
+                // n == cap means the path was truncated to fit; a truncated path points nowhere and would read as
+                // module:missing-file, so grow once (Windows long paths) and retry, then skip if still truncated.
+                if (n >= cap)
+                {
+                    name.Capacity = 32768;
+                    name.Length = 0;
+                    cap = (uint)name.Capacity;
+                    n = GetModuleFileNameExW(h, mods[i], name, cap);
+                }
+                if (n > 0 && n < cap) result.Add(name.ToString(0, (int)n));
             }
             return result;
         }
@@ -740,8 +750,9 @@ public sealed class AcModules
 
     // Sizes of the committed, executable regions of process pid that no loaded module backs: private or mapped
     // executable memory, or an executable image whose allocation base is not a loaded module. Null when the process
-    // can't be opened; an empty list when it is clean. Nothing is read from the regions - only the memory map is
-    // walked - and nothing is written.
+    // can't be opened, or when its module list can't be read (every image would then look unbacked - better no
+    // answer than a false one); an empty list when it is clean. Nothing is read from the regions - only the memory
+    // map is walked - and nothing is written.
     public static List<long> RealAnonExecRegions(int pid)
     {
         IntPtr h = IntPtr.Zero;
@@ -750,6 +761,8 @@ public sealed class AcModules
             h = OpenProcess(ProcessQueryInformation | ProcessVmRead, false, pid);
             if (h == IntPtr.Zero) return null;
             var bases = ModuleBases(h);
+            if (bases.Count == 0) return null;   // a live process always has modules: an empty set means the list
+                                                 // couldn't be read, so we can't tell backed images apart - don't guess
             var sizes = new List<long>();
             var mbi = new MemoryBasicInformation();
             IntPtr len = new IntPtr(Marshal.SizeOf(typeof(MemoryBasicInformation)));
