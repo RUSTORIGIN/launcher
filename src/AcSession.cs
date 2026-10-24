@@ -465,6 +465,15 @@ public static class AcSignals
 //   module:missing-file         a loaded module whose file is no longer where Windows says it was loaded from (a DLL
 //                               renamed away after injection); no name, no hash
 //   module:scan-failed          the game process could not be opened at all (expected only when the game runs elevated)
+//   debugger:attached           a debugger is attached to the game - a memory editor or trainer (Cheat Engine, a
+//                               trainer) attaches as one; read-only, nothing is traced or changed
+//   handle:external-rw:<32 hex> another process (not the game, not the launcher, not Windows, not signed) holds an
+//                               open handle to the game with memory read/write/operation access: the external-cheat
+//                               case that injects no module at all. The 32 hex are that program's SHA-256 prefix, so
+//                               the server can translate known ones; its path and contents never leave the PC
+// The last two look beyond the game's own modules (an external reader or debugger injects nothing, so phase A/B miss
+// it). A program that reads the game's memory is judged like a module: Windows' own processes and trusted-signed
+// programs (overlays, recorders, antivirus) are not reported, only unsigned ones, by hash.
 // Listed game files are the file check's job (client:modified). Windows' own code folders (System32, SysWOW64, WinSxS,
 // assembly, Microsoft.NET) are skipped: writing there needs admin rights, and their files are signed through catalogs,
 // not in the file. The rest of %SystemRoot% is NOT skipped: Temp, Tasks and tracing are writable by any user. The first
@@ -477,6 +486,7 @@ public sealed class AcModules
     public const int HashPrefixLength = 32;
     public const int MaxLabels = 64;   // the heartbeat sends at most MaxSignals anyway; this bounds the memory
     public const string MemLargeLabel = "mem:private-exec:large";   // the phase-B label; sent once, then kept for the launch
+    public const string DebuggerLabel = "debugger:attached";        // a debugger is attached to the game
 
     // Phase B (docs\AC_MODULE_SIGNAL.md): a manually mapped DLL - code an injector writes into the game's memory
     // without the Windows loader - never appears in the module list, so phase A can't see it. It does leave
@@ -493,8 +503,10 @@ public sealed class AcModules
     public Func<int, List<string>> ListModules = ListProcessModules;
     public Func<string, bool> IsSigned = HasTrustedSignature;
     public Func<int, List<long>> ListAnonExecRegions = RealAnonExecRegions;   // sizes of exec regions no module backs
+    public Func<int, bool> IsDebugged = RealIsDebugged;                       // a debugger attached to the game
+    public Func<int, List<string>> ListExternalReaders = RealExternalReaders; // exes holding a r/w handle to the game
     public int FirstScanDelayMs = DefaultFirstScanDelayMs;
-    public int Scans, Classified, MemScans;   // counters for tests and the log
+    public int Scans, Classified, MemScans, HandleScans;   // counters for tests and the log
 
     readonly string clientDir;              // the game folder, full path with a trailing separator, or null
     readonly HashSet<string> listed = new HashSet<string>();   // relative paths (lower case) of the hosted build's listed files
@@ -581,6 +593,11 @@ public sealed class AcModules
                     // Phase B only: skip the memory walk entirely when the server didn't enable it (no floor), and
                     // once the label is already sent - it stays for the launch, so re-walking can't change the output.
                     if (MemFloorBytes > 0 && !labels.Contains(MemLargeLabel)) Add(MemoryBucket(pid));
+                    // A debugger or an external memory reader can attach after the game started, so these are checked
+                    // every scan (until the label is up); an external reader classifies like a module (signed/Windows
+                    // skipped), so each distinct reader is hashed once per launch.
+                    if (!labels.Contains(DebuggerLabel) && Debugged(pid)) Add(DebuggerLabel);
+                    foreach (var reader in ExternalReaders(pid)) Add(ClassifyExternalReader(reader));
                 }
             }
         }
@@ -645,6 +662,49 @@ public sealed class AcModules
         if (signed) return null;
         string hash = HashPrefix(full);
         return hash == null ? null : "module:unsigned:" + hash;
+    }
+
+    // True when a debugger is attached to the game; never throws. HandleScans doubles as "the beyond-modules checks
+    // ran" for the log and tests.
+    bool Debugged(int pid)
+    {
+        HandleScans++;
+        try { return IsDebugged(pid); } catch { return false; }
+    }
+
+    // The exe paths of processes holding a read/write handle to the game, or empty; never throws or returns null.
+    List<string> ExternalReaders(int pid)
+    {
+        try { List<string> r = ListExternalReaders(pid); return r ?? new List<string>(); }
+        catch { return new List<string>(); }
+    }
+
+    // The label for one process that holds a read/write handle to the game, or null when it is fine (or can't be
+    // judged). Cached by path, size and last-write time, like a module. Windows' own processes and trusted-signed
+    // programs are not reported (an overlay, a recorder or antivirus legitimately reads game memory); an unsigned one
+    // is reported by the first 32 hex of its SHA-256, so the server can translate known cheats and nothing else.
+    public string ClassifyExternalReader(string path)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(path)) return null;
+            if (path.StartsWith("\\\\?\\")) path = path.Substring(4);
+            string full = Path.GetFullPath(path);
+            if (IsTrustedWindowsPath(full)) return null;   // OS processes legitimately hold handles to everything
+            var fi = new FileInfo(full);
+            if (!fi.Exists) return null;
+            string key = "ext|" + fi.FullName + "|" + fi.Length.ToString(CultureInfo.InvariantCulture) + "|" + fi.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture);
+            string label;
+            if (cache.TryGetValue(key, out label)) return label.Length == 0 ? null : label;
+            bool signed;
+            try { signed = IsSigned(full); } catch { signed = true; }   // a check that fails must not flag a legit tool
+            label = "";
+            if (!signed) { string hash = HashPrefix(full); if (hash != null) label = "handle:external-rw:" + hash; }
+            cache[key] = label;
+            Classified++;
+            return label.Length == 0 ? null : label;
+        }
+        catch { return null; }
     }
 
     void Add(string label)
@@ -803,6 +863,142 @@ public sealed class AcModules
         }
         catch { }
         return set;
+    }
+
+    // ---- a debugger attached to the game: CheckRemoteDebuggerPresent, read-only ----
+    const uint ProcessQueryLimitedInformation = 0x1000;
+    const uint ProcessVmWrite = 0x0020, ProcessVmOperation = 0x0008;   // ProcessVmRead is 0x0010 above
+
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool CheckRemoteDebuggerPresent(IntPtr process, out bool present);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool QueryFullProcessImageNameW(IntPtr process, uint flags, StringBuilder name, ref uint size);
+
+    // True when a debugger is attached to process pid. A memory editor or trainer attaches as a debugger; this only
+    // asks Windows whether one is attached - nothing is traced, read or changed. False on any failure (we can't open
+    // the process, say): the signal is evidence that a debugger is attached, never proof that none is.
+    public static bool RealIsDebugged(int pid)
+    {
+        IntPtr h = IntPtr.Zero;
+        try
+        {
+            h = OpenProcess(ProcessQueryInformation, false, pid);
+            if (h == IntPtr.Zero) return false;
+            bool present;
+            return CheckRemoteDebuggerPresent(h, out present) && present;
+        }
+        catch { return false; }
+        finally { if (h != IntPtr.Zero) try { CloseHandle(h); } catch { } }
+    }
+
+    // ---- processes holding a read/write handle to the game: NtQuerySystemInformation, read-only ----
+    const int SystemExtendedHandleInformation = 0x40;
+    static readonly int StatusInfoLengthMismatch = unchecked((int)0xC0000004);
+
+    [DllImport("ntdll.dll")] static extern int NtQuerySystemInformation(int infoClass, IntPtr buffer, int length, out int needed);
+
+    // 64-bit SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX. The launcher runs 64-bit, so the pointer-sized fields are 8 bytes.
+    [StructLayout(LayoutKind.Sequential)]
+    struct SystemHandleEntryEx
+    {
+        public IntPtr Object;
+        public IntPtr UniqueProcessId;
+        public IntPtr HandleValue;
+        public uint GrantedAccess;
+        public ushort CreatorBackTraceIndex;
+        public ushort ObjectTypeIndex;
+        public uint HandleAttributes;
+        public uint Reserved;
+    }
+
+    // The exe paths of the processes that hold an open handle to the game (gamePid) with memory read, write or
+    // operation access, and are not the game, the launcher, Windows' System/Idle, or a process we can't name. An
+    // external cheat that reads or writes the game's memory without injecting a module lives here. Null when the game
+    // can't be opened or the handle table can't be read (no answer beats a wrong one); an empty list when nothing
+    // holds such a handle. The whole system handle table is a snapshot taken once; nothing is written anywhere.
+    public static List<string> RealExternalReaders(int gamePid)
+    {
+        IntPtr game = IntPtr.Zero, buffer = IntPtr.Zero;
+        try
+        {
+            game = OpenProcess(ProcessQueryLimitedInformation, false, gamePid);
+            if (game == IntPtr.Zero) return null;   // can't anchor the game's kernel object -> no answer
+            int ourPid = Process.GetCurrentProcess().Id;
+            int length = 1 << 20;
+            for (int tries = 0; tries < 8; tries++)
+            {
+                buffer = Marshal.AllocHGlobal(length);
+                int needed;
+                int status = NtQuerySystemInformation(SystemExtendedHandleInformation, buffer, length, out needed);
+                if (status == StatusInfoLengthMismatch)
+                {
+                    Marshal.FreeHGlobal(buffer); buffer = IntPtr.Zero;
+                    length = Math.Max(needed + (1 << 20), length * 2);   // grow past what it asked for; it keeps changing
+                    continue;
+                }
+                if (status != 0) return null;
+                break;
+            }
+            if (buffer == IntPtr.Zero) return null;
+
+            // The table can hold hundreds of thousands of entries and is re-read every heartbeat, so the fixed fields
+            // we need are read by offset (Object 0, UniqueProcessId 8, HandleValue 16, GrantedAccess 24) rather than
+            // marshaling a whole SystemHandleEntryEx per entry. SizeOf gives the stride; the struct documents the layout.
+            int entrySize = Marshal.SizeOf(typeof(SystemHandleEntryEx));
+            long count = Marshal.ReadIntPtr(buffer).ToInt64();   // NumberOfHandles, first field of the header
+            long maxByBuf = (length - IntPtr.Size * 2L) / entrySize;
+            if (count < 0 || count > maxByBuf) count = maxByBuf;   // never read past the buffer we sized
+            long first = buffer.ToInt64() + IntPtr.Size * 2;      // header is { NumberOfHandles, Reserved }
+            long gameHandle = game.ToInt64();
+
+            // First the game's kernel object, found through our own handle to it; then every other handle on that
+            // same object with memory access, by owner process.
+            long gameObject = 0;
+            for (long i = 0; i < count; i++)
+            {
+                long entry = first + i * entrySize;
+                if ((int)Marshal.ReadInt64(new IntPtr(entry + 8)) == ourPid && Marshal.ReadInt64(new IntPtr(entry + 16)) == gameHandle)
+                { gameObject = Marshal.ReadInt64(new IntPtr(entry)); break; }
+            }
+            if (gameObject == 0) return null;   // a live handle's object is never null: not finding it means no answer
+
+            const uint rw = ProcessVmRead | ProcessVmWrite | ProcessVmOperation;
+            var seen = new HashSet<int>();
+            var paths = new List<string>();
+            for (long i = 0; i < count; i++)
+            {
+                long entry = first + i * entrySize;
+                if (Marshal.ReadInt64(new IntPtr(entry)) != gameObject) continue;
+                int owner = (int)Marshal.ReadInt64(new IntPtr(entry + 8));
+                if (owner == gamePid || owner == ourPid || owner <= 4) continue;   // the game, us, System (4) / Idle (0)
+                if (((uint)Marshal.ReadInt32(new IntPtr(entry + 24)) & rw) == 0) continue;
+                if (!seen.Add(owner)) continue;   // one label per reader, whatever access rights it took
+                string p = ProcessPath(owner);
+                if (p != null) paths.Add(p);
+            }
+            return paths;
+        }
+        catch { return null; }
+        finally
+        {
+            if (buffer != IntPtr.Zero) Marshal.FreeHGlobal(buffer);
+            if (game != IntPtr.Zero) try { CloseHandle(game); } catch { }
+        }
+    }
+
+    // The full path of process pid's exe, or null when it can't be opened or named.
+    static string ProcessPath(int pid)
+    {
+        IntPtr h = IntPtr.Zero;
+        try
+        {
+            h = OpenProcess(ProcessQueryLimitedInformation, false, pid);
+            if (h == IntPtr.Zero) return null;
+            var sb = new StringBuilder(1024);
+            uint size = (uint)sb.Capacity;
+            if (!QueryFullProcessImageNameW(h, 0, sb, ref size)) return null;
+            return sb.ToString(0, (int)Math.Min(size, (uint)sb.Capacity));
+        }
+        catch { return null; }
+        finally { if (h != IntPtr.Zero) try { CloseHandle(h); } catch { } }
     }
 
     // ---- Authenticode: wintrust, offline ----

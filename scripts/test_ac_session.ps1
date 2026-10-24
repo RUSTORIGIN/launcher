@@ -394,9 +394,11 @@ else { Write-Host "  SKIP  signed-module check (every module of this process is 
 $self = New-Object AcModules $null, $null, 'RustClient.exe', $null
 $self.FirstScanDelayMs = 0
 $selfLabels = $self.Scan($me.Id)
-# this host is .NET, which JITs into private executable memory, so the phase-B mem label may legitimately appear
-# here (it would not on the IL2CPP game, which is AOT); the module part must still report nothing
-$selfModuleLabels = @($selfLabels | Where-Object { $_ -notlike 'mem:*' })
+# Only the module part is asserted here: this host is .NET, which JITs into private executable memory (the phase-B
+# mem label may legitimately appear - it would not on the IL2CPP game, which is AOT), and on a shared CI runner
+# another unsigned process may hold a read/write handle to this one (a legitimate handle:external-rw). Both are
+# environmental and measure-only; the module scan of this process must still report nothing.
+$selfModuleLabels = @($selfLabels | Where-Object { $_ -like 'client:*' -or $_ -like 'module:*' })
 Check "modules: a live module scan of this process reports no module labels ($($selfModuleLabels -join ','))" ($selfModuleLabels.Count -eq 0 -and $self.Scans -eq 1 -and $self.Classified -gt 0)
 
 # ---- phase B: executable memory no module backs (manually mapped injection) ----
@@ -422,6 +424,46 @@ if ($rcProc) {
     $usedMb = if ($regions) { [math]::Round((($regions | Measure-Object -Sum).Sum) / 1MB, 2) } else { 'n/a' }
     Check "mem: a live scan of the running game returns a region list ($usedMb MB unbacked exec)" ($null -ne $regions)
 } else { Write-Host "  SKIP  live memory scan (RustClient not running)" }
+
+# ---- debugger + external memory readers (docs\AC_MODULE_SIGNAL.md): fake delegates ----
+$edir = Join-Path ([IO.Path]::GetTempPath()) ("ac-ext-test-" + [Guid]::NewGuid().ToString('N'))
+$egame = Join-Path $edir 'game'; $eother = Join-Path $edir 'other'
+New-Item -ItemType Directory -Force $egame, $eother | Out-Null
+try {
+    $ebytes = [Text.Encoding]::ASCII.GetBytes('reader bytes')
+    foreach ($f in "$egame\RustClient.exe", "$eother\obs.exe", "$eother\cheat.exe") { [IO.File]::WriteAllBytes($f, $ebytes) }
+    $rhash = (Get-FileHash -LiteralPath "$eother\cheat.exe" -Algorithm SHA256).Hash.ToLowerInvariant().Substring(0, 32)
+    $erules = [System.Collections.Generic.List[AcSignals+FileRule]]::new()
+    $erules.Add([AcSignals]::ParseClientFile("RustClient.exe|$($ebytes.Length)|" + (Get-FileHash -LiteralPath "$egame\RustClient.exe" -Algorithm SHA256).Hash.ToLowerInvariant()))
+    $esigner = [Func[string, bool]] { param($p) $p -like '*obs.exe' }   # "signed" = obs.exe only
+    $noModules = [Func[int, System.Collections.Generic.List[string]]] { param($id) New-Object System.Collections.Generic.List[string] }
+
+    # a debugger attached -> one label, nothing else (module and reader lists empty)
+    $m = New-Object AcModules $egame, $erules, 'RustClient.exe', $null
+    $m.FirstScanDelayMs = 0; $m.IsSigned = $esigner; $m.ListModules = $noModules
+    $m.IsDebugged = [Func[int, bool]] { param($id) $true }
+    $m.ListExternalReaders = $noModules
+    Check "ac: a debugger attached to the game -> debugger:attached" (($m.Scan(1) -join ',') -eq 'debugger:attached')
+
+    # no debugger; three readers: signed (obs), unsigned (cheat), a Windows process -> only the unsigned non-Windows one, by hash
+    $m2 = New-Object AcModules $egame, $erules, 'RustClient.exe', $null
+    $m2.FirstScanDelayMs = 0; $m2.IsSigned = $esigner; $m2.ListModules = $noModules
+    $m2.IsDebugged = [Func[int, bool]] { param($id) $false }
+    $m2.ListExternalReaders = [Func[int, System.Collections.Generic.List[string]]] { param($id)
+        $l = New-Object System.Collections.Generic.List[string]
+        $l.Add("$eother\obs.exe"); $l.Add("$eother\cheat.exe"); $l.Add("$env:SystemRoot\System32\csrss.exe"); $l }
+    Check "ac: external readers -> only the unsigned, non-Windows one is reported by hash" (($m2.Scan(1) -join ',') -eq "handle:external-rw:$rhash")
+    Check "ac: a signed external reader -> no label"   ($null -eq $m2.ClassifyExternalReader("$eother\obs.exe"))
+    Check "ac: an unsigned external reader -> hash label" ($m2.ClassifyExternalReader("$eother\cheat.exe") -eq "handle:external-rw:$rhash")
+    Check "ac: a Windows-folder external reader -> no label" ($null -eq $m2.ClassifyExternalReader("$env:SystemRoot\System32\csrss.exe"))
+    $eall = $m2.Scan(1)
+    Check "ac: the new labels pass CleanSignals unchanged" (([AcSession]::CleanSignals($eall) -join ',') -eq ($eall -join ','))
+} finally { Remove-Item -Recurse -Force $edir -ErrorAction SilentlyContinue }
+
+# live, this process: the real checks never throw and return sane shapes
+Check "ac: RealIsDebugged on this process returns a bool without throwing" ([AcModules]::RealIsDebugged($me.Id) -is [bool])
+$selfReaders = [AcModules]::RealExternalReaders($me.Id)
+Check "ac: RealExternalReaders on this process returns a list or null without throwing" ($null -eq $selfReaders -or $selfReaders -is [System.Collections.Generic.List[string]])
 
 # ---- optional: the real client against a running session service ----
 # ---- game link (#1): the code the server sends to the game, echoed from its log ----

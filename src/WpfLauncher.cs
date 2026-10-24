@@ -3749,8 +3749,9 @@ public class LauncherWindow : Window
             acSession.Start();
             // Tell the player once what the session sends. Shown after the game has already started, so it never
             // holds up PLAY; while the launcher is hidden in the tray it waits until the window is shown again.
-            // The pref is versioned: players who saw the notice before the module scan existed see the new text once.
-            if (!Prefs.GetBool("AcNoticeShown2", false))
+            // The pref is versioned: players who saw an earlier notice see the new text once (now the debugger and
+            // external-memory-reader signals).
+            if (!Prefs.GetBool("AcNoticeShown3", false))
                 Dispatcher.BeginInvoke((Action)(() => { acNoticePending = true; ShowAcNoticeIfDue(); }));
         }
         catch (Exception ex) { Log("ac-session: not started: " + ex.Message); }
@@ -3763,7 +3764,7 @@ public class LauncherWindow : Window
     {
         if (!acNoticePending || hiddenForGame || !IsVisible) return;
         acNoticePending = false;
-        Prefs.Set("AcNoticeShown2", true);
+        Prefs.Set("AcNoticeShown3", true);
         Alert("Anti-cheat session",
             "While you play, the launcher keeps a session with the Rustorigin server, so the server can tell a game " +
             "started from the launcher from one started on its own.\n\n" +
@@ -3773,7 +3774,9 @@ public class LauncherWindow : Window
             "Windows, or a signed program is loaded into the game (as the file's name when it sits in the game folder, otherwise " +
             "as a fingerprint of the file that the server can match against known programs such as overlays, or only that a " +
             "loaded file has vanished, or that the game holds an unusual amount of running code that no program file accounts for - " +
-            "never its path, the memory's contents, and nothing about programs outside the game); and an ID of this " +
+            "never a path or the memory's contents); whether a debugger is attached to the game; whether another program on this PC " +
+            "has opened the game to read or change its memory, and when one has, a fingerprint of that one program so the server can " +
+            "match known cheats (never its path, and nothing about any program that leaves the game alone); and an ID of this " +
             "PC that stays the same until Windows is reinstalled (a one-way hash of your Windows install ID). Like any website, " +
             "the server also sees your IP address. It also reads one code the server sends to your game from the game's own log, " +
             "to show the session belongs to this game. No files leave your PC.\n\n" +

@@ -104,6 +104,34 @@ region while every benign region was under 0.06 MB, so the **largest single unba
 more sharply than the total does, and it is harder to trip with benign overlays (many tiny regions). The total is
 harder to evade by splitting the map, though. A later version could report on both; today it uses the total only.
 
+### Beyond the module list: a debugger or an external memory reader
+
+Phases A and B look at code *inside* the game. Two cheats inject nothing there: a **debugger/trainer** attaches
+to the game, and an **external reader** (an aimbot or ESP that runs in its own process) just opens the game and
+reads its memory. `AcModules.Scan` adds one check for each, every scan (so one that attaches mid-game is still
+caught), both read-only and as the same user:
+
+- **`debugger:attached`** - `CheckRemoteDebuggerPresent` on the game process (`RealIsDebugged`, replaceable for
+  tests). It only asks Windows whether a debugger is attached; nothing is traced, read or changed.
+- **`handle:external-rw:<first 32 hex of SHA-256>`** - another process holds an open handle to the game with
+  memory read/write/operation access. `RealExternalReaders` takes one snapshot of the system handle table
+  (`NtQuerySystemInformation(SystemExtendedHandleInformation)`, read-only), anchors the game's kernel object via
+  the launcher's own handle to the game, and lists the other processes whose handle on that object carries
+  `PROCESS_VM_READ`/`WRITE`/`OPERATION`. Each is classified like a module (`ClassifyExternalReader`): the game
+  itself, the launcher, Windows' System/Idle (pid <= 4), Windows' own code folders and trusted-signed programs are
+  **not** reported (an overlay, a recorder, a capture tool or antivirus legitimately reads game memory); an
+  unsigned one is reported by the first 32 hex of its exe's SHA-256, so the service can translate known cheats
+  exactly as for modules. Its path never leaves the PC.
+
+Both ship **measure-only**, like phase B: `debugger:attached` is a strong signal (few legitimate reasons to debug
+a live game) but a handful of tools do it, and `handle:external-rw` can match an unsigned but legitimate tool, so
+the panel keeps the labels for staff to look at rather than opening a case automatically until the measurement
+phase has data.
+
+This is the first signal that reports anything about a program **outside** the game - but only its fingerprint, and
+only when it has opened the game to read or write its memory. A program that leaves the game alone is never looked
+at or named.
+
 ### Not in scope
 
 Comparing the in-memory code of `GameAssembly.dll` with the file on disk (patch detection) is possible from
@@ -122,6 +150,8 @@ Verify each during the measurement phase. None of these is assumed safe without 
 | OBS game capture, Medal, Overwolf, MSI Afterburner / RTSS hooks | Signing varies by product and version: **measure**; translate known hashes for staff (below) |
 | ReShade and other post-processing mods | Proxy DLL in the game folder: `client:extra-module:dxgi.dll` (or similar). Legitimate, but it is exactly the cheat-loading technique, so staff need to look |
 | Players' own modified client files | `client:modified:<name>`: correct, and it is what the existing file check already reports |
+| A debugger attached to the game (a developer, some capture/automation or crash tools) | `debugger:attached`: **measure**; there are few legitimate reasons to debug a live game on a player's PC |
+| A program reading the game's memory: OBS/overlay capture, RTSS, some controller/macro software, antivirus | Signed or Windows-folder ones: no label. Unsigned: `handle:external-rw:<hash>` - **measure**; translate known hashes like modules |
 
 **Translating hashes for staff.** As with tools, the service keeps a private `ac_modules.txt`
 (`<hash prefix>|<name>|benign|cheat`) and turns `module:unsigned:<hash>` into `module:benign:rtss-hooks` or
@@ -136,11 +166,15 @@ What leaves the PC, in addition to today's labels:
 - for game-folder files: the file name, only when it's not part of the official build;
 - for any other unsigned module loaded **into the game**: the first 32 hex characters of its SHA-256;
 - `module:missing-file` when a loaded module's file is no longer where it was loaded from (nothing about the file);
-- `module:scan-failed` when the game process could not be opened at all.
+- `module:scan-failed` when the game process could not be opened at all;
+- `debugger:attached` when a debugger is attached to the game (nothing about the debugger);
+- `handle:external-rw:<32 hex>` when another process has opened the game for memory read/write: the first 32 hex
+  of that one process's SHA-256, and nothing else about it.
 
-Never sent: module paths, names of modules outside the game folder, signed modules, the module list, memory
-contents (phase B sends a bucket, not addresses or bytes). Modules are inspected only inside the game
-process the launcher started, never in other programs.
+Never sent: module or process paths, names of modules outside the game folder, signed modules or signed external
+readers, the module list, the list of running programs, memory contents (phase B sends a bucket, not addresses or
+bytes; the debugger and external-reader checks read no memory at all). The only thing ever reported about a program
+other than the game is the SHA-256 prefix of one that has opened the game to read or write its memory.
 
 This **changes a promise.** Slice 5 says the launcher does no "handle scan or memory read". Listing a
 process's modules and querying its memory map are reads of the game process, not of the player's files or
@@ -148,8 +182,9 @@ other programs. Even so:
 
 - the slice-5 wording in `CLIENT_ANTICHEAT.md` changed with this slice;
 - the one-time PLAY notice names it ("whether code that isn't part of the game, Windows, or a signed program
-  is loaded into the game", as the file's name in the game folder, otherwise as an anonymous fingerprint);
-- the notice pref was renamed to `AcNoticeShown2`, so players who saw the old text see the new one once.
+  is loaded into the game", as the file's name in the game folder, otherwise as an anonymous fingerprint), and
+  now also the debugger and external-memory-reader checks;
+- the notice pref was renamed (now `AcNoticeShown3`), so players who saw an earlier text see the new one once.
 
 A hash of an unsigned file could in theory point to someone's own homemade tool. It is still only a hash, and
 only of code running inside the game.
