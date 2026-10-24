@@ -617,7 +617,7 @@ Two separate mechanisms - don't confuse them:
 | `MinimizeInGame` | `false` | Minimize the launcher while the client runs. |
 | `SafeDownload` | `false` | Set by the launcher after a download failed its integrity check: the next download uses a single connection. Cleared by the next download that verifies. |
 | `DiscordRpc` | `true` | Publish Discord Rich Presence (needs `DiscordAppId` set in `launcher.cfg`). |
-| `AcNoticeShown2` | `false` | Set once the one-time anti-cheat session notice has been shown (after the first PLAY with `AcSessionUrl` set). The key is versioned: it was `AcNoticeShown` before the notice named the loaded-module scan (slice 10), so players who saw the old text see the new one once; the old key is left as it is. |
+| `AcNoticeShown3` | `false` | Set once the one-time anti-cheat session notice has been shown (after the first PLAY with `AcSessionUrl` set). The key is versioned: `AcNoticeShown` -> `AcNoticeShown2` (named the loaded-module scan, slice 10) -> `AcNoticeShown3` (named the debugger and external-memory-reader checks), so players who saw an older text see the new one once; the old keys are left as they are. |
 
 To add a user setting: add a `Prefs.GetBool(...)` read where it takes effect, and (optionally) a
 `SettingRow(...)` in `BuildSettingsOverlay` so it shows in the gear panel; users can also set it in

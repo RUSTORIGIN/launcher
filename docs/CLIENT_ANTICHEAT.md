@@ -264,14 +264,18 @@ faked by a careful script.
 
 What leaves the player's PC: the SteamID, the launcher version, heartbeat timing, whether the game is
 running, the labels of matched signals (`tool:<id>`, `client:modified:<file>`, `client:missing:<file>`, and since
-slice 10 `client:extra-module:<file>`, `module:unsigned:<32 hex>`, `module:missing-file`, `module:scan-failed`, `mem:private-exec:large`) and the hardware id (a
+slice 10 `client:extra-module:<file>`, `module:unsigned:<32 hex>`, `module:missing-file`, `module:scan-failed`,
+`mem:private-exec:large`, `debugger:attached`, `handle:external-rw:<32 hex>`) and the hardware id (a
 one-way hash of the Windows MachineGuid). Game files are hashed on the PC, and only the "modified" label is
 sent, never a hash or file contents. For the module signal the launcher lists the modules loaded **in the game
-process it started** (never in other programs): a game-folder file that is not part of the build is reported by its
+process it started**: a game-folder file that is not part of the build is reported by its
 file name; an unsigned module from anywhere else by the first 32 hex characters of its SHA-256; never a path, the
 module list, a signed module, or a module in `%SystemRoot%`. For phase B the launcher walks the game's memory map
 and sends one coarse flag when the executable memory no module backs is over a floor, never a size, an address or
-the memory's contents. There are no process lists or personal files.
+the memory's contents. The debugger check sends only whether a debugger is attached to the game. The
+external-reader check sends, for a program that has opened the game to read or write its memory, the first 32 hex
+of that one program's SHA-256 (signed, Windows and System programs are not reported) - the only thing sent about
+any program other than the game, and never its path. There are no process lists or personal files.
 
 The session service keeps sessions in memory only and forgets them 6 hours after their last heartbeat. Its
 log carries counts only. The gate plugin's daily log records each join's status and labels with the
@@ -372,14 +376,23 @@ what is sent.
     - `module:scan-failed`: the game process could not be opened at all (the game runs elevated);
     - `mem:private-exec:large` (phase B): the game holds more executable memory that no loaded module backs than
       a floor allows - where a manually mapped DLL lives. A coarse "over the floor" flag, never a size or address;
-      measure-only (the panel keeps it, opens no case on it).
+      measure-only (the panel keeps it, opens no case on it);
+    - `debugger:attached`: a debugger is attached to the game (`CheckRemoteDebuggerPresent`, read-only) - a memory
+      editor or trainer attaches as one. Checked every scan; measure-only;
+    - `handle:external-rw:<32 hex>`: another process holds an open handle to the game with memory
+      read/write/operation access - an external cheat that injects no module (`NtQuerySystemInformation`, one
+      read-only snapshot of the handle table; `RealExternalReaders`). The reader is classified like a module
+      (game / launcher / System-Idle / Windows folders / trusted-signed are not reported), and an unsigned one is
+      sent as the first 32 hex of its exe's SHA-256, never its path; measure-only.
 
     Labels stay for the launch once seen. Nothing can block or delay PLAY; a failure to list or read adds no
-    label. The one-time notice names the scan (pref renamed to `AcNoticeShown2`, so everyone sees the new text
-    once). Tested: the classifier against a temp folder with a fake module list and a fake signature check
-    (listed / unlisted / Windows / signed / unsigned / unreadable / missing, the cache, the first-scan delay,
-    the incomplete-list gate, `scan-failed`), and live on the test's own process (module list read, a signed
-    module recognised, no labels).
+    label. The debugger and external-reader checks are re-run every scan (they can attach after the game started).
+    The one-time notice names the scan and the two new checks (pref renamed to `AcNoticeShown3`, so everyone sees
+    the new text once). Tested: the classifier against a temp folder with a fake module list and a fake signature
+    check (listed / unlisted / Windows / signed / unsigned / unreadable / missing, the cache, the first-scan delay,
+    the incomplete-list gate, `scan-failed`), the debugger and external-reader labels with injected delegates
+    (signed / unsigned / Windows-process readers, a debugger present/absent), and live on the test's own process
+    (module list read, a signed module recognised, the external-reader snapshot does not throw, no labels).
 
     **Session service (`ac_session.py`, `server/acsession/` in the plugins repo):** next to `ac_tools.txt`, a private
     `ac_modules.txt` (`<32 hex>|<name>|benign|cheat`, `AC_MODULES_FILE`, re-read when it changes; see
@@ -401,7 +414,8 @@ what is sent.
     `signalsCase` in `server/index.js` opens or extends the player's open case (title `Injected code: <name>`,
     evidence `by: "session check", kind: "launcher"`, audit `launcher-signals`) for the module labels only
     (`client:extra-module:*`, `module:unsigned:*`, `module:cheat:*`, `module:missing-file`, `module:scan-failed`; a
-    `module:benign:*` label is kept on the record but opens nothing), once per label set per 10 minutes, and
+    `module:benign:*` label, and the measure-only `mem:private-exec:large`, `debugger:attached` and
+    `handle:external-rw:*`, are kept on the record but open nothing until the measurement phase has data), once per label set per 10 minutes, and
     announces a new case like the other automatic ones. Review only: the panel never kicks or bans on a label.
     The panel also reads the plugin's `join` / `link` / `change` / `kick` / `would-kick` lines into a live launcher
     status per player (online table, player dialog), and its ban tools can ban the other accounts the launcher has
