@@ -476,6 +476,7 @@ public sealed class AcModules
     public const int MaxNameLength = 40;
     public const int HashPrefixLength = 32;
     public const int MaxLabels = 64;   // the heartbeat sends at most MaxSignals anyway; this bounds the memory
+    public const string MemLargeLabel = "mem:private-exec:large";   // the phase-B label; sent once, then kept for the launch
 
     // Phase B (docs\AC_MODULE_SIGNAL.md): a manually mapped DLL - code an injector writes into the game's memory
     // without the Windows loader - never appears in the module list, so phase A can't see it. It does leave
@@ -574,7 +575,13 @@ public sealed class AcModules
                     if (!scanFailedLogged) { log("module scan: the game process can't be opened - reporting module:scan-failed"); scanFailedLogged = true; }
                     Add("module:scan-failed");
                 }
-                else { foreach (var m in modules) Add(Classify(m)); Add(MemoryBucket(pid)); }
+                else
+                {
+                    foreach (var m in modules) Add(Classify(m));
+                    // Phase B only: skip the memory walk entirely when the server didn't enable it (no floor), and
+                    // once the label is already sent - it stays for the launch, so re-walking can't change the output.
+                    if (MemFloorBytes > 0 && !labels.Contains(MemLargeLabel)) Add(MemoryBucket(pid));
+                }
             }
         }
         catch (Exception e) { log("module scan failed: " + e.Message); }
@@ -582,18 +589,20 @@ public sealed class AcModules
     }
 
     // The phase-B label for the executable memory in the game that no loaded module backs (a manually mapped
-    // injector lives here), or null when the total is under the benign floor or the scan can't run. Point-in-time
-    // and cheap; it is re-checked every scan and the label, once sent, stays for the launch. Measure-only.
+    // injector lives here), or null when the total is under the benign floor or the scan can't run. Point-in-time;
+    // Scan re-checks it each scan until the label is sent (it stays for the launch) and only while the server set a
+    // floor, so the memory walk is skipped once the label is up or phase B is off. Measure-only.
     public string MemoryBucket(int pid)
     {
         try
         {
+            if (MemFloorBytes <= 0) return null;   // no floor from the server: phase B is off - don't walk memory
             List<long> sizes = ListAnonExecRegions(pid);
-            if (sizes == null || MemFloorBytes <= 0) return null;   // no floor from the server: phase B is off
+            if (sizes == null) return null;
             MemScans++;
             long total = 0;
             foreach (long s in sizes) total += s;
-            return total >= MemFloorBytes ? "mem:private-exec:large" : null;
+            return total >= MemFloorBytes ? MemLargeLabel : null;
         }
         catch { return null; }
     }
@@ -702,8 +711,18 @@ public sealed class AcModules
             for (int i = 0; i < count; i++)
             {
                 name.Length = 0;
-                uint n = GetModuleFileNameExW(h, mods[i], name, (uint)name.Capacity);
-                if (n > 0) result.Add(name.ToString(0, (int)Math.Min(n, name.Capacity)));
+                uint cap = (uint)name.Capacity;
+                uint n = GetModuleFileNameExW(h, mods[i], name, cap);
+                // n == cap means the path was truncated to fit; a truncated path points nowhere and would read as
+                // module:missing-file, so grow once (Windows long paths) and retry, then skip if still truncated.
+                if (n >= cap)
+                {
+                    name.Capacity = 32768;
+                    name.Length = 0;
+                    cap = (uint)name.Capacity;
+                    n = GetModuleFileNameExW(h, mods[i], name, cap);
+                }
+                if (n > 0 && n < cap) result.Add(name.ToString(0, (int)n));
             }
             return result;
         }
@@ -731,8 +750,9 @@ public sealed class AcModules
 
     // Sizes of the committed, executable regions of process pid that no loaded module backs: private or mapped
     // executable memory, or an executable image whose allocation base is not a loaded module. Null when the process
-    // can't be opened; an empty list when it is clean. Nothing is read from the regions - only the memory map is
-    // walked - and nothing is written.
+    // can't be opened, or when its module list can't be read (every image would then look unbacked - better no
+    // answer than a false one); an empty list when it is clean. Nothing is read from the regions - only the memory
+    // map is walked - and nothing is written.
     public static List<long> RealAnonExecRegions(int pid)
     {
         IntPtr h = IntPtr.Zero;
@@ -741,6 +761,8 @@ public sealed class AcModules
             h = OpenProcess(ProcessQueryInformation | ProcessVmRead, false, pid);
             if (h == IntPtr.Zero) return null;
             var bases = ModuleBases(h);
+            if (bases.Count == 0) return null;   // a live process always has modules: an empty set means the list
+                                                 // couldn't be read, so we can't tell backed images apart - don't guess
             var sizes = new List<long>();
             var mbi = new MemoryBasicInformation();
             IntPtr len = new IntPtr(Marshal.SizeOf(typeof(MemoryBasicInformation)));

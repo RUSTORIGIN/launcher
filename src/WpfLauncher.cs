@@ -3732,7 +3732,10 @@ public class LauncherWindow : Window
                     try { using (var p = Process.GetProcessById(adoptedPid)) if (!p.HasExited) return adoptedPid; } catch { }
                     adoptedPid = 0;
                 }
-                try { var g = FindGameProcess(); if (g != null) adoptedPid = g.Id; } catch { }
+                // FindGameProcess may hand back a fresh Process (which holds an OS handle once MainModule was read)
+                // or the shared gameProc field: dispose the former so a heartbeat-rate lookup doesn't leak handles,
+                // never the latter.
+                try { var g = FindGameProcess(); if (g != null) { adoptedPid = g.Id; if (!ReferenceEquals(g, gameProc)) g.Dispose(); } } catch { }
                 return adoptedPid;
             };
             acSession.Signals = () =>
