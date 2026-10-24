@@ -534,6 +534,27 @@ steps 1-2 and 4 above (package the client, set the matching `Sha256`, upload the
 are still done by hand *before* tagging - otherwise the released launcher embeds a hash for a
 zip nobody is hosting. Only tag once `config/launcher.cfg` holds the hash of the zip you uploaded.
 
+**Anti-cheat session rollout** (the first release that sets `AcSessionUrl`; every later release still adds its
+version in step 2), in order:
+
+1. Deploy the session service and the gate plugin from the `RUSTORIGIN/plugins` repo as
+   `server/acsession/README.md` describes (`server/acsession/`: `ac_session.py`, its tests, `ac_tools.txt.example`,
+   `ac_modules.txt.example`; `server/linux/rust-acsession.service` plus the `rust-logprune` timer and
+   `prune-logs.sh`; `OriginSession.cs` at the repo root with `config/OriginSession.json`). On the production box
+   `ac_session.py` reads `server.env` from its own folder, so it is copied to the server root.
+2. Set the service's `server.env`: `AC_PUBLIC_BIND` (behind the TLS reverse proxy), `AC_CHECK_BIND` (loopback
+   only), `AC_HW_KEY` (64 hex), `AC_LAUNCHER_VERSIONS` (the released launcher versions: add the version being
+   released, e.g. `1.2.0.0`), `AC_TOOLS_FILE` / `AC_MODULES_FILE` (private lists made from the `.example` files),
+   `AC_MEM_FLOOR_MB` (the phase-B floor; 0/unset = phase B off), `AC_TRUSTED_PROXIES`.
+3. Create `ac.rustorigin.com`: a TLS reverse proxy in front of `AC_PUBLIC_BIND`, **A record only** (IPv4).
+4. Set `AcSessionUrl=https://ac.rustorigin.com` in `config/launcher.cfg` - only once the endpoint is live.
+5. Set `UpdatePublicKey=` - only once the release signing key exists (`release.yml` refuses to build a release
+   without it). Both are release-time, operator-only settings; the committed config ships them blank.
+6. Tag and publish (above).
+7. Run in shadow (`Enforce` off, the plugin's default): watch its `would-kick` lines and `signals` labels.
+8. After the measurement period, write `ac_modules.txt` from the common hashes and set `AC_MEM_FLOOR_MB`.
+9. `session.enforce on`.
+
 Uploading/publishing is an outward-facing action: do it deliberately, not as part of a build.
 
 ## launcher.cfg reference

@@ -40,7 +40,10 @@ game runs, every N seconds:                     ^ 127.0.0.1 only: GET /v1/check
 - **Launcher:** `src/AcSession.cs` builds and signs the messages, parses the replies, gathers the
   evidence labels and the hardware id, and runs the session client that `Play` starts (`StartAcSession`
   in `src/WpfLauncher.cs`).
-- **Session service and gate plugin:** live in `RUSTORIGIN/plugins`, not in this repo. The Oxide sandbox
+- **Session service and gate plugin:** live in `RUSTORIGIN/plugins`, not in this repo: the service in
+  `server/acsession/` (`ac_session.py`, its tests, `ac_tools.txt.example`, `ac_modules.txt.example` and
+  `README.md`, the deploy runbook), its unit in `server/linux/rust-acsession.service`, and the plugin as
+  `OriginSession.cs` at that repo's root (with `config/OriginSession.json`). The Oxide sandbox
   normally keeps plugins away from raw network listeners, so the plugin does not host the endpoint. It
   asks the service over `127.0.0.1` with Oxide's `webrequest`.
 - **Address:** a new TLS subdomain (working name `ac.rustorigin.com`) pointing at the prod box. It is
@@ -237,10 +240,15 @@ faked by a careful script.
 
 ## Rollout
 
-1. **Prerequisites:** the public session address (`ac.rustorigin.com`, TLS) is live and has an **A record
-   only**: the game connects over IPv4, so a launcher reaching the service over IPv6 would come from
-   another address and read as `mismatch`. A launcher release with `AcSessionUrl` set has reached players
-   (it is mandatory through self-update). `AC_HW_KEY` is set.
+1. **Prerequisites:** the service and the plugin are deployed from the plugins repo as `server/acsession/README.md`
+   describes, with the service's `server.env` set: `AC_PUBLIC_BIND` (behind the TLS reverse proxy), `AC_CHECK_BIND`
+   (loopback only), `AC_HW_KEY` (64 hex), `AC_LAUNCHER_VERSIONS` (the released launcher versions, including the
+   one being released), `AC_TOOLS_FILE` / `AC_MODULES_FILE` (private lists made from the `.example` files),
+   `AC_MEM_FLOOR_MB` (the phase-B floor; 0/unset = phase B off) and `AC_TRUSTED_PROXIES`. The public session
+   address (`ac.rustorigin.com`, TLS) is live and has an **A record only**: the game connects over IPv4, so a
+   launcher reaching the service over IPv6 would come from another address and read as `mismatch`. A launcher
+   release with `AcSessionUrl` set has reached players (it is mandatory through self-update). The release-side
+   steps, in order, are in [LAUNCHER.md](LAUNCHER.md) under "Release / publish checklist".
 2. **Shadow** (OriginSession 0.3.0 default, `Enforce` false): the gate logs every status, and a
    `would-kick` line for each player who stayed without a usable session for the grace period. The
    launcher never blocks PLAY when the service cannot be reached.
@@ -373,7 +381,7 @@ what is sent.
     the incomplete-list gate, `scan-failed`), and live on the test's own process (module list read, a signed
     module recognised, no labels).
 
-    **Session service (`ac_session.py`, built on the dev copy):** next to `ac_tools.txt`, a private
+    **Session service (`ac_session.py`, `server/acsession/` in the plugins repo):** next to `ac_tools.txt`, a private
     `ac_modules.txt` (`<32 hex>|<name>|benign|cheat`, `AC_MODULES_FILE`, re-read when it changes; see
     `ac_modules.txt.example`). The check reply's `labels` turn a known hash into `module:cheat:<name>` or
     `module:benign:<name>` and leave an unknown hash as `module:unsigned:<hash>`; `signals` stay as sent. Every
